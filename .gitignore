@@ -1,0 +1,52 @@
+.env
+.env.radar
+.env.apply
+# The environment Install.cmd builds. Rebuildable from requirements.txt,
+# and platform-specific, so it is never the same on two machines.
+.venv/
+
+__pycache__/
+*.pyc
+
+# Your own profile: resume content, voice, targeting, employers. The whole
+# point of profile.example/ is that this directory never gets committed.
+/profile/
+
+# -- generated, regenerable ------------------------------------------------
+# Scheduled-run output; rotated at 1 MB.
+logs/
+# Tailored resume packets, one folder per posting, rebuildable from the JD
+# plus master content. Delivered copies live outside the repo.
+out/
+# Application packets, same deal.
+packets/
+data/engine/reports/
+data/apply/scratch/
+data/apply/applications.tmp
+data/apply/applications.corrupt.json
+
+# The working set radar rewrites every run, with JD bodies in it. The
+# committed dataset is the snapshots the dashboard reads.
+data/radar/candidates.json
+data/radar/seen.json
+data/radar/seen.json.bak
+data/radar/notion_queue.json
+data/radar/digests/
+data/radar/*.tmp
+
+# Which Job Radar Tracker rows notion_sync.py has already processed -- a
+# dedupe cache, rebuildable from Notion (worst case it re-syncs a row).
+data/apply/notion_sync_state.json
+
+# The submission log: which employers you have applied to, when, what the
+# recruiter said, and the name on every resume variant. It was tracked for
+# a year on the reasoning that it is the history behind the duplicate-
+# application guard and losing it would be expensive. That reasoning was
+# about backups and ignored what the file actually is, which is a diary of
+# a job search. Untracking it costs nothing the app needs: `apply/applog.py`
+# reads it off disk and treats a missing file as an empty log.
+data/apply/applications.json
+data/calibration/
+
+# data/engine/jds/ is deliberately NOT ignored: it is the corpus behind the
+# keyword gap report, and postings come down.
