@@ -1,0 +1,140 @@
+# The employers you want watched, and where their job board actually is.
+#
+# This is the example profile's list: eleven Denver-area employers, every one
+# of them confirmed against a live feed on 2026-09-08 with the discovery
+# script below. They are here because the coordinates are real and the example
+# has to actually return postings, not because a fictional candidate has an
+# opinion about any of them.
+#
+# Adding one:
+#     py scripts/radar/discover_ats.py <slug>
+# and paste the coordinates it prints. Read the sample posting it prints
+# first: a slug is just a string, and the APIs will happily hand back a
+# different company's board for it.
+#
+# If that finds nothing:
+#     py scripts/radar/discover_sitemap.py <careers-url>
+# which checks robots.txt, the sitemap, and schema.org JobPosting markup.
+# Anything clearing all three can be added as ats = "sitemap".
+#
+# Plenty of large employers find nothing either way. iCIMS, Taleo and Oracle
+# have no clean public JSON feed, so those go in the email-alert lane instead
+# of here. Of fifteen Denver names probed for this file, four had no feed at
+# all, which is roughly the hit rate to expect.
+#
+#   ats     which handler in radar/sources/ats.py reads this entry
+#   name    display name, used as the company on every posting
+#   tier    1 = top target employer, 2 = worth watching
+#   workday needs host / tenant / site; everything else needs slug.
+
+
+# -- Greenhouse ------------------------------------------------------------
+
+[[employer]]
+# Payroll and benefits platform headquartered in Denver. Its own finance and
+# 401(k) operations roles post here regularly, and they are Denver-based.
+ats = "greenhouse"
+name = "Gusto"
+tier = 1
+slug = "gusto"
+
+[[employer]]
+# Denver HQ, education benefits. A small board, but the postings that appear
+# are local and often exactly on target.
+ats = "greenhouse"
+name = "Guild"
+tier = 1
+slug = "guild"
+
+[[employer]]
+# Background check platform with a large Denver office. Finance roles are
+# usually posted as Denver/San Francisco pairs.
+ats = "greenhouse"
+name = "Checkr"
+tier = 1
+slug = "checkr"
+
+[[employer]]
+# Large board, mostly not Denver. Kept at tier 2 because the geo scorer
+# demotes the out-of-area majority automatically, and the local finance roles
+# are worth catching when they appear.
+ats = "greenhouse"
+name = "ZoomInfo"
+tier = 2
+slug = "zoominfo"
+
+
+# -- Ashby -----------------------------------------------------------------
+
+[[employer]]
+# Denver HQ. Note the board is also visible on SmartRecruiters and Workday;
+# Ashby is the one carrying the full posting list, so it is the one listed.
+ats = "ashby"
+name = "Ibotta"
+tier = 1
+slug = "ibotta"
+
+[[employer]]
+# Denver-based mental health network. The board is dominated by clinical
+# roles in other states, which the title and geo scorers handle, but the
+# corporate finance postings are local.
+ats = "ashby"
+name = "SonderMind"
+tier = 2
+slug = "sondermind"
+
+
+# -- Lever -----------------------------------------------------------------
+
+[[employer]]
+# Denver is one of its US offices. Heavily weighted toward engineering and
+# toward London, so tier 2.
+ats = "lever"
+name = "Palantir"
+tier = 2
+slug = "palantir"
+
+
+# -- Workday ---------------------------------------------------------------
+
+[[employer]]
+# Newport Beach HQ, but the restaurant support center work and a large share
+# of corporate accounting roles sit in Columbus and Denver-adjacent markets.
+# Most of the 200-plus postings are restaurant management, which the
+# off-field markers filter out.
+ats = "workday"
+name = "Chipotle"
+tier = 2
+host = "chipotle.wd5.myworkdayjobs.com"
+tenant = "chipotle"
+site = "chipotlecareers"
+
+[[employer]]
+# Boulder HQ, fiber infrastructure. Consistent finance and revenue operations
+# hiring in the metro.
+ats = "workday"
+name = "Zayo"
+tier = 1
+host = "zayo.wd1.myworkdayjobs.com"
+tenant = "zayo"
+site = "zayo_Careers"
+
+[[employer]]
+# Westminster HQ. The board is global and the geo scorer demotes most of it.
+ats = "workday"
+name = "Trimble"
+tier = 2
+host = "trimble.wd1.myworkdayjobs.com"
+tenant = "trimble"
+site = "trimblecareers"
+
+[[employer]]
+# Denver HQ. The Greenhouse board also answers for this slug but carries two
+# test postings, so the Workday feed is the real one. A good illustration of
+# why the discovery script prints a sample posting.
+ats = "workday"
+name = "Western Union"
+tier = 1
+host = "westernunion.wd5.myworkdayjobs.com"
+tenant = "westernunion"
+site = "westernunionJobs"

@@ -1,0 +1,615 @@
+# MASTER CONTENT -- every truthful statement the candidate can make.
+#
+# This is Wren Adeyemi, who does not exist. Everything below is invented, and
+# it is invented in accounting rather than analytics on purpose: an example
+# built in the author's own field would let those assumptions hide inside the
+# machinery. If the engine can tailor an AP clerk's resume, the engine is
+# general.
+#
+# Tailoring is SELECTION, ORDERING and VARIANT CHOICE over this file. It never
+# writes a new claim and it never edits the text of one. That is the whole
+# ethical basis of the tool: a tailored resume is a subset of this file, so
+# nothing on it can be untrue unless something here is untrue.
+#
+# Rules for editing this file (enforced by `py -m jobdesk.engine.main check`):
+#   * every `tags` entry must be a term id in vocabulary.toml
+#   * a variant may REWORD its bullet, never add a fact. Checked mechanically
+#     by requiring the variant's numbers to be a subset of the base bullet's,
+#     because invented metrics are the failure mode that actually gets someone
+#     caught.
+#   * `draft = true` means "not confirmed yet". Drafts are excluded from every
+#     rendered resume unless --include-draft is passed explicitly.
+#
+# Fields on [[bullet]]:
+#   id       unique, dotted, stable (it appears in the tailoring report)
+#   parent   an [[experience]] or [[project]] id
+#   tags     vocabulary term ids this bullet genuinely demonstrates
+#   priority tie-break when coverage is equal (higher wins)
+#   text     the default phrasing, what is on the live resume today
+
+# ---------------------------------------------------------------------------
+[identity]
+name = "Wren A. Adeyemi"
+location = "Denver, CO"
+email = "wren.adeyemi@example.com"
+phone = "303-555-0142"
+linkedin = "linkedin.com/in/wren-adeyemi-example"
+github = ""
+
+# ---------------------------------------------------------------------------
+# SUMMARY
+#
+# Assembled from three approved parts, never generated: an opening clause
+# picked by target family, a middle clause naming the tools THIS posting asked
+# for (drawn only from the skills below), and a closing clause. The one
+# interpolated value is the posting's own job title, so the resume never claims
+# a title the posting did not use.
+#
+# Family names have to match [[summary_family]] in targeting.toml.
+# ---------------------------------------------------------------------------
+[summary]
+middle_min_tools = 2
+
+[[summary.middle]]
+id = "mid.accounting"
+families = ["accounting", "audit"]
+template = "Works day to day in {tools}, closing the books on schedule and leaving a trail someone else can follow."
+fallback = "Works day to day in QuickBooks, NetSuite, and Excel, closing the books on schedule and leaving a trail someone else can follow."
+
+[[summary.middle]]
+id = "mid.billing"
+families = ["billing", "payroll"]
+template = "Comfortable running high-volume {tools} work without letting the exceptions pile up."
+fallback = "Comfortable running high-volume accounts payable and receivable work in QuickBooks and Excel without letting the exceptions pile up."
+
+[[summary.middle]]
+id = "mid.analysis"
+families = ["analysis", "operations"]
+template = "Uses {tools} to turn transaction detail into reporting a manager can act on."
+fallback = "Uses Excel, SQL, and Power BI to turn transaction detail into reporting a manager can act on."
+
+[[summary.opening]]
+id = "open.accounting"
+families = ["accounting"]
+text = "Accounting graduate with two years of full-cycle accounting experience across general ledger, reconciliations, and month-end close."
+
+[[summary.opening]]
+id = "open.billing"
+families = ["billing"]
+text = "Accounting graduate with hands-on accounts payable and receivable experience in a high-volume, multi-entity environment."
+
+[[summary.opening]]
+id = "open.payroll"
+families = ["payroll"]
+text = "Accounting graduate with payroll and benefits administration experience for a 90-person workforce across two states."
+
+[[summary.opening]]
+id = "open.audit"
+families = ["audit"]
+text = "Accounting graduate with audit-preparation experience, comfortable building the schedules external auditors ask for and defending how each number was derived."
+
+[[summary.opening]]
+id = "open.analysis"
+families = ["analysis", "operations"]
+text = "Accounting graduate who moves comfortably between the ledger and the reporting built on top of it, with budget variance and cash forecasting experience."
+
+[[summary.closing]]
+id = "close.default"
+families = []
+text = "Equally at home in the detail work and in explaining it to the people who have to act on the numbers."
+
+[[summary.closing]]
+id = "close.domain"
+families = ["*domain*"]
+text = "Familiar with the reporting and record-keeping expectations specific to {domain}."
+
+# ---------------------------------------------------------------------------
+# EDUCATION
+# ---------------------------------------------------------------------------
+[[education]]
+id = "ucd"
+degree = "Bachelor of Science: Accounting"
+school = "University of Colorado Denver"
+order = 1
+
+[[education]]
+id = "frcc"
+degree = "Associate of Applied Science: Business Administration"
+school = "Front Range Community College"
+order = 2
+
+# Coursework is a keyword surface as much as a credential. The courses shown
+# under the degree are picked per posting from this list, highest overlap
+# first, capped at `coursework_shown` below.
+[[coursework]]
+id = "acct3220"
+name = "Intermediate Accounting I & II"
+tags = ["general-ledger", "gaap", "financial-reporting", "accruals", "fixed-assets"]
+priority = 10
+
+[[coursework]]
+id = "acct4400"
+name = "Auditing"
+tags = ["audit-support", "internal-controls", "compliance", "documentation"]
+priority = 9
+
+[[coursework]]
+id = "acct3300"
+name = "Cost and Managerial Accounting"
+tags = ["budgeting", "variance-analysis", "reporting", "manufacturing"]
+priority = 8
+
+[[coursework]]
+id = "acct4200"
+name = "Accounting Information Systems"
+tags = ["erp", "internal-controls", "process-improvement", "documentation", "sql"]
+priority = 9
+
+[[coursework]]
+id = "acct4600"
+name = "Federal Income Taxation"
+tags = ["sales-tax", "compliance"]
+priority = 6
+
+[[coursework]]
+id = "fnce3010"
+name = "Corporate Finance"
+tags = ["forecasting", "financial-reporting", "budgeting"]
+priority = 7
+
+[[coursework]]
+id = "isms3050"
+name = "Business Analytics with Excel and SQL"
+tags = ["excel", "sql", "reporting", "powerbi", "data-quality"]
+priority = 8
+
+[[coursework]]
+id = "acct4900"
+name = "Governmental and Nonprofit Accounting"
+tags = ["nonprofit", "government", "compliance", "financial-reporting"]
+priority = 5
+
+[[coursework]]
+id = "bcom3010"
+name = "Business Writing and Professional Communication"
+tags = ["communication", "documentation"]
+priority = 3
+
+# ---------------------------------------------------------------------------
+# SKILLS
+#
+# `term` links a rendered skill to vocabulary.toml, which is how "the posting's
+# stack leads" gets computed. `detail` renders in parentheses.
+# ---------------------------------------------------------------------------
+[skills]
+category_order = ["Accounting Systems", "Reporting & Analysis", "Core Accounting", "Process & Controls"]
+
+[[skill]]
+term = "quickbooks"
+category = "Accounting Systems"
+detail = "Online and Desktop"
+priority = 10
+
+[[skill]]
+term = "netsuite"
+category = "Accounting Systems"
+priority = 9
+
+[[skill]]
+term = "sage"
+category = "Accounting Systems"
+priority = 5
+
+[[skill]]
+term = "bill-com"
+category = "Accounting Systems"
+priority = 7
+
+[[skill]]
+term = "concur"
+category = "Accounting Systems"
+label = "Expense Platforms"
+detail = "Concur, Expensify"
+priority = 6
+
+[[skill]]
+term = "adp"
+category = "Accounting Systems"
+label = "Payroll Platforms"
+detail = "ADP Workforce Now, Paylocity"
+priority = 7
+
+[[skill]]
+term = "excel"
+category = "Reporting & Analysis"
+detail = "Pivot Tables, XLOOKUP, Power Query"
+priority = 10
+
+[[skill]]
+term = "sql"
+category = "Reporting & Analysis"
+priority = 6
+
+[[skill]]
+term = "powerbi"
+category = "Reporting & Analysis"
+priority = 5
+
+[[skill]]
+term = "google-workspace"
+category = "Reporting & Analysis"
+priority = 3
+
+[[skill]]
+term = "general-ledger"
+category = "Core Accounting"
+priority = 10
+
+[[skill]]
+term = "accounts-payable"
+category = "Core Accounting"
+priority = 10
+
+[[skill]]
+term = "accounts-receivable"
+category = "Core Accounting"
+priority = 9
+
+[[skill]]
+term = "reconciliation"
+category = "Core Accounting"
+priority = 9
+
+[[skill]]
+term = "month-end-close"
+category = "Core Accounting"
+priority = 9
+
+[[skill]]
+term = "journal-entries"
+category = "Core Accounting"
+priority = 8
+
+[[skill]]
+term = "gaap"
+category = "Core Accounting"
+priority = 7
+
+[[skill]]
+term = "payroll-processing"
+category = "Core Accounting"
+priority = 7
+
+[[skill]]
+term = "internal-controls"
+category = "Process & Controls"
+priority = 7
+
+[[skill]]
+term = "audit-support"
+category = "Process & Controls"
+priority = 7
+
+[[skill]]
+term = "documentation"
+category = "Process & Controls"
+label = "Process Documentation"
+priority = 6
+
+[[skill]]
+term = "vendor-management"
+category = "Process & Controls"
+priority = 5
+
+# ---------------------------------------------------------------------------
+# EXPERIENCE
+#
+# `min_bullets` is a floor spent before the posting is consulted, so every role
+# is represented. Keep the floors low: they claim page space from the bullets
+# that actually match the posting.
+# ---------------------------------------------------------------------------
+[[experience]]
+id = "frpg"
+title = "Accounting Assistant"
+company = "Front Range Property Group"
+location = "Denver, CO"
+dates = "June 2024 - Present"
+order = 1
+min_bullets = 2
+max_bullets = 5
+
+[[experience]]
+id = "meridian"
+title = "Accounts Payable Clerk"
+company = "Meridian Dental Partners"
+location = "Lakewood, CO"
+dates = "August 2023 - June 2024"
+order = 2
+min_bullets = 2
+max_bullets = 4
+
+[[experience]]
+id = "sga"
+title = "Student Bookkeeper"
+company = "CU Denver Student Government Finance Office"
+location = "Denver, CO"
+dates = "September 2022 - May 2023"
+order = 3
+min_bullets = 1
+max_bullets = 3
+
+# ---- Front Range Property Group -------------------------------------------
+[[bullet]]
+id = "frpg.close"
+parent = "frpg"
+priority = 10
+tags = ["month-end-close", "journal-entries", "reconciliation", "general-ledger", "deadline-management"]
+text = "Own the month-end close for 6 property entities, posting recurring and adjusting journal entries and reconciling 22 balance sheet accounts to a 5-business-day deadline."
+
+  [[bullet.variant]]
+  id = "frpg.close.gl"
+  tags = ["general-ledger", "journal-entries", "reconciliation", "accruals"]
+  text = "Maintain the general ledger for 6 entities, posting journal entries and clearing 22 balance sheet reconciliations each period."
+
+  [[bullet.variant]]
+  id = "frpg.close.deadline"
+  tags = ["month-end-close", "deadline-management", "time-management"]
+  text = "Close 6 entities on a 5-business-day calendar, working the reconciliation queue in priority order so the exceptions surface early."
+
+[[bullet]]
+id = "frpg.bankrec"
+parent = "frpg"
+priority = 9
+tags = ["reconciliation", "problem-solving", "data-quality", "attention-to-detail"]
+text = "Reconcile 9 operating and escrow bank accounts monthly, researching and clearing an average of 15 exceptions per cycle before close."
+
+  [[bullet.variant]]
+  id = "frpg.bankrec.detail"
+  tags = ["reconciliation", "attention-to-detail", "record-keeping"]
+  text = "Reconcile 9 bank accounts monthly and document each of the roughly 15 exceptions cleared per cycle, so the following month starts clean."
+
+[[bullet]]
+id = "frpg.ap"
+parent = "frpg"
+priority = 9
+tags = ["accounts-payable", "purchase-orders", "vendor-management", "bill-com", "deadline-management"]
+text = "Process roughly 400 vendor invoices monthly in Bill.com, matching each against its purchase order and receiving record before releasing it into the weekly check run."
+
+  [[bullet.variant]]
+  id = "frpg.ap.volume"
+  tags = ["accounts-payable", "deadline-management", "bill-com"]
+  text = "Run a 400-invoice monthly AP cycle in Bill.com on a weekly payment calendar, holding vendor terms without a missed discount window."
+
+  [[bullet.variant]]
+  id = "frpg.ap.controls"
+  tags = ["accounts-payable", "internal-controls", "purchase-orders", "compliance"]
+  text = "Apply three-way match to roughly 400 monthly invoices, holding anything without an approved purchase order out of the check run."
+
+[[bullet]]
+id = "frpg.variance"
+parent = "frpg"
+priority = 8
+tags = ["variance-analysis", "budgeting", "reporting", "excel", "communication"]
+text = "Build the monthly budget-to-actual package for 6 properties in Excel, writing the variance narrative for any line more than 5% off plan."
+
+  [[bullet.variant]]
+  id = "frpg.variance.reporting"
+  tags = ["reporting", "excel", "financial-reporting", "communication"]
+  text = "Produce the monthly reporting package for 6 properties and walk the property managers through what moved and why."
+
+[[bullet]]
+id = "frpg.forecast"
+parent = "frpg"
+priority = 7
+tags = ["forecasting", "excel", "reporting", "problem-solving"]
+text = "Maintain a rolling 13-week cash forecast in Excel across 6 entities, updated weekly from the AP aging and lease receipts."
+
+[[bullet]]
+id = "frpg.audit"
+parent = "frpg"
+priority = 7
+tags = ["audit-support", "documentation", "internal-controls", "compliance"]
+text = "Prepare the annual audit schedules and pull requested support for the external auditors, cutting the follow-up request list from 31 items in 2024 to 12 in 2025."
+
+  [[bullet.variant]]
+  id = "frpg.audit.controls"
+  tags = ["internal-controls", "audit-support", "documentation"]
+  text = "Assemble audit support and document the control steps behind each schedule, taking the auditors' follow-up list from 31 items to 12 year over year."
+
+[[bullet]]
+id = "frpg.sop"
+parent = "frpg"
+priority = 6
+tags = ["documentation", "process-improvement", "training"]
+text = "Wrote the desk procedures for close and AP after the prior assistant left with none, and used them to train the replacement AP clerk."
+
+  [[bullet.variant]]
+  id = "frpg.sop.process"
+  tags = ["process-improvement", "documentation"]
+  text = "Documented the close and AP procedures that had never been written down, turning a role that lived in one person's head into a repeatable checklist."
+
+[[bullet]]
+id = "frpg.netsuite"
+parent = "frpg"
+priority = 6
+tags = ["netsuite", "erp", "process-improvement", "data-quality"]
+text = "Supported the migration from QuickBooks Desktop to NetSuite, validating the opening balances for 6 entities and correcting 140 miscoded historical transactions before cutover."
+
+  [[bullet.variant]]
+  id = "frpg.netsuite.data"
+  tags = ["data-quality", "erp", "attention-to-detail"]
+  text = "Validated migrated opening balances for 6 entities and corrected 140 miscoded transactions during the NetSuite implementation."
+
+# ---- Meridian Dental Partners ---------------------------------------------
+[[bullet]]
+# Draft: she does maintain the register, but the depreciation posting moved to
+# the controller in March and she has not confirmed how to phrase what is left.
+# Drafts never reach a rendered resume unless --include-draft is passed, which
+# is what makes it safe to write one down before it is settled.
+id = "frpg.fixedassets"
+parent = "frpg"
+priority = 4
+draft = true
+tags = ["fixed-assets", "general-ledger", "reconciliation"]
+text = "Maintain the fixed asset register for 6 entities, reconciling the schedule to the general ledger each quarter."
+
+[[bullet]]
+id = "meridian.ap"
+parent = "meridian"
+priority = 10
+tags = ["accounts-payable", "deadline-management", "quickbooks", "vendor-management"]
+text = "Processed 250 to 300 invoices per month for 11 clinic locations in QuickBooks, coding each to the correct location and expense account."
+
+  [[bullet.variant]]
+  id = "meridian.ap.multi"
+  tags = ["accounts-payable", "general-ledger", "quickbooks", "attention-to-detail"]
+  text = "Coded and entered 250 to 300 monthly invoices across 11 locations, keeping each clinic's expenses on its own general ledger."
+
+[[bullet]]
+id = "meridian.vendor"
+parent = "meridian"
+priority = 8
+tags = ["vendor-management", "customer-service", "communication", "problem-solving"]
+text = "Handled vendor inquiries for 180 active suppliers, resolving pricing and short-ship disputes directly rather than routing them to the controller."
+
+[[bullet]]
+id = "meridian.expense"
+parent = "meridian"
+priority = 7
+tags = ["expense-reports", "concur", "compliance", "internal-controls"]
+text = "Audited employee expense reports in Expensify against the reimbursement policy, returning roughly 1 in 8 for missing documentation."
+
+  [[bullet.variant]]
+  id = "meridian.expense.service"
+  tags = ["expense-reports", "customer-service", "communication"]
+  text = "Reviewed employee expense reports in Expensify and coached submitters on what documentation the policy required, rather than only rejecting."
+
+[[bullet]]
+id = "meridian.1099"
+parent = "meridian"
+priority = 6
+tags = ["sales-tax", "compliance", "record-keeping", "vendor-management"]
+text = "Ran the annual 1099 process for 64 contractors, chasing missing W-9s and filing on time in both years."
+
+[[bullet]]
+id = "meridian.aging"
+parent = "meridian"
+priority = 6
+tags = ["accounts-receivable", "collections", "reporting", "healthcare"]
+text = "Produced the weekly AR aging for 11 clinics and flagged accounts past 60 days to the practice managers for follow-up."
+
+  [[bullet.variant]]
+  id = "meridian.aging.collections"
+  tags = ["collections", "accounts-receivable", "communication"]
+  text = "Worked the 60-day-plus AR list with practice managers each week, escalating what patient billing could not resolve."
+
+# ---- CU Denver Student Government Finance Office ---------------------------
+[[bullet]]
+id = "sga.books"
+parent = "sga"
+priority = 8
+tags = ["general-ledger", "record-keeping", "nonprofit", "excel"]
+text = "Kept the books for a $310,000 student activity fund across 40 registered organizations, recording every disbursement against its approved allocation."
+
+  [[bullet.variant]]
+  id = "sga.books.fund"
+  tags = ["nonprofit", "compliance", "record-keeping"]
+  text = "Tracked a $310,000 activity fund across 40 organizations, holding each disbursement to its approved allocation."
+
+[[bullet]]
+id = "sga.reimburse"
+parent = "sga"
+priority = 6
+tags = ["expense-reports", "customer-service", "documentation", "attention-to-detail"]
+text = "Reviewed roughly 25 student reimbursement requests weekly for documentation and eligibility, and rewrote the submission form after a third of requests kept arriving incomplete."
+
+[[bullet]]
+id = "sga.report"
+parent = "sga"
+priority = 5
+tags = ["reporting", "excel", "communication", "budgeting"]
+text = "Presented a monthly spend-against-budget summary to the senate finance committee for 40 organizations."
+
+# ---------------------------------------------------------------------------
+# PROJECTS
+#
+# Anything real and defensible that is not a paid role. For an early-career
+# candidate this section is often where the strongest technical evidence sits.
+# ---------------------------------------------------------------------------
+[[project]]
+id = "proj-close"
+name = "Month-End Close Rebuild - Front Range Property Group"
+order = 1
+min_bullets = 0
+max_bullets = 2
+
+[[project]]
+id = "proj-recon"
+name = "Vendor Statement Reconciliation Tool - Excel and Power Query"
+order = 2
+min_bullets = 0
+max_bullets = 2
+
+[[project]]
+id = "proj-tax"
+name = "VITA Volunteer Tax Preparer - IRS certified, two seasons"
+order = 3
+min_bullets = 0
+max_bullets = 2
+
+[[bullet]]
+id = "proj-close.days"
+parent = "proj-close"
+priority = 8
+tags = ["month-end-close", "process-improvement", "documentation", "deadline-management"]
+text = "Rebuilt the close calendar around a dependency order rather than a task list, taking the close from 9 business days to 5 without adding staff."
+
+[[bullet]]
+id = "proj-close.checklist"
+parent = "proj-close"
+priority = 6
+tags = ["internal-controls", "documentation", "process-improvement"]
+text = "Added a sign-off column to every close step so an incomplete reconciliation cannot be silently skipped."
+
+[[bullet]]
+id = "proj-recon.tool"
+parent = "proj-recon"
+priority = 8
+tags = ["excel", "reconciliation", "process-improvement", "accounts-payable"]
+text = "Built a Power Query workbook that matches vendor statements against the AP subledger and lists only the differences, replacing a line-by-line manual comparison that took most of a day."
+
+  [[bullet.variant]]
+  id = "proj-recon.tool.excel"
+  tags = ["excel", "data-quality", "process-improvement"]
+  text = "Built a Power Query workbook that reconciles vendor statements to the subledger and outputs an exceptions-only report."
+
+[[bullet]]
+id = "proj-recon.sql"
+parent = "proj-recon"
+priority = 5
+tags = ["sql", "reporting", "powerbi"]
+text = "Wrote the SQL views behind a Power BI page showing AP aging and check-run timing by entity."
+
+[[bullet]]
+id = "proj-tax.returns"
+parent = "proj-tax"
+priority = 7
+tags = ["compliance", "customer-service", "attention-to-detail", "sales-tax"]
+text = "Prepared and filed roughly 60 individual returns per season as an IRS-certified VITA volunteer, with every return passing second-reviewer quality check."
+
+  [[bullet.variant]]
+  id = "proj-tax.returns.service"
+  tags = ["customer-service", "communication", "compliance"]
+  text = "Worked one-on-one with roughly 60 filers per season as an IRS-certified VITA volunteer, explaining each return before it was signed."
+
+# ---------------------------------------------------------------------------
+[render]
+# One page, always. The renderer measures and reports the gap; the tailorer
+# drops the lowest-coverage optional bullets until it fits.
+max_pages = 1
+# Deliberately below the number of bullets that exist (21). If the ceiling
+# equalled the inventory, "tailoring" would select everything and the page-fit
+# loop would quietly do the real cutting at the end. The choice belongs in the
+# tailorer, where it is made on posting coverage and reported.
+total_bullet_ceiling = 11
+coursework_shown = 6

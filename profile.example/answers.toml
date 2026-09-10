@@ -1,0 +1,150 @@
+# ATS FREE-TEXT ANSWER BANK
+#
+# These are the questions that turn a 5-minute application into a 25-minute
+# one. Answering them once, well, and reusing them is most of the time saving
+# in Assisted Apply.
+#
+# `confirm = true` means the answer is a draft nobody has said out loud yet.
+# Those render with a CONFIRM marker in the packet and are listed by
+# `py -m jobdesk.apply.main answers --unconfirmed`. Clear the flag by editing
+# the answer and deleting the line. That is the confirmation.
+#
+# Fields: id, question (the canonical form), aliases (how ATSes phrase it),
+# answer, confirm, note.
+#
+# On AI-detection: some ATSes now run detectors over free text. The defense is
+# genuine specificity, real systems and real numbers, not obfuscation. Every
+# answer below names something that (in this fictional candidate's world)
+# actually happened.
+
+# ---------------------------------------------------------------------------
+# Logistics. The fast ones, and the ones where a wrong answer gets you
+# auto-rejected by a filter before a human reads anything.
+# ---------------------------------------------------------------------------
+[[answer]]
+id = "sponsorship"
+question = "Will you now or in the future require sponsorship for employment visa status?"
+aliases = ["sponsorship", "visa", "work authorization", "authorized to work",
+           "legally authorized"]
+answer = "No. I am authorized to work in the United States and do not require sponsorship now or in the future."
+
+[[answer]]
+id = "relocation"
+question = "Are you willing to relocate?"
+aliases = ["relocate", "relocation", "willing to move"]
+answer = "I am based in Denver, Colorado and am not looking to relocate. I am fully available for roles across the Denver metro and for remote work."
+
+[[answer]]
+id = "start-date"
+question = "When are you available to start?"
+aliases = ["available to start", "start date", "notice period", "availability"]
+answer = "Two weeks from an accepted offer. I would want to hand off an in-flight close cleanly rather than leave one half done."
+
+[[answer]]
+id = "salary"
+question = "What are your salary expectations?"
+aliases = ["salary expectation", "compensation expectation", "desired salary",
+           "expected salary", "pay expectation"]
+answer = "I am targeting $58,000 to $68,000 for a full-time accounting role in the Denver metro, and I am flexible for the right team and scope."
+confirm = true
+note = "Check this against the actual number before it goes out. A range you have not decided on is worse than no answer."
+
+[[answer]]
+id = "hybrid"
+question = "Are you able to work onsite or hybrid at this location?"
+aliases = ["onsite", "hybrid", "in office", "commute", "work location"]
+answer = "Yes. I live in Denver and can be onsite anywhere in the metro, including Boulder and the south suburbs."
+
+[[answer]]
+id = "how-heard"
+question = "How did you hear about this role?"
+aliases = ["how did you hear", "referral source", "source"]
+answer = "Through your company careers page."
+
+# ---------------------------------------------------------------------------
+# The ones that take real thought. Written once, edited when they stop being
+# true, and never generated at submit time.
+# ---------------------------------------------------------------------------
+[[answer]]
+id = "why-company"
+question = "Why do you want to work here?"
+aliases = ["why this company", "why do you want to work", "interest in the company",
+           "why are you interested in"]
+answer = "I am looking for an accounting team small enough that I see the whole cycle and structured enough that the close is not improvised each month. What drew me here specifically is the scope described in the posting."
+confirm = true
+note = "This one is deliberately generic and it reads that way. Add one real sentence about the specific employer before sending, or drop the answer."
+
+[[answer]]
+id = "why-role"
+question = "Why are you interested in this role?"
+aliases = ["why this role", "why this position", "interested in this position"]
+answer = "It is the work I already do, at a scale where I would learn something. I own a 6-entity close today, and I want the next role to add depth rather than repeat what I have."
+
+[[answer]]
+id = "career-gap"
+question = "Can you explain the gap in your employment history?"
+aliases = ["gap in employment", "employment gap", "career gap",
+           "not currently working in", "career change"]
+answer = "There is a nine-month gap between my last semester and my first accounting job. I was working retail hours and finishing the degree at the same time, and I did not want to start a close cycle I could not commit to. The degree finished in May 2023 and I was in an AP seat by August."
+note = "The highest-leverage answer in this file. Say the same thing here that the cover letter bridge says, so one story is told once."
+
+[[answer]]
+id = "difficult-problem"
+question = "Describe a difficult problem you solved."
+aliases = ["difficult problem", "challenging situation", "problem you solved",
+           "tell us about a time"]
+answer = "During our NetSuite migration the opening balances for two entities would not tie, off by about $4,000 in aggregate. Rather than plug it, I traced it back through the QuickBooks history and found 140 transactions coded to the wrong entity over three years, most of them shared vendor invoices split by hand. I corrected them before cutover and added a coding rule so the split is no longer a judgment call. It took nine days I had not planned for, and the alternative was carrying a known error into a new system permanently."
+
+[[answer]]
+id = "strength"
+question = "What is your greatest strength?"
+aliases = ["greatest strength", "strengths", "what do you bring"]
+answer = "I write things down. When I started at Front Range Property Group the close lived entirely in the previous assistant's head and nobody could run it after she left. I documented it, and the close went from 9 business days to 5 because the order of operations was finally visible."
+
+[[answer]]
+id = "excel-experience"
+question = "Describe your experience with Excel."
+aliases = ["excel experience", "describe your experience with excel", "advanced excel",
+           "spreadsheet skills", "pivot table"]
+answer = "Excel is where most of my reporting happens. I build the monthly budget-to-actual package for 6 entities in it and maintain a rolling 13-week cash forecast. Beyond pivot tables and XLOOKUP, I use Power Query for anything repeating: my vendor statement reconciliation is a Power Query workbook that matches statements against the AP subledger and outputs only the differences, which replaced a manual comparison that took most of a day."
+
+[[answer]]
+id = "erp-experience"
+question = "Which accounting systems have you used?"
+aliases = ["accounting software", "erp experience", "quickbooks", "netsuite",
+           "systems you have used", "software experience"]
+answer = "QuickBooks Online and Desktop for two years, NetSuite since our migration last year, and Bill.com for the AP workflow. I supported the QuickBooks to NetSuite migration itself, which meant validating opening balances for 6 entities and correcting the historical data that did not survive the mapping."
+
+[[answer]]
+id = "close-experience"
+question = "Describe your month-end close experience."
+aliases = ["month end close", "month-end", "closing the books", "close process",
+           "reconciliation experience"]
+answer = "I own the close for 6 property entities on a 5-business-day calendar: recurring and adjusting journal entries, 22 balance sheet reconciliations, and 9 bank accounts where roughly 15 exceptions a cycle get researched and cleared. Every step has a sign-off, so an incomplete reconciliation cannot be quietly skipped."
+
+[[answer]]
+id = "audit-experience"
+question = "Describe your experience supporting an audit."
+aliases = ["audit experience", "external auditors", "audit support", "pbc list",
+           "internal controls"]
+answer = "I prepare the annual audit schedules and pull the support the external auditors request. Their follow-up list went from 31 items in 2024 to 12 in 2025, entirely because I started documenting the control steps behind each schedule as I built it instead of reconstructing them the following spring."
+
+[[answer]]
+id = "high-volume"
+question = "How do you handle a high volume of transactions and competing deadlines?"
+aliases = ["high volume", "competing priorities", "manage deadlines", "fast-paced",
+           "prioritize"]
+answer = "By working the exceptions first. On 400 invoices a month the routine ones move themselves once the three-way match is in place; what actually threatens the deadline is the 20 that do not match. I clear those early in the week so the check run is never the place a problem is discovered."
+
+[[answer]]
+id = "accuracy"
+question = "How do you ensure accuracy in your work?"
+aliases = ["ensure accuracy", "attention to detail", "avoid errors", "quality control",
+           "double check"]
+answer = "Controls rather than care. Care does not survive a bad week. Every reconciliation has a sign-off, invoices without an approved purchase order are held rather than paid, and the recurring reports come from a query rather than a copied range. Where I have found an error twice, I have changed the process rather than promised to look harder."
+
+[[answer]]
+id = "anything-else"
+question = "Is there anything else you would like us to know?"
+aliases = ["anything else", "additional information", "additional comments"]
+answer = "Two seasons as an IRS-certified VITA volunteer, roughly 60 returns a season, every one passing second-reviewer check. It is not on the resume as employment, but it is where I got comfortable explaining a number to someone who has to sign it."

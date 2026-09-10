@@ -1,0 +1,99 @@
+# Canonical skill/method vocabulary.
+#
+# ONE list, used for two jobs that have to agree:
+#   1. reading a job description  (JD text -> canonical term ids)
+#   2. tagging master content     (bullet `tags` -> the same term ids)
+#
+# If those two used different words, tailoring would silently match nothing.
+# `py -m jobdesk.engine.main check` fails on any bullet tag that is not an id
+# here, which is the only thing keeping the two halves in sync.
+#
+# `aliases` is where JD-vocabulary mirroring lives. A posting that says
+# "three-way match" and a bullet that says "matched invoices against POs and
+# receipts" are the same canonical term, so the bullet gets credit without
+# anyone rewriting a true statement into a false one.
+#
+# Matching is case-insensitive, on word boundaries, over the JD text. Short
+# aliases are dangerous: "ap" fires inside "apply" and "approach", so the AP
+# term below spells the phrases out.
+#
+# `kind`: tool | method | soft | domain
+#   tool   -> can appear in the SKILLS section and is worth leading with
+#   method -> what the work IS; matched against bullets, never invented
+#   soft   -> counted for the gap report, deliberately NOT used to pick bullets
+#   domain -> industry context; drives the summary's closing clause only
+
+term = [
+  # ---- tools: accounting systems -----------------------------------------
+  { id="quickbooks", label="QuickBooks", kind="tool", aliases=["quickbooks", "quick books", "qbo", "quickbooks online", "quickbooks desktop"] },
+  { id="netsuite", label="NetSuite", kind="tool", aliases=["netsuite", "net suite", "oracle netsuite"] },
+  { id="sage", label="Sage Intacct", kind="tool", aliases=["sage", "sage intacct", "intacct", "sage 100", "sage 50"] },
+  { id="sap", label="SAP", kind="tool", aliases=["sap", "sap fico", "s/4hana"] },
+  { id="erp", label="ERP Systems", kind="tool", aliases=["erp", "erp system", "erp systems", "enterprise resource planning", "great plains", "dynamics gp", "dynamics 365", "business central"] },
+  { id="bill-com", label="Bill.com", kind="tool", aliases=["bill.com", "bill com", "billcom", "ap automation", "invoice automation"] },
+  { id="concur", label="SAP Concur", kind="tool", aliases=["concur", "sap concur", "expensify", "expense management software"] },
+  { id="adp", label="ADP", kind="tool", aliases=["adp", "adp workforce now", "adp run"] },
+  { id="paylocity", label="Paylocity", kind="tool", aliases=["paylocity", "paycom", "paychex", "gusto", "payroll software", "payroll system"] },
+
+  # ---- tools: reporting ---------------------------------------------------
+  # No bare "sheets" alias: it matches "balance sheets" in every accounting JD
+  # written, and that is a method, not a tool.
+  { id="excel", label="Excel", kind="tool", aliases=["excel", "microsoft excel", "ms excel", "advanced excel", "spreadsheet", "spreadsheets", "pivot table", "pivot tables", "vlookup", "xlookup", "sumif", "index match", "macros"] },
+  { id="google-workspace", label="Google Workspace", kind="tool", aliases=["google workspace", "google sheets", "google docs", "g suite"] },
+  { id="sql", label="SQL", kind="tool", aliases=["sql", "mysql", "sql server", "queries", "querying", "relational database", "stored procedures"] },
+  { id="powerbi", label="Power BI", kind="tool", aliases=["power bi", "powerbi", "power-bi", "dax"] },
+  { id="tableau", label="Tableau", kind="tool", aliases=["tableau"] },
+  { id="outlook", label="Outlook", kind="tool", aliases=["outlook", "microsoft office", "ms office", "office 365", "microsoft 365"] },
+
+  # ---- methods: core accounting ------------------------------------------
+  { id="general-ledger", label="General Ledger", kind="method", aliases=["general ledger", "gl", "g/l", "chart of accounts", "subledger", "sub-ledger", "trial balance"] },
+  { id="accounts-payable", label="Accounts Payable", kind="method", aliases=["accounts payable", "a/p", "vendor invoices", "invoice processing", "three-way match", "3-way match", "check runs", "payment runs", "vendor payments"] },
+  { id="accounts-receivable", label="Accounts Receivable", kind="method", aliases=["accounts receivable", "a/r", "customer invoicing", "aging report", "aging reports", "billing cycle", "cash application", "remittance"] },
+  { id="reconciliation", label="Account Reconciliation", kind="method", aliases=["reconciliation", "reconciliations", "reconcile", "reconciling", "bank reconciliation", "balance sheet reconciliation", "account reconciliation"] },
+  { id="month-end-close", label="Month-End Close", kind="method", aliases=["month end close", "month-end close", "monthly close", "period close", "close process", "close cycle", "year-end close", "quarter end"] },
+  { id="journal-entries", label="Journal Entries", kind="method", aliases=["journal entries", "journal entry", "je", "adjusting entries", "recurring entries"] },
+  { id="accruals", label="Accruals and Prepaids", kind="method", aliases=["accruals", "accrual", "prepaid", "prepaids", "deferred revenue", "amortization schedule"] },
+  { id="financial-reporting", label="Financial Reporting", kind="method", aliases=["financial reporting", "financial statements", "income statement", "balance sheet", "p&l", "profit and loss", "cash flow statement"] },
+  { id="gaap", label="GAAP", kind="method", aliases=["gaap", "us gaap", "generally accepted accounting principles", "accounting standards"] },
+  { id="fixed-assets", label="Fixed Assets", kind="method", aliases=["fixed assets", "depreciation", "capitalization", "asset register"] },
+  { id="sales-tax", label="Sales and Use Tax", kind="method", aliases=["sales tax", "use tax", "tax filings", "tax returns", "1099", "1099s", "w-9", "tax compliance"] },
+
+  # ---- methods: adjacent finance -----------------------------------------
+  { id="payroll-processing", label="Payroll Processing", kind="method", aliases=["payroll processing", "process payroll", "payroll run", "timesheets", "timekeeping", "garnishments", "payroll taxes", "benefits administration"] },
+  { id="collections", label="Collections", kind="method", aliases=["collections", "past due", "delinquent accounts", "dunning", "credit hold", "collection calls"] },
+  { id="purchase-orders", label="Purchase Orders", kind="method", aliases=["purchase order", "purchase orders", "po matching", "requisitions", "procurement"] },
+  { id="expense-reports", label="Expense Reporting", kind="method", aliases=["expense reports", "expense reporting", "employee reimbursements", "corporate card", "p-card"] },
+  { id="budgeting", label="Budgeting", kind="method", aliases=["budget", "budgeting", "budget preparation", "cost center", "departmental budgets"] },
+  { id="forecasting", label="Forecasting", kind="method", aliases=["forecast", "forecasting", "cash forecast", "cash flow projection", "projections"] },
+  { id="variance-analysis", label="Variance Analysis", kind="method", aliases=["variance analysis", "budget to actual", "budget vs actual", "variance reporting", "fluctuation analysis"] },
+
+  # ---- methods: controls and process -------------------------------------
+  { id="internal-controls", label="Internal Controls", kind="method", aliases=["internal controls", "internal control", "segregation of duties", "control environment", "sox", "sarbanes"] },
+  { id="audit-support", label="Audit Support", kind="method", aliases=["audit", "auditors", "audit support", "pbc", "audit schedules", "audit requests", "external audit"] },
+  { id="compliance", label="Compliance", kind="method", aliases=["compliance", "regulatory", "policy adherence", "record retention"] },
+  { id="process-improvement", label="Process Improvement", kind="method", aliases=["process improvement", "streamline", "streamlining", "efficiency", "automation", "workflow improvement", "standardize", "standardization"] },
+  { id="documentation", label="Documentation", kind="method", aliases=["documentation", "document processes", "sop", "sops", "standard operating procedure", "desk procedures", "process documentation"] },
+  { id="data-quality", label="Data Accuracy", kind="method", aliases=["data accuracy", "data integrity", "data quality", "accuracy of records", "error rate", "quality control"] },
+  { id="record-keeping", label="Record Keeping", kind="method", aliases=["record keeping", "recordkeeping", "maintain records", "filing", "document management"] },
+  { id="vendor-management", label="Vendor Management", kind="method", aliases=["vendor management", "vendor relations", "vendor onboarding", "vendor setup", "supplier management", "vendor inquiries"] },
+  { id="customer-service", label="Customer Service", kind="method", aliases=["customer service", "client service", "customer inquiries", "client facing", "internal customers", "service oriented"] },
+  { id="training", label="Training Others", kind="method", aliases=["train", "training", "mentor", "onboard new hires", "cross-train", "cross training"] },
+  { id="reporting", label="Reporting", kind="method", aliases=["reporting", "reports", "ad hoc reports", "ad-hoc reporting", "management reporting", "kpi", "metrics", "dashboards", "dashboard"] },
+
+  # ---- soft ---------------------------------------------------------------
+  { id="attention-to-detail", label="Attention to Detail", kind="soft", aliases=["attention to detail", "detail oriented", "detail-oriented", "meticulous", "accuracy", "thorough"] },
+  { id="communication", label="Communication", kind="soft", aliases=["communication skills", "written and verbal", "verbal and written", "communicate effectively", "interpersonal"] },
+  { id="time-management", label="Time Management", kind="soft", aliases=["time management", "prioritize", "prioritization", "multitask", "multi-task", "manage competing"] },
+  { id="deadline-management", label="Working to Deadlines", kind="soft", aliases=["deadlines", "deadline driven", "tight deadlines", "fast-paced", "fast paced", "high volume", "high-volume"] },
+  { id="teamwork", label="Teamwork", kind="soft", aliases=["team player", "collaborate", "collaboration", "cross-functional", "cross functional", "work with teams"] },
+  { id="problem-solving", label="Problem Solving", kind="soft", aliases=["problem solving", "problem-solving", "troubleshoot", "research discrepancies", "resolve discrepancies", "critical thinking", "analytical skills"] },
+
+  # ---- domain -------------------------------------------------------------
+  { id="healthcare", label="healthcare", kind="domain", aliases=["healthcare", "health care", "hospital", "clinic", "medical practice", "patient"] },
+  { id="nonprofit", label="nonprofit finance", kind="domain", aliases=["nonprofit", "non-profit", "501(c)(3)", "grant funded", "fund accounting", "donor"] },
+  { id="construction", label="construction and real estate", kind="domain", aliases=["construction", "general contractor", "job costing", "property management", "real estate", "lease accounting"] },
+  { id="saas", label="software and subscription businesses", kind="domain", aliases=["saas", "subscription", "arr", "recurring revenue", "software company"] },
+  { id="manufacturing", label="manufacturing", kind="domain", aliases=["manufacturing", "inventory costing", "cogs", "bill of materials", "production"] },
+  { id="government", label="public sector accounting", kind="domain", aliases=["government", "public sector", "municipal", "county", "state agency", "gasb"] },
+  { id="retail", label="retail and hospitality", kind="domain", aliases=["retail", "restaurant", "hospitality", "store operations", "point of sale", "pos"] },
+]
