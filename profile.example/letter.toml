@@ -1,0 +1,157 @@
+# COVER LETTER CONTENT
+#
+# Same rule as master.toml, for the same reason: a cover letter is assembled by
+# SELECTION from the paragraphs below, never written at send time. Every
+# sentence that leaves this machine was read and approved here first.
+#
+# Enforced by `apply/letter.py::verify`, which runs on every build:
+#   1. every rendered paragraph must match its template exactly, with only the
+#      declared slots substituted. No free text can be added anywhere.
+#   2. every number in the finished letter must also appear in the tailored
+#      resume that ships with it. A paragraph claiming "400 invoices" is
+#      dropped if the resume that went with it did not make that claim.
+#   3. every tool named must appear in the resume's SKILLS section AND in the
+#      job description. The letter cannot want a skill the candidate does not
+#      list.
+#
+# Rule 2 counts spelled-out numbers too, so avoid using "one", "two" and their
+# neighbours as pronouns or figures of speech. "rather than feeding one" was
+# read as a claim about the number 1, and it silently cost every accounting
+# letter its opening paragraph until someone read the drop list.
+#
+# Slots available: {role} {company} {tools}. Nothing else is substituted.
+# `families` are the target families from targeting.toml's [[summary_family]]
+# blocks, so the two files never drift: accounting, billing, payroll, audit,
+# analysis, operations. "*" matches all.
+#
+# `employer` groups paragraphs that describe the same job, so one letter does
+# not tell the same story twice.
+
+[meta]
+# Contact details are NOT duplicated here. They are lifted from the tailored
+# resume's own text at build time, so the letterhead and the resume can never
+# disagree about a phone number.
+greeting = "Dear Hiring Team,"
+sign_off = "Sincerely,"
+
+# True skills worth listing on a resume for the keyword match and embarrassing
+# to name in a sentence. Nobody writes "my experience with Outlook".
+tool_stoplist = ["Outlook", "Google Workspace", "Microsoft Office"]
+
+# ---------------------------------------------------------------------------
+# OPENING -- who is writing and what for. One per family. All are true; the
+# choice is only about which part of the same background to lead with.
+# ---------------------------------------------------------------------------
+[[opening]]
+id = "open.accounting"
+families = ["accounting"]
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver, and my two years of experience have been full-cycle: general ledger, reconciliations, and owning a month-end close rather than feeding someone else's."""
+
+[[opening]]
+id = "open.billing"
+families = ["billing"]
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver with hands-on accounts payable and receivable experience in high-volume, multi-entity environments, which is the work this role is built around."""
+
+[[opening]]
+id = "open.payroll"
+families = ["payroll"]
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver. Payroll and benefits administration have been part of my day-to-day rather than something I have only read about, and I know how unforgiving the calendar is."""
+
+[[opening]]
+id = "open.audit"
+families = ["audit"]
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver. My auditing coursework turned into practice quickly: I prepare the annual audit schedules at my current employer and answer for how each number was derived."""
+
+[[opening]]
+id = "open.analysis"
+families = ["analysis", "operations"]
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver who works on both sides of the ledger and the reporting built on top of it, from journal entries through the budget variance package a manager actually reads."""
+
+# ---------------------------------------------------------------------------
+# EVIDENCE -- the middle of the letter. Each one is a specific thing that
+# happened, with the numbers that make it checkable.
+# ---------------------------------------------------------------------------
+[[evidence]]
+id = "ev.close.full"
+employer = "frpg"
+families = ["accounting", "audit"]
+template = """At Front Range Property Group I own the month-end close for 6 property entities. That means the recurring and adjusting journal entries, 22 balance sheet reconciliations, and 9 bank accounts where roughly 15 exceptions a cycle have to be researched and cleared before anything closes. When I started, the close ran 9 business days on a task list nobody had written down. I rebuilt it around a dependency order and documented it, and it now runs in 5."""
+
+[[evidence]]
+id = "ev.close.short"
+employer = "frpg"
+families = ["*"]
+template = """At Front Range Property Group I own the month-end close for 6 property entities, including 22 balance sheet reconciliations and 9 bank accounts, on a 5-business-day calendar. It ran 9 business days before I rebuilt the close around a dependency order and wrote the procedures down."""
+
+[[evidence]]
+id = "ev.ap.frpg"
+employer = "frpg"
+families = ["billing", "operations"]
+template = """The payables side is roughly 400 vendor invoices a month in Bill.com, each matched against its purchase order and receiving record before it goes into the weekly check run. Anything without an approved purchase order is held rather than paid, which is the sort of rule that only works if someone applies it every week."""
+
+[[evidence]]
+id = "ev.reporting"
+employer = "frpg"
+families = ["analysis", "operations"]
+template = """I also build the monthly budget-to-actual package for those 6 properties and write the variance narrative for any line more than 5% off plan, then walk the property managers through what moved. Alongside it I keep a rolling 13-week cash forecast updated weekly from the AP aging and lease receipts."""
+
+[[evidence]]
+id = "ev.audit"
+employer = "frpg"
+families = ["audit", "accounting"]
+template = """I prepare the annual audit schedules and pull support for the external auditors. Their follow-up request list went from 31 items in 2024 to 12 in 2025, which came entirely from documenting the control steps behind each schedule instead of reassembling them from memory each spring."""
+
+[[evidence]]
+id = "ev.ap.meridian"
+employer = "meridian"
+families = ["billing", "accounting", "operations"]
+template = """Before this I was the AP clerk at Meridian Dental Partners, processing 250 to 300 invoices a month across 11 clinic locations and keeping each clinic's expenses coded to its own general ledger. I handled vendor inquiries for 180 suppliers directly, including pricing and short-ship disputes, rather than routing them up."""
+
+[[evidence]]
+id = "ev.payroll"
+employer = "meridian"
+families = ["payroll"]
+template = """At Meridian Dental Partners I audited employee expense reports against the reimbursement policy and ran the annual 1099 process for 64 contractors, chasing down missing W-9s and filing on time both years. The deadline work is familiar and I do not need to be reminded of it."""
+
+[[evidence]]
+id = "ev.tools"
+employer = "tools"
+families = ["*"]
+requires_tools = true
+template = """On the systems side, what I use day to day is {tools}. I supported a migration from QuickBooks Desktop to NetSuite, validating opening balances for 6 entities and correcting 140 miscoded historical transactions before cutover, so I have seen what a system change does to data that was never quite right to begin with."""
+
+[[evidence]]
+id = "ev.excel"
+employer = "proj-recon"
+families = ["analysis", "operations", "billing"]
+template = """Here is how I work: reconciling vendor statements against the AP subledger was a line-by-line comparison that took most of a day, so I built a Power Query workbook that does the match and outputs only the differences. The judgment still belongs to a person. The clerical part does not need to."""
+
+[[evidence]]
+id = "ev.vita"
+employer = "proj-tax"
+families = ["*"]
+template = """Outside of work I spent two seasons as an IRS-certified VITA volunteer, preparing and filing roughly 60 individual returns a season with every return passing second-reviewer quality check. Sitting with people while they sign something they do not fully understand is a useful reminder of who the accuracy is for."""
+
+# ---------------------------------------------------------------------------
+# BRIDGE -- the paragraph that answers the obvious objection before a reader
+# has to raise it. Delete this section if there is nothing to explain.
+# ---------------------------------------------------------------------------
+[[bridge]]
+id = "bridge.experience.tools"
+families = ["*"]
+requires_tools = true
+template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I closed 6 entities on my own this month, and I have worked in {tools} rather than around them."""
+
+[[bridge]]
+id = "bridge.experience.plain"
+families = ["*"]
+requires_tools = false
+template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I own a close for 6 entities rather than a single task within someone else's."""
+
+# ---------------------------------------------------------------------------
+# CLOSE
+# ---------------------------------------------------------------------------
+[[close]]
+id = "close.standard"
+families = ["*"]
+template = """I would welcome the chance to talk about the {role} role and what {company} needs from it. I am local to the Denver metro, available on short notice, and reachable at the phone number and email above. Thank you for your time."""

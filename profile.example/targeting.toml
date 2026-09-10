@@ -1,0 +1,465 @@
+# Who you are targeting, expressed as scoring inputs.
+#
+# This is Wren Adeyemi, who does not exist: an early-career accounting and
+# financial-operations candidate in Denver. Nothing here overlaps with the
+# person who built JobDesk, and that is the point. If the radar can score a
+# Denver AP clerk role for a fictional accountant using the same machinery
+# that scores a Richmond analyst role, then the machinery is machinery and the
+# profile is data.
+#
+# It is also the test fixture. JOBDESK_PROFILE pointed at this directory is
+# what tests/test_profile.py runs against, so this file cannot quietly rot.
+#
+# Copy the whole directory to `profile/` and edit it. Every value is a plain
+# TOML list. Nothing here needs Python and nothing here needs a model.
+
+# --------------------------------------------------------------------------
+# Target titles, by tier. Matched as substrings against the posting title.
+# Tier 1 = strongest fit today. Tier 2 = reachable with minor positioning.
+# Tier 3 = stretch. Points scale accordingly.
+# --------------------------------------------------------------------------
+tier_1_titles = [
+  "staff accountant", "junior accountant", "accounting associate",
+  "accounting specialist", "accounts payable", "accounts receivable",
+  "ap specialist", "ar specialist", "billing specialist",
+  "bookkeeper", "payroll specialist", "payroll administrator",
+  "accounting clerk", "financial operations",
+]
+
+tier_2_titles = [
+  "financial analyst", "budget analyst", "revenue analyst",
+  "billing analyst", "reconciliation analyst", "cost accountant",
+  "grant accountant", "fund accountant", "tax associate",
+  "treasury analyst", "credit analyst", "collections specialist",
+]
+
+tier_3_titles = [
+  "business analyst", "operations analyst", "data analyst",
+  "office manager", "procurement specialist", "contract administrator",
+  "compliance analyst", "internal auditor",
+]
+
+# Titles that are adjacent rather than on the list. These earn modest points
+# AND count as on-target, so the off-target cap does not fire on them. Widen
+# this when a title you would happily take keeps scoring zero.
+adjacent_titles = [
+  "finance associate", "finance specialist", "revenue operations",
+  "billing operations", "invoice", "general ledger", "month end",
+  "reconciliation", "accounting technician",
+]
+
+domain_modifiers = [
+  "accounting", "financial", "finance", "payroll", "billing", "revenue",
+  "tax", "audit", "treasury", "budget", "grant", "fund", "cost",
+  "procurement", "accounts", "credit", "collections", "business",
+]
+
+# Clerical work that carries an on-target word but sits below this level.
+# Checked BEFORE the function families, because a bare "data" or "billing"
+# token would otherwise pull the whole entry-clerk band in.
+clerical_markers = [
+  "data entry", "data capture", "mail clerk", "file clerk", "receptionist",
+  "cashier", "teller", "front desk", "scanning clerk", "transcription",
+]
+
+# Head nouns from other professions. Also checked before the families, so a
+# stray token cannot carry an off-field title on-target.
+off_field_markers = [
+  "nurse", "nursing", "therapist", "physician", "dental", "pharmacist",
+  "account executive", "sales representative", "sales rep",
+  "business development", "recruiter", "teacher", "instructor",
+  "driver", "welder", "electrician", "plumber", "mechanic",
+  "attorney", "paralegal", "chef", "cook", "server", "bartender",
+  "custodian", "janitor", "security guard", "caregiver",
+  # Safety compliance is a whole other profession that happens to share the
+  # word "compliance". An EHS Coordinator scored 83/A before these landed.
+  "ehs", "hse", "environmental health", "occupational safety",
+  "safety coordinator", "safety specialist", "safety manager",
+  # "Account Manager" is sales. "Accounting Manager" is not. Both contain
+  # "account", which is why the word alone is never enough.
+  "account manager", "account director", "client success",
+]
+
+# Unpaid work. An unpaid position is not a job search outcome.
+volunteer_markers = [
+  "volunteer position", "volunteer role", "volunteer opportunity",
+  "this is a volunteer", "unpaid volunteer", "pro bono", "volunteer basis",
+]
+
+# Explicit early-career signals in a title. A small additive bonus, never a
+# gate.
+entry_level_markers = [
+  "associate", "junior", "jr", "entry level", "entry-level", "early career",
+  "recent graduate", "new grad", "graduate", "trainee", "level i",
+]
+
+# Seniority bands this candidate is not one of. A match is a HARD block: the
+# posting scores 0 no matter how well it fits otherwise.
+title_disqualifiers = [
+  "senior", "sr.", "sr ", "lead ", "principal", "manager", "director",
+  "head of", "vp ", "vice president", "chief", "supervisor",
+  "intern", "internship", "co-op", "apprentice", "partner",
+  " iii", " iv", "cpa manager",
+]
+
+# Hard blockers. If the posting body says this, she cannot be hired.
+hard_disqualifiers = [
+  "cpa required", "active cpa license", "cpa certification required",
+  "security clearance", "ts/sci", "top secret", "secret clearance",
+  "polygraph", "rn license", "registered nurse", "law degree",
+  "juris doctor", "commercial driver", "cdl required",
+  "series 7", "series 63", "cfa charterholder",
+]
+
+# --------------------------------------------------------------------------
+# Staffing agencies and their tells. A PENALTY, not a block: recruiters do
+# place people. The flag is the point, because duplicate agency submissions
+# to the same employer are one of the few things that genuinely burns a
+# candidate, and that is only manageable if the agency is visible first.
+# --------------------------------------------------------------------------
+staffing_agencies = [
+  "robert half", "accountemps", "creative financial staffing", "vaco",
+  "addison group", "beacon hill", "kforce", "randstad", "adecco",
+  "manpower", "kelly services", "aerotek", "insight global",
+  "teksystems", "aston carter", "ledgent", "roth staffing",
+]
+
+agency_phrases = [
+  "our client is", "our client seeks", "our client, a",
+  "on behalf of our client", "client is seeking", "contract to hire",
+  "contract-to-hire", "corp to corp", "w2 only", "staffing agency",
+]
+
+# Compensation structures that are not a salaried accounting job by any
+# reading, and no amount of title fit changes that.
+comp_structure_blocks = [
+  "commission only", "commission-only", "100% commission",
+  "unpaid internship", "unpaid position", "this is an unpaid",
+  "no base salary", "straight commission",
+]
+
+# --------------------------------------------------------------------------
+# Geography. Denver metro and the commutable ring.
+# --------------------------------------------------------------------------
+
+home_metro = "Denver, CO"
+
+# The roughly one-hour drive ring. Onsite roles outside it are hard-blocked:
+# she is not relocating.
+local_terms = [
+  "denver", "aurora", "lakewood", "littleton", "englewood", "centennial",
+  "westminster", "arvada", "thornton", "broomfield", "golden",
+  "wheat ridge", "commerce city", "greenwood village", "lone tree",
+  "boulder", "louisville", "superior", "parker", "castle rock",
+  "northglenn", "brighton", "tech center",
+]
+
+# Wider Colorado, past the commute ring. Used only to label an onsite
+# out-of-area block with a clearer reason. It earns no commute score, because
+# an onsite role there still means moving.
+state_terms = [
+  "colorado", " co ", ", co", "colorado springs", "fort collins",
+  "greeley", "pueblo", "grand junction", "loveland",
+]
+
+remote_terms = [
+  "remote", "work from home", "wfh", "distributed", "anywhere",
+  "telework", "virtual position", "home-based",
+]
+
+hybrid_terms = ["hybrid", "flex office", "3 days in office", "onsite 2 days"]
+
+# Remote postings that are remote somewhere else. The global boards are full
+# of well-matched roles restricted to another country.
+remote_exclusions = [
+  "remote (canada)", "remote - canada", "remote, canada", "canada only",
+  "remote (uk)", "united kingdom only", "emea only", "apac only",
+  "remote (india)", "india only", "latam only", "eu only", "non-us only",
+]
+
+# Country and region names that, in the LOCATION field, mean the role is not
+# US-based. Ambiguous names are left out on purpose: a false negative is one
+# extra posting to skim, a false positive silently hides real local jobs.
+non_us_markers = [
+  "philippines", "india", "pakistan", "bangladesh", "indonesia", "vietnam",
+  "thailand", "malaysia", "singapore", "japan", "china", "hong kong",
+  "taiwan", "south korea", "australia", "new zealand", "canada", "mexico",
+  "brazil", "argentina", "chile", "colombia", "peru", "costa rica",
+  "united kingdom", "england", "scotland", "ireland", "france", "germany",
+  "spain", "italy", "portugal", "netherlands", "belgium", "sweden",
+  "norway", "denmark", "finland", "poland", "romania", "ukraine", "czech",
+  "austria", "switzerland", "greece", "turkey", "israel", "nigeria",
+  "kenya", "south africa", "uae", "dubai", "london", "berlin", "paris",
+  "madrid", "amsterdam", "dublin", "toronto", "vancouver", "sydney",
+  "bangalore", "mumbai", "manila", "warsaw", "lisbon",
+]
+
+# Stacks she does not have. Presence in the JD costs points but never
+# disqualifies, because job ads routinely list a wish list nobody has in full.
+foreign_skills = [
+  "hyperion", "blackline", "workiva", "onestream", "anaplan",
+  "oracle ebs", "peoplesoft financials", "cobol", "vba macros",
+]
+
+# --------------------------------------------------------------------------
+# Experience and compensation thresholds.
+# --------------------------------------------------------------------------
+
+# Up to years_comfortable is in range. Up to max_years_stretch is a demoted
+# stretch. Above max_years_stretch is a HARD BLOCK, never surfaced. This is
+# the single biggest noise filter in the whole engine: a recruiter will not
+# look past a candidate who is years short of a stated minimum.
+years_comfortable = 2
+max_years_stretch = 3
+
+# The standard HR escape hatch. "5 years of experience OR an equivalent
+# combination of education and experience" is not a 5-year gate. One of these
+# phrases downgrades the hard block to the ordinary out-of-range penalty, so
+# the posting is demoted rather than erased.
+#
+# But only up to a point. Against a 10-year requirement it is boilerplate that
+# got pasted in, and treating it as an opening would undo the filter the block
+# exists to be.
+equivalency_ceiling = 6
+
+equivalency_phrases = [
+  "or equivalent combination", "an equivalent combination",
+  "or equivalent experience", "or equivalent education",
+  "or equivalent work experience", "or related experience",
+  "combination of education and experience",
+]
+
+# Explicit "we will teach you" signals. These also disarm the years block: a
+# posting that says it will train cannot simultaneously mean its years line
+# as a gate.
+no_experience_phrases = [
+  "no experience necessary", "no experience required", "no prior experience",
+  "will train", "training provided", "paid training", "on-the-job training",
+  "entry level position", "entry-level position", "0-2 years", "0-1 year",
+  "1-2 years", "recent graduate", "new graduate", "no minimum experience",
+]
+
+# --------------------------------------------------------------------------
+# Education. Wren holds a B.S. in Accounting.
+# --------------------------------------------------------------------------
+
+degree_fields = [
+  "accounting", "finance", "business administration", "economics",
+  "business", "financial management",
+]
+
+bachelors_terms = [
+  "bachelor", "bachelor's", "bachelors", "b.s.", "bs degree", "b.a.",
+  "undergraduate degree", "4-year degree", "four year degree",
+]
+
+# Degrees and licenses she does not hold. A stated requirement here is a real
+# gate, penalised rather than blocked, because plenty of postings list these
+# as preferred and the binding/preferred split is handled upstream.
+advanced_degree_terms = [
+  "master's degree", "masters degree", "mba", "m.s. degree", "macc",
+  "cpa eligible", "cpa candidate", "cma", "phd", "doctorate",
+]
+
+# Below the floor is demoted, not blocked. At or above the target earns a
+# bonus. Denver entry accounting runs roughly $48-62k.
+salary_floor = 45000
+salary_target = 68000
+
+# Postings older than this are near-dead: recruiters review in arrival order,
+# and most requisitions stop being read long before they come down.
+fresh_days = 3
+stale_days = 30
+
+# --------------------------------------------------------------------------
+# Title decomposition: FUNCTION x LEVEL.
+#
+# The tier lists above are a closed vocabulary. A title that is not on one of
+# them scores zero and gets capped below the reporting threshold, which is a
+# hard ceiling on recall that no amount of list-padding fixes. These families
+# match a title whose separators ("/", "&", "-", ",") have been flattened to
+# spaces, so "Accounts Payable/Receivable Clerk" reads correctly.
+#
+# Scoring takes max(tier points, family points), so adding a family can only
+# help. Nothing that scores today can regress.
+# --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# What the keyword boards get asked for.
+#
+# Adzuna and USAJOBS take a phrase, not a taxonomy, and each phrase is a round
+# trip, so this is a short list rather than the whole tier-1 set. Omit the key
+# and the top of tier 1 is used instead.
+search_queries = [
+  "staff accountant", "accounts payable", "accounts receivable",
+  "bookkeeper", "payroll specialist", "billing specialist",
+  "accounting associate",
+]
+
+# Workday is queried one `searchText` at a time rather than pulled wholesale,
+# because the list response has no body and the years parse needs a second
+# call per posting. Single words only: Workday treats a phrase as an AND and
+# quietly returns nothing. Omit the key and one word per function family is
+# derived instead.
+workday_search_terms = ["accountant", "accounting", "payroll", "billing",
+                        "audit", "finance"]
+
+[[function_families]]
+label = "accounting function"
+points = 30
+terms = [
+  "accountant", "accounting", "bookkeep", "general ledger", "ledger",
+  "accounts payable", "accounts receivable", "reconciliation",
+  "month end close", "financial reporting", "invoice", "invoicing",
+]
+
+[[function_families]]
+label = "payroll/benefits function"
+points = 26
+terms = [
+  "payroll", "benefits administration", "timekeeping", "compensation",
+  "hris", "workforce administration",
+]
+
+[[function_families]]
+label = "billing/revenue function"
+points = 24
+terms = [
+  "billing", "revenue", "collections", "credit", "cash application",
+  "order to cash", "procure to pay", "accounts", "remittance",
+]
+
+[[function_families]]
+label = "audit/controls function"
+points = 22
+terms = [
+  "audit", "auditor", "compliance", "controls", "internal control",
+  "risk", "governance", "sox",
+]
+
+[[function_families]]
+label = "analysis/reporting function"
+points = 20
+terms = [
+  "analyst", "analysis", "analytics", "reporting", "forecasting",
+  "budget", "financial planning", "variance",
+]
+
+[[function_families]]
+label = "operations/process function"
+points = 16
+terms = [
+  "operations", "business operations", "process improvement",
+  "procurement", "purchasing", "contract administration", "vendor",
+]
+
+# --------------------------------------------------------------------------
+# Dealbreaker attributes. Each one removes a whole category of false positive
+# that a title-plus-geo read cannot see. Negative points, and a flag is raised
+# either way, so nothing disappears silently.
+# --------------------------------------------------------------------------
+
+[[dealbreaker_signals]]
+label = "driving required"
+points = -5
+phrases = [
+  "valid driver's license", "valid drivers license",
+  "reliable transportation", "must have own vehicle",
+  "personal vehicle required", "travel to client sites",
+]
+
+[[dealbreaker_signals]]
+label = "off-hours availability"
+points = -6
+phrases = [
+  "weekend availability", "available to work weekends", "rotating shift",
+  "on-call rotation", "night shift", "must work holidays",
+  "extended hours during month end", "overtime required during close",
+]
+
+[[dealbreaker_signals]]
+label = "second language required"
+points = -8
+phrases = [
+  "bilingual required", "must be bilingual", "fluent in spanish",
+  "spanish fluency required", "must be fluent in",
+]
+
+[[dealbreaker_signals]]
+label = "physical labor"
+points = -12
+phrases = [
+  "lift up to 50", "lift 50 lbs", "physically demanding",
+  "stand for long periods", "ability to lift", "warehouse environment",
+]
+
+# --------------------------------------------------------------------------
+# Stack overlap. Weighted, because the resume leads with these.
+# --------------------------------------------------------------------------
+
+[core_skills]
+"excel" = 6
+"quickbooks" = 5
+"netsuite" = 5
+"sage" = 3
+"general ledger" = 4
+"reconciliation" = 4
+"accounts payable" = 4
+"accounts receivable" = 4
+
+[supporting_skills]
+"sql" = 3
+"power bi" = 2
+"tableau" = 2
+"erp" = 3
+"sap" = 2
+"oracle financials" = 2
+"bill.com" = 2
+"concur" = 2
+"expensify" = 1
+"adp" = 2
+"paylocity" = 2
+"gusto" = 1
+"month end close" = 3
+"journal entries" = 3
+"accruals" = 2
+"variance analysis" = 2
+"gaap" = 3
+"1099" = 1
+"audit support" = 2
+"pivot table" = 2
+"vlookup" = 2
+
+# --------------------------------------------------------------------------
+# Which summary clause a posting gets, chosen by title keyword. First match
+# wins, so the narrow families go first. The last entry is the fallback and
+# its keywords are ignored. Names must match the `families` values on the
+# summary openings and middles in master.toml.
+# --------------------------------------------------------------------------
+
+[[summary_family]]
+name = "audit"
+title_keywords = ["audit", "compliance", "control", "sox", "risk"]
+
+[[summary_family]]
+name = "payroll"
+title_keywords = ["payroll", "benefits", "timekeeping", "compensation"]
+
+[[summary_family]]
+name = "billing"
+title_keywords = ["billing", "receivable", "payable", "collections",
+                  "invoice", "credit", "revenue"]
+
+[[summary_family]]
+name = "accounting"
+title_keywords = ["accountant", "accounting", "bookkeep", "ledger",
+                  "reconcil", "tax", "close"]
+
+[[summary_family]]
+name = "analysis"
+title_keywords = ["analyst", "analysis", "budget", "forecast", "reporting"]
+
+# Fallback.
+[[summary_family]]
+name = "operations"
+title_keywords = []

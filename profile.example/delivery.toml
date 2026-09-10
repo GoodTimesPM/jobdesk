@@ -1,0 +1,15 @@
+# Where finished files get copied, outside the repo.
+#
+# Optional, and shipped commented out on purpose. With no delivery.toml at
+# all, or with a path that does not exist, nothing is copied and everything
+# still lands in `out/` and `packets/`, which is the right default for someone
+# who just cloned this.
+#
+# Point these at wherever you actually keep job search material, so the
+# finished files land next to the rest of it instead of inside a git repo.
+
+# Tailored resumes from the Resume Engine.
+# resumes = 'D:\Job Search\Tailored Resumes'
+
+# Full application packets: resume, letter, ATS answers, submit checklist.
+# packets = 'D:\Job Search\Applications'
