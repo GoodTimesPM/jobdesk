@@ -1,0 +1,12 @@
+﻿# Assisted Apply master on/off switch (the unattended `auto` run only).
+# First non-blank, non-comment line decides:
+#   ON  (or anything else) -> the scheduled packet build proceeds
+#   OFF / 0 / false / no / disabled / paused -> it exits immediately
+#
+# Checked before any candidate is read, so an OFF run costs nothing.
+# Fails OPEN: if this file is missing or unreadable, packets get built.
+#
+# This is separate from job-radar's SWITCH.txt on purpose -- pausing discovery
+# and pausing packet drafts are different decisions. Typing OFF here does not
+# stop the morning radar sweep, the digest, or the Discord ping.
+ON
