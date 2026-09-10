@@ -1,0 +1,8 @@
+# Job Radar master on/off switch.
+# First non-blank, non-comment line decides:
+#   ON  (or anything else) -> the scheduled run proceeds
+#   OFF / 0 / false / no / disabled / paused -> it exits immediately
+#
+# Checked before any network call, so an OFF run costs nothing.
+# Fails OPEN: if this file is missing or unreadable, the radar runs.
+ON

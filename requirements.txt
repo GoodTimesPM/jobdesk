@@ -1,0 +1,35 @@
+# JobDesk dependencies.
+#
+# Nothing here is a model, an API client, or an account. JobDesk scores,
+# tailors and assembles entirely on your machine; every dependency below is
+# either an HTTP client or a document renderer.
+#
+# Most of the work is standard library: config and content are TOML read with
+# `tomllib`, which ships with Python 3.11+, so the profile files get comments
+# and multi-line strings without a YAML dependency.
+
+# -- radar: discovery ------------------------------------------------------
+requests>=2.31      # every job-board and ATS fetch
+
+# raw_postings ingestion for the Richmond Job Market Dashboard (plan item
+# 11). Pure-Python (no C build step), and the write is best-effort: a
+# missing or broken MySQL never blocks a radar run.
+pymysql>=1.1
+
+# Verify TLS against the OS certificate store. Some employer careers sites
+# (jobs.virginia.gov) serve an incomplete certificate chain that browsers
+# repair via AIA fetching and certifi cannot. Optional -- radar/http.py
+# degrades gracefully if it isn't installed.
+truststore>=0.9
+
+# -- engine: rendering and reading resumes ---------------------------------
+fpdf2>=2.8          # PDF rendering, for the resume and the cover letter
+python-docx>=1.1    # DOCX rendering -- Workday and Taleo parse .docx better
+PyMuPDF>=1.24       # reading a PDF back: the ATS simulator, and the setup
+                    # wizard's resume import
+
+# -- app: the desktop window -----------------------------------------------
+# JobDesk opens as an application rather than a browser tab. Optional: without
+# it, `py -m jobdesk.app --browser` serves the identical page to a tab, and
+# the window falls back to that on its own.
+pywebview>=5.0
