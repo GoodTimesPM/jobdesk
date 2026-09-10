@@ -1,0 +1,458 @@
+/* JobDesk's one stylesheet.
+
+   No framework and no build step, because the page it dresses is served by
+   `http.server` out of a folder. Tokens first, components after; the dark
+   palette redefines the tokens only, so nothing below has to know which
+   theme it is in. */
+
+:root {
+  color-scheme: light dark;
+
+  --ink:        #191b1f;
+  --ink-soft:   #5d6470;
+  --ink-faint:  #8b929e;
+  --ground:     #f7f6f3;
+  --card:       #ffffff;
+  --line:       #dfdcd6;
+  --line-soft:  #ebe8e3;
+  --accent:     #1d5b73;
+  --accent-ink: #ffffff;
+  --good:       #2e7d4f;
+  --warn:       #9a6414;
+  --bad:        #a33a2c;
+  --shadow:     0 1px 2px rgba(20, 22, 26, .06);
+  --radius:     6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink:       #e6e6e4;
+    --ink-soft:  #a3a8b0;
+    --ink-faint: #757b85;
+    --ground:    #16181b;
+    --card:      #1d2024;
+    --line:      #32363c;
+    --line-soft: #26292e;
+    --accent:    #5fb2cf;
+    --accent-ink:#10161a;
+    --good:      #6dc08c;
+    --warn:      #d3a250;
+    --bad:       #e08573;
+    --shadow:    none;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+h2 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
+code { font-family: Consolas, "SF Mono", ui-monospace, monospace; font-size: .92em; }
+button { font: inherit; }
+
+/* -- chrome ------------------------------------------------------------- */
+
+.bar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 0 18px; height: 46px;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+}
+.brand { font-weight: 650; letter-spacing: .2px; }
+.tabs { display: flex; gap: 2px; }
+.tab {
+  background: none; border: 0; padding: 6px 12px; border-radius: var(--radius);
+  color: var(--ink-soft); cursor: pointer;
+}
+.tab:hover { background: var(--line-soft); color: var(--ink); }
+.tab[aria-current="true"] { background: var(--accent); color: var(--accent-ink); }
+.who { margin-left: auto; color: var(--ink-faint); font-size: 12.5px; }
+
+.banner {
+  padding: 9px 18px; background: var(--warn); color: #fff; font-size: 13px;
+}
+.banner.bad { background: var(--bad); }
+
+.view { padding: 18px; max-width: 1500px; }
+
+/* -- jobs table --------------------------------------------------------- */
+
+.controls {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.controls .spacer { flex: 1; }
+input[type="search"], select, input[type="text"], input[type="number"],
+input[type="email"], textarea, input:not([type]) {
+  font: inherit; color: var(--ink); background: var(--card);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 9px;
+}
+input[type="search"] { min-width: 300px; }
+.pick, .check { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); }
+/* Wide enough for three digits and the spinner, narrow enough that the
+   two boxes plus the word between them read as one control. */
+.pick input[type=number] { width: 4.5rem; text-align: right;
+  font-variant-numeric: tabular-nums; }
+.pick .to { color: var(--ink-soft); }
+.counts { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+
+button:not(.tab) {
+  background: var(--accent); color: var(--accent-ink); border: 0;
+  padding: 7px 14px; border-radius: var(--radius); cursor: pointer;
+}
+button.ghost {
+  background: var(--card); color: var(--ink); border: 1px solid var(--line);
+}
+button:disabled { opacity: .45; cursor: default; }
+
+/* Every table is wrapped in one of these. A table is the one block of a
+   page that has a width of its own: seven columns of postings need the room
+   they need, and a 390px screen is not going to grow. The choices are drop
+   columns, stack each row into a card, or let the table keep its width and
+   move sideways inside a box that is the width of the page. The third is the
+   only one that keeps a column of scores readable as a column, which is what
+   this table is for. The border and the shadow live out here so the frame
+   stays put while the rows slide under it. */
+.scroller {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); box-shadow: var(--shadow);
+  /* Without this the sideways scrollbar sits over the last row of the
+     table on the platforms that show a persistent one. */
+  padding-bottom: 1px;
+}
+.grid {
+  width: 100%; border-collapse: collapse; background: var(--card);
+  overflow: hidden;
+}
+.grid th {
+  text-align: left; font-weight: 600; font-size: 12px; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--ink-faint);
+  padding: 8px 10px; border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.grid th.sortable { cursor: pointer; }
+.grid th.sortable:hover { color: var(--ink); }
+.grid th[data-dir]::after { content: " ↑"; }
+.grid th[data-dir="desc"]::after { content: " ↓"; }
+.grid td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.grid tr.row { cursor: pointer; }
+.grid tr.row:hover td { background: var(--line-soft); }
+.grid tr.applied td { color: var(--ink-faint); }
+
+.score { font-variant-numeric: tabular-nums; font-weight: 650; white-space: nowrap; }
+.tier { display: inline-block; width: 18px; text-align: center; border-radius: 3px;
+        font-size: 11px; margin-left: 6px; color: #fff; }
+.tier.A { background: var(--good); }
+.tier.B { background: var(--accent); color: var(--accent-ink); }
+.tier.C { background: var(--warn); }
+.tier.D, .tier.F { background: var(--ink-faint); }
+.moved { font-size: 11.5px; color: var(--ink-faint); margin-left: 6px; }
+.moved.up { color: var(--good); }
+.moved.down { color: var(--bad); }
+.pill { font-size: 11px; border: 1px solid var(--line); border-radius: 99px;
+        padding: 1px 7px; color: var(--ink-soft); margin-left: 6px; }
+
+.detail td { background: var(--ground); }
+.detail .why { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.detail .why span { font-size: 12px; border: 1px solid var(--line);
+                    border-radius: var(--radius); padding: 2px 8px; }
+/* The job description, once jdstruct has found its shape. Headings, lists
+   and paragraphs, because a 6,000-character Workday posting arrives as one
+   line and reading it as one line is not reading it. */
+.detail .jd {
+  max-height: 420px; overflow-y: auto;
+  border-left: 2px solid var(--line); padding-left: 14px; color: var(--ink-soft);
+  max-width: 92ch;
+}
+.jd h4 { margin: 14px 0 4px; font-size: 12.5px; letter-spacing: .4px;
+         text-transform: uppercase; color: var(--ink); }
+.jd h4:first-child { margin-top: 0; }
+.jd p { margin: 0 0 8px; }
+.jd ul { margin: 0 0 10px; padding-left: 20px; }
+.jd li { margin-bottom: 3px; }
+.jd .raw { white-space: pre-wrap; }
+.detail .actions { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.detail a { color: var(--accent); }
+.empty { color: var(--ink-faint); padding: 40px 0; text-align: center; }
+
+/* -- criteria ----------------------------------------------------------- */
+
+.panel-head { max-width: 62ch; margin-bottom: 16px; }
+.note { color: var(--ink-soft); margin: 4px 0; }
+.criteria {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.criteria label {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px;
+}
+.criteria .key { font-family: Consolas, ui-monospace, monospace; font-size: 12px;
+                 color: var(--ink-faint); }
+.criteria textarea { resize: vertical; min-height: 68px; }
+.panel-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+
+/* -- wizard ------------------------------------------------------------- */
+
+.steps { display: flex; gap: 6px; list-style: none; padding: 0; margin: 0 0 18px;
+         flex-wrap: wrap; }
+.steps li { font-size: 12px; color: var(--ink-faint); padding: 4px 10px;
+            border: 1px solid var(--line); border-radius: 99px; }
+.steps li[data-state="done"] { color: var(--good); border-color: var(--good); }
+.steps li[data-state="now"] { color: var(--accent-ink); background: var(--accent);
+                              border-color: var(--accent); }
+
+#wizard { max-width: 720px; }
+.step { border: 1px solid var(--line); background: var(--card);
+        border-radius: var(--radius); padding: 18px; margin: 0; }
+.step .note { max-width: 62ch; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.fields.wide { grid-template-columns: 1fr; }
+.fields label, .full { display: flex; flex-direction: column; gap: 4px;
+                       color: var(--ink-soft); }
+.full { margin-top: 14px; }
+textarea { font: inherit; }
+
+.drop {
+  display: block; margin-top: 14px; padding: 34px; text-align: center;
+  border: 2px dashed var(--line); border-radius: var(--radius);
+  color: var(--ink-soft); cursor: pointer;
+}
+.drop:hover, .drop.over { border-color: var(--accent); color: var(--ink); }
+
+.picks { margin-top: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { background: var(--card); border: 1px solid var(--line); color: var(--ink);
+        border-radius: 99px; padding: 4px 12px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink);
+                             border-color: var(--accent); }
+
+.wizard-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.problems { margin-top: 14px; color: var(--bad); }
+.problems p { margin: 4px 0; }
+.done { max-width: 62ch; margin-top: 18px; }
+.done ul { color: var(--ink-soft); }
+
+/* -- the run badge ------------------------------------------------------ */
+
+.runbadge {
+  margin-left: auto; background: var(--accent); color: var(--accent-ink);
+  border: 0; border-radius: 99px; padding: 4px 12px; font-size: 12.5px;
+  cursor: pointer; max-width: 340px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runbadge + .who { margin-left: 16px; }
+
+/* -- row actions and guards --------------------------------------------- */
+
+.detail .actions { display: flex; gap: 8px; align-items: center;
+                   flex-wrap: wrap; margin-bottom: 10px; }
+.detail .actions .grow { flex: 1; }
+.guards { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.guard { font-size: 12.5px; border-left: 3px solid var(--line);
+         padding: 2px 0 2px 9px; color: var(--ink-soft); }
+.guard[data-level="block"] { border-color: var(--bad); color: var(--bad); }
+.guard[data-level="warn"] { border-color: var(--warn); }
+.guard[data-level="ok"] { border-color: var(--good); }
+
+/* -- applied ------------------------------------------------------------ */
+
+.funnel { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.stat {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 8px 14px; min-width: 92px;
+}
+.stat b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 12px; color: var(--ink-faint); }
+.stat.zero { color: var(--ink-faint); }
+.stat.live { border-color: var(--accent); }
+
+.due { border-left: 3px solid var(--warn); padding: 6px 12px;
+       margin-bottom: 14px; color: var(--warn); }
+
+.grid select { padding: 3px 6px; font-size: 13px; }
+.grid tr.overdue td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.grid td.when { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.badge { font-size: 11px; border-radius: 3px; padding: 1px 7px; color: #fff; }
+.badge.prepared { background: var(--ink-faint); }
+.badge.sent { background: var(--good); }
+.badge.dead { background: var(--bad); }
+
+.fields label.wide { grid-column: 1 / -1; }
+.manual textarea, .full textarea { width: 100%; box-sizing: border-box; resize: vertical;
+                   font-family: inherit; font-size: 13px; }
+.jd-paste { margin: 10px 0; }
+.jd-paste textarea { width: 100%; box-sizing: border-box; resize: vertical;
+                     font-family: inherit; font-size: 13px; }
+
+.report {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px; margin-top: 24px; align-items: start;
+}
+.report .card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px;
+}
+.report h3 { font-size: 14px; margin: 0 0 4px; }
+.report .note { font-size: 12.5px; max-width: 52ch; }
+.report .scroller { margin-top: 10px; }
+.report .empty { margin: 10px 2px 2px; font-size: 12.5px; }
+
+.manual { background: var(--card); border: 1px solid var(--line);
+          border-radius: var(--radius); padding: 16px; margin-bottom: 14px; }
+.manual .fields { grid-template-columns: repeat(3, 1fr); }
+
+/* -- archive and console share a two-column shell ----------------------- */
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px;
+         align-items: start; }
+.split > * { min-width: 0; }
+.side h2 { font-size: 14px; }
+.side .note { font-size: 12.5px; }
+.grid.mini th, .grid.mini td { padding: 5px 8px; font-size: 12.5px; }
+.pager { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.console { grid-template-columns: 260px minmax(0, 1fr); }
+.runs { list-style: none; margin: 0; padding: 0;
+        max-height: 62vh; overflow-y: auto; }
+.runs li {
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
+  padding: 7px 10px; margin-bottom: 6px; cursor: pointer; font-size: 12.5px;
+}
+.runs li[aria-current="true"] { border-color: var(--accent); }
+.runs .label { display: block; color: var(--ink); }
+.runs .meta { color: var(--ink-faint); }
+.runs .meta[data-state="running"] { color: var(--accent); }
+.runs .meta[data-state="failed"] { color: var(--bad); }
+.runs .meta[data-state="done"] { color: var(--good); }
+
+.out {
+  margin: 0; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px;
+  font-family: Consolas, "SF Mono", ui-monospace, monospace; font-size: 12.5px;
+  line-height: 1.55; height: 62vh; overflow: auto; white-space: pre-wrap;
+  color: var(--ink-soft);
+}
+
+/* -- setup extras ------------------------------------------------------- */
+
+.panel { background: var(--card); border: 1px solid var(--line);
+         border-radius: var(--radius); padding: 16px; margin-top: 18px;
+         max-width: 720px; }
+.panel .panel-foot { margin-top: 12px; }
+
+@media (max-width: 1100px) {
+  .split, .console { grid-template-columns: minmax(0, 1fr); }
+  .manual .fields { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tab, .chip, button { transition: background-color .12s ease, color .12s ease; }
+}
+
+/* ── phone access ───────────────────────────────────────────────────────── */
+/* The code and the readings sit side by side because they are read together:
+   the QR is useless without the line that says the firewall is dropping the
+   packet. Below 640px they stack, which is also the width this panel is most
+   likely to be read at -- on the phone it is talking about. */
+.phone-grid {
+  display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  gap: 20px; align-items: start; margin: 14px 0 4px;
+}
+.phone-qr svg { width: 100%; height: auto; max-width: 200px;
+  background: #fff; padding: 8px; border-radius: var(--radius);
+  border: 1px solid var(--line); }
+.phone-qr .note { margin-top: 8px; }
+.phone-facts { display: flex; flex-direction: column; gap: 7px; }
+.fact { display: flex; gap: 10px; align-items: baseline; font-size: 13px;
+  border-left: 3px solid var(--line); padding-left: 9px; }
+.fact.good { border-left-color: var(--good); }
+.fact.warn { border-left-color: var(--warn); }
+.fact.bad  { border-left-color: var(--bad); }
+.fact-k { color: var(--ink-soft); min-width: 11rem; }
+.fact-v { color: var(--ink); }
+.phone-facts code { display: block; margin-top: 5px; word-break: break-all;
+  font-size: 12px; }
+@media (max-width: 640px) {
+  .phone-grid { grid-template-columns: 1fr; }
+  .fact { flex-direction: column; gap: 1px; }
+  .fact-k { min-width: 0; }
+}
+
+/* ── the phone itself ───────────────────────────────────────────────────── */
+/*
+ * Not a second layout. The desktop page is a table of postings and a few
+ * panels, and all of that survives a 390px screen once two things stop
+ * fighting it: the tab bar, which is six items on a row built for one line,
+ * and the controls row, which assumes a search box can be 300px wide.
+ *
+ * The tables keep every column and scroll sideways instead. Hiding the last
+ * four was the first attempt and it was the wrong one: the salary and the
+ * age of a posting are most of the reason to look at a queue at all, and a
+ * column you have to open a row to read is a column you stop reading. A card
+ * per row was the other candidate, and it loses the thing a table is for,
+ * which is scanning down one column with your eye. So the table stays a
+ * table and the page lets it be wider than the phone. See `.scroller`.
+ */
+@media (max-width: 700px) {
+  .bar { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .tabs { order: 3; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tab { white-space: nowrap; padding: 6px 10px; }
+  .who { font-size: 12px; }
+  .view { padding: 12px; }
+
+  input[type="search"] { min-width: 0; width: 100%; }
+  .controls { gap: 8px; }
+  .controls .spacer { display: none; }
+  /* A 44px target is the smallest thing a thumb hits reliably; the desktop
+     sizes are built for a cursor, which is a pixel. */
+  .controls button, .panel-foot button { min-height: 40px; }
+
+  .grid { font-size: 13px; }
+  .grid th, .grid td { padding: 7px 8px; }
+  /* Cells stop wrapping, so each column is as wide as its widest value and
+     the table is wider than the screen, which is the whole point: `.scroller`
+     then has something to scroll. Let the cells wrap instead and the table
+     squeezes itself down to the width of the phone, every column turns into a
+     column of three-line stacks, and nothing scrolls because nothing
+     overflows. Titles get a ceiling so one long posting cannot push the score
+     column half a screen away. */
+  .grid td { white-space: nowrap; max-width: 15rem;
+             overflow: hidden; text-overflow: ellipsis; }
+  /* The expanded row is prose and a job description. It wraps, and it is
+     sized to the screen rather than to the table above it, so opening a row
+     never widens the scroll. */
+  .detail td { white-space: normal; max-width: none; width: 1px; }
+  .detail td > * { max-width: calc(100vw - 48px); }
+
+  .panel { padding: 13px; }
+  .manual .fields, .fields { grid-template-columns: 1fr; }
+}
+
+/* ── the packet, in the page ────────────────────────────────────────────── */
+.packet { margin-top: 12px; }
+.packet h4 { margin: 0 0 2px; }
+.downloads { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
+.downloads .chip { text-decoration: none; }
+.disclose {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  border-top: 1px solid var(--line-soft); padding: 8px 0; color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.disclose:hover { color: var(--accent); }
+.packet .raw { margin: 0 0 10px; }
+
+/* Explorer is on the machine running the server, so this button does nothing
+   for the phone that is looking at the page. Hidden there rather than left to
+   be tapped: a control that silently fails is worse than one that is absent. */
+@media (max-width: 700px) {
+  .desktop-only { display: none; }
+}

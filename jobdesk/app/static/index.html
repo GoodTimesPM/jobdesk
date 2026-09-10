@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobDesk</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="/icon-192.png">
+<!-- Added to a phone's home screen, JobDesk should look and open like the
+     desktop app it is: its own icon, its own window, no browser chrome. The
+     manifest covers Android; the three apple- tags are the same request made
+     the way iOS still asks for it, and its icon is flattened because iOS
+     paints transparency black. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="JobDesk">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#12151c">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">JobDesk</div>
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-view="jobs">Jobs</button>
+    <button class="tab" data-view="applied">Applied</button>
+    <button class="tab" data-view="archive">Archive</button>
+    <button class="tab" data-view="criteria">Criteria</button>
+    <button class="tab" data-view="console">Console</button>
+    <button class="tab" data-view="setup">Setup</button>
+  </nav>
+  <button class="runbadge" id="runbadge" hidden></button>
+  <div class="who" id="who"></div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<!-- == jobs =========================================================== -->
+<main class="view" id="view-jobs" hidden>
+  <section class="controls">
+    <input type="search" id="search" placeholder="Filter by title, company, or location">
+    <label class="pick">Score
+      <input type="number" id="score-min" min="0" max="100" step="1" value="45"
+             inputmode="numeric" aria-label="Lowest score to show">
+      <span class="to">to</span>
+      <input type="number" id="score-max" min="0" max="100" step="1" value="100"
+             inputmode="numeric" aria-label="Highest score to show">
+    </label>
+    <label class="pick">Jump to
+      <select id="tier">
+        <option value="" selected>a range</option>
+        <option value="75,100">A, 75 and up</option>
+        <option value="60,74">B, 60 to 74</option>
+        <option value="45,59">C, 45 to 59</option>
+        <option value="45,100">everything scored</option>
+        <option value="0,100">everything, F-tier included</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="hide-applied" checked> Hide applied</label>
+    <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
+    <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
+    <button id="sweep" class="ghost">Run the radar</button>
+    <button id="new-posting" class="ghost">A posting from elsewhere</button>
+    <button id="rescore" class="ghost">Rescore</button>
+    <div class="spacer"></div>
+    <div class="counts" id="counts"></div>
+  </section>
+
+  <form class="manual" id="posting" hidden>
+    <h2>A posting JobDesk never found</h2>
+    <p class="note">
+      Something off a company&#39;s own careers page, or a link someone sent
+      you. It gets the same packet, the same guard rules and the same row on
+      the Applied tab as anything the radar turned up.
+    </p>
+    <div class="fields">
+      <label>Company<input name="company" required></label>
+      <label>Role<input name="title" required placeholder="exactly as posted"></label>
+      <label class="wide">Link<input name="url" placeholder="optional, but JobDesk will try to read the description from it"></label>
+    </div>
+    <label class="full">The job description
+      <textarea name="jd" rows="8" placeholder="Paste it here. Optional if the link above is readable, but pasting always beats fetching -- some sites hand a robot a login page."></textarea>
+    </label>
+    <div class="panel-foot">
+      <button type="button" id="posting-build">Build the packet</button>
+      <button type="button" id="posting-cancel" class="ghost">Cancel</button>
+      <span class="note" id="posting-status"></span>
+    </div>
+  </form>
+
+  <div class="scroller">
+    <table class="grid" id="jobs">
+      <thead>
+        <tr>
+          <th class="sortable" data-key="score">Score</th>
+          <th class="sortable" data-key="title">Title</th>
+          <th class="sortable" data-key="company">Company</th>
+          <th class="sortable" data-key="location">Location</th>
+          <th class="sortable num" data-key="age_days">Posted</th>
+          <th class="sortable" data-key="salary">Salary</th>
+          <th class="sortable" data-key="source">Source</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="empty" id="jobs-empty" hidden></p>
+</main>
+
+<!-- == applied ======================================================== -->
+<main class="view" id="view-applied" hidden>
+  <div class="panel-head">
+    <h2>Where every application stands</h2>
+    <p class="note">
+      A packet on disk and a submitted application are two different things.
+      JobDesk builds the first one and you do the second, so a row stays
+      <em>prepared</em> until you say otherwise.
+    </p>
+  </div>
+
+  <section class="funnel" id="funnel"></section>
+  <div class="due" id="due" hidden></div>
+
+  <section class="controls">
+    <input type="search" id="app-search" placeholder="Filter by company or role">
+    <label class="pick">Status
+      <select id="app-status"><option value="">all</option></select>
+    </label>
+    <label class="check"><input type="checkbox" id="sent-only"> Actually sent only</label>
+    <button id="log-manual" class="ghost">Log one from elsewhere</button>
+    <div class="spacer"></div>
+    <div class="counts" id="app-counts"></div>
+  </section>
+
+  <form class="manual" id="manual" hidden>
+    <h2>An application you made somewhere else</h2>
+    <p class="note">
+      A job you found on a company's own site and applied to in a browser is
+      still an application. Leaving it out skews the funnel and stops the
+      duplicate check from seeing it.
+    </p>
+    <div class="fields">
+      <label>Company<input name="company" required></label>
+      <label>Role<input name="role" required></label>
+      <label>Link<input name="url" placeholder="optional"></label>
+      <label>Applied on<input name="when" type="date"></label>
+      <label>Where you found it<input name="source" placeholder="company site"></label>
+      <label>Notes<input name="notes"></label>
+    </div>
+    <div class="panel-foot">
+      <button type="button" id="manual-save">Log it</button>
+      <button type="button" id="manual-cancel" class="ghost">Cancel</button>
+      <span class="note" id="manual-status"></span>
+    </div>
+  </form>
+
+  <div class="scroller">
+    <table class="grid" id="apps">
+      <thead>
+        <tr>
+          <th class="sortable" data-key="company">Company</th>
+          <th class="sortable" data-key="role">Role</th>
+          <th class="sortable" data-key="status">Status</th>
+          <th class="sortable" data-key="applied_on">Applied</th>
+          <th class="sortable num" data-key="days_since">Age</th>
+          <th class="sortable" data-key="follow_up_due">Follow up</th>
+          <th class="sortable" data-key="source">Source</th>
+          <th class="sortable num" data-key="score">Score</th>
+        </tr>
+      </thead>
+      <tbody id="app-rows"></tbody>
+    </table>
+  </div>
+  <p class="empty" id="apps-empty" hidden></p>
+
+  <section class="report">
+    <div class="card">
+      <h3>Which sources answer</h3>
+      <p class="note">
+        A response is a human getting back to you at all, not an offer. A
+        source that sends plenty and hears nothing is a source to stop
+        spending mornings on.
+      </p>
+      <div class="scroller">
+        <table class="grid mini">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th class="num">Sent</th>
+              <th class="num">Replied</th>
+              <th class="num">Rate</th>
+            </tr>
+          </thead>
+          <tbody id="by-source"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="by-source-empty" hidden></p>
+    </div>
+    <div class="card">
+      <h3>Where the no&#39;s land</h3>
+      <p class="note">
+        A pile of rejections before a first call points at the resume or the
+        ATS. Rejections after an interview point somewhere else entirely, and
+        the fix is a different one.
+      </p>
+      <div class="scroller">
+        <table class="grid mini">
+          <thead>
+            <tr><th>Stage reached</th><th class="num">Rejections</th></tr>
+          </thead>
+          <tbody id="rejections"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="rejections-empty" hidden></p>
+    </div>
+  </section>
+</main>
+
+<!-- == archive ======================================================== -->
+<main class="view" id="view-archive" hidden>
+  <div class="panel-head">
+    <h2>Everything the radar has ever seen</h2>
+    <p class="note" id="archive-summary"></p>
+    <p class="note">
+      Each of these is a <em>distinct</em> posting, counted once however many
+      times it has been seen. A sweep pulls around nine thousand listings and
+      almost all of them are ones it pulled this morning &mdash; a req stays up
+      for weeks, so the same Coinbase role has been counted here once and read
+      a hundred and forty-six times. The number below the count is what the
+      radar is genuinely finding.
+    </p>
+    <p class="note">
+      The Jobs tab holds a working queue: postings above the score floor, seen
+      in the last 30 days. This is the index behind it. It knows a title, a
+      company, a link and a score, and no more than that, which is all the
+      radar needs to tell a new posting from one it already reported.
+    </p>
+  </div>
+
+  <section class="controls">
+    <input type="search" id="arc-q" placeholder="Search every posting ever seen, by title or company">
+    <label class="pick">Score at least
+      <input type="number" id="arc-score" value="0" min="0" step="5" style="width:80px">
+    </label>
+    <label class="pick">Seen since
+      <input type="date" id="arc-since">
+    </label>
+    <button id="arc-go">Search</button>
+    <div class="spacer"></div>
+    <div class="counts" id="arc-counts"></div>
+  </section>
+
+  <div class="split">
+    <div>
+      <div class="scroller">
+        <table class="grid" id="arc">
+          <thead>
+            <tr>
+              <th>Score</th><th>Title</th><th>Company</th>
+              <th>First seen</th><th>Last seen</th><th class="num">Up for</th>
+            </tr>
+          </thead>
+          <tbody id="arc-rows"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button id="arc-prev" class="ghost">Previous</button>
+        <span class="note" id="arc-page"></span>
+        <button id="arc-next" class="ghost">Next</button>
+      </div>
+    </div>
+    <aside class="side">
+      <h2>Who posts the most</h2>
+      <p class="note">
+        Ranked by how many of their postings ever cleared the floor. An
+        employer that posts constantly and never scores is one to stop
+        watching.
+      </p>
+      <div class="scroller">
+        <table class="grid mini" id="arc-companies">
+          <thead><tr><th>Company</th><th class="num">Scored</th><th class="num">Posts</th></tr></thead>
+          <tbody id="arc-company-rows"></tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- == criteria ======================================================= -->
+<main class="view" id="view-criteria" hidden>
+  <div class="panel-head">
+    <h2>What counts as a good job</h2>
+    <p class="note" id="criteria-file"></p>
+    <p class="note">
+      These are the settings whose effect you can watch. Saving rewrites the
+      file, keeps every comment in it, and immediately rescores the postings
+      already on disk. Nothing is fetched and nothing is submitted.
+    </p>
+  </div>
+  <form id="criteria" class="criteria"></form>
+  <div class="panel-foot">
+    <button id="save-criteria">Save and rescore</button>
+    <span class="note" id="criteria-status"></span>
+  </div>
+</main>
+
+<!-- == console ======================================================== -->
+<main class="view" id="view-console" hidden>
+  <div class="panel-head">
+    <h2>What JobDesk is doing</h2>
+    <p class="note">
+      Every long job runs here, in this process, and prints as it goes. One at
+      a time: two radar sweeps racing each other would write the same files.
+    </p>
+  </div>
+
+  <section class="controls">
+    <button id="run-sweep">Run the radar</button>
+    <button id="run-dry" class="ghost">Dry run</button>
+    <button id="run-check" class="ghost">Check my resume</button>
+    <button id="run-gap" class="ghost">Gap report</button>
+    <div class="spacer"></div>
+    <label class="check"><input type="checkbox" id="follow" checked> Follow output</label>
+  </section>
+
+  <div class="split console">
+    <aside class="side">
+      <h2>Runs</h2>
+      <ul class="runs" id="runs"></ul>
+    </aside>
+    <pre class="out" id="out">Nothing has run yet in this session.</pre>
+  </div>
+</main>
+
+<!-- == setup ========================================================== -->
+<main class="view" id="view-setup" hidden>
+  <ol class="steps" id="steps">
+    <li data-step="0">Resume</li>
+    <li data-step="1">You</li>
+    <li data-step="2">Titles</li>
+    <li data-step="3">Where</li>
+    <li data-step="4">Money</li>
+    <li data-step="5">Companies</li>
+    <li data-step="6">Finish</li>
+  </ol>
+
+  <form id="wizard">
+    <!-- 0 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="0">
+      <h2>Start from your resume</h2>
+      <p class="note">
+        Drop in a PDF, Word document or plain text file. JobDesk reads it to
+        pre-fill the next few screens, then deletes the upload. It never
+        rewrites what your resume says: it fills in your contact details and
+        offers the job titles it found so you can pick from them.
+      </p>
+      <label class="drop" id="drop">
+        <input type="file" id="resume" accept=".pdf,.docx,.txt,.md" hidden>
+        <span>Choose a file, or drop one here</span>
+      </label>
+      <p class="note" id="resume-status"></p>
+      <p class="note">No resume handy? Skip this and type the answers yourself.</p>
+    </fieldset>
+
+    <!-- 1 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="1" hidden>
+      <h2>Who is applying</h2>
+      <p class="note">This is the header on every resume JobDesk builds.</p>
+      <div class="fields">
+        <label>Name<input name="name" required></label>
+        <label>Email<input name="email" type="email" required></label>
+        <label>Phone<input name="phone"></label>
+        <label>LinkedIn<input name="linkedin" placeholder="linkedin.com/in/you"></label>
+        <label>GitHub or portfolio<input name="github"></label>
+      </div>
+    </fieldset>
+
+    <!-- 2 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="2" hidden>
+      <h2>What you are looking for</h2>
+      <p class="note">
+        Tier 1 is what you would take today. Tier 2 is reachable with the right
+        pitch. Tier 3 is a stretch. Titles are matched as text against the
+        posting, so keep them short and general: <em>operations analyst</em>
+        catches "Senior Operations Analyst II" but "Operations Analyst,
+        Payments" catches almost nothing.
+      </p>
+      <div id="title-picks" class="picks" hidden>
+        <p class="note">Found in your resume. Click any that still fit:</p>
+        <div class="chips" id="title-chips"></div>
+      </div>
+      <div class="fields wide">
+        <label>Tier 1 titles<textarea name="titles_1" rows="3" placeholder="one per line"></textarea></label>
+        <label>Tier 2 titles<textarea name="titles_2" rows="2"></textarea></label>
+        <label>Tier 3 titles<textarea name="titles_3" rows="2"></textarea></label>
+      </div>
+    </fieldset>
+
+    <!-- 3 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="3" hidden>
+      <h2>Where you can work</h2>
+      <div class="fields">
+        <label>City<input name="city" required></label>
+        <label>State<input name="state" maxlength="2" placeholder="VA"></label>
+        <label>Work mode
+          <select name="work_mode">
+            <option value="any">Anything within reach</option>
+            <option value="remote">Remote only</option>
+            <option value="hybrid">Hybrid or local</option>
+            <option value="onsite">On site, local</option>
+          </select>
+        </label>
+        <label>Commute radius (miles)<input name="radius_miles" type="number" value="30" min="0"></label>
+      </div>
+      <p class="note">
+        A posting scores as local when its location contains your city or
+        state. You can add suburbs and neighbouring towns later in the
+        Criteria tab, which is where <code>local_terms</code> lives.
+      </p>
+    </fieldset>
+
+    <!-- 4 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="4" hidden>
+      <h2>Money and hard nos</h2>
+      <div class="fields">
+        <label>Walk-away floor<input name="salary_floor" type="number" placeholder="60000"></label>
+        <label>What you are aiming at<input name="salary_target" type="number" placeholder="85000"></label>
+      </div>
+      <label class="full">Dealbreakers, one per line
+        <textarea name="dealbreakers" rows="3" placeholder="night shift&#10;door to door"></textarea>
+      </label>
+      <p class="note">
+        Added to the list JobDesk already screens for: unpaid work,
+        commission-only pay, and multi-level marketing. Most postings do not
+        state a salary, so the floor only counts against the ones that do.
+      </p>
+    </fieldset>
+
+    <!-- 5 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="5" hidden>
+      <h2>Companies worth watching</h2>
+      <p class="note">
+        JobDesk checks these employers' own job boards every morning, where a
+        posting shows up days before it reaches the aggregators. Optional: the
+        general search runs regardless. Name them now and JobDesk will tell you
+        which command finds each one's board.
+      </p>
+      <label class="full">One company per line
+        <textarea name="employers" rows="6" placeholder="Target&#10;Kaiser Permanente&#10;Stripe"></textarea>
+      </label>
+    </fieldset>
+
+    <!-- 6 --------------------------------------------------------------- -->
+    <fieldset class="step" data-step="6" hidden>
+      <h2>Where finished work goes</h2>
+      <p class="note">
+        Optional. Give a folder outside this project and JobDesk copies each
+        finished resume and application packet there, so the files you work
+        from are not buried in a code directory. Leave blank to keep
+        everything inside the project.
+      </p>
+      <div class="fields wide">
+        <label>Resumes<input name="delivery_resumes" placeholder="D:\Job Search\Resumes"></label>
+        <label>Packets<input name="delivery_packets" placeholder="D:\Job Search\Applications"></label>
+      </div>
+      <div class="problems" id="wizard-problems" hidden></div>
+    </fieldset>
+
+    <div class="wizard-foot">
+      <button type="button" id="back" class="ghost">Back</button>
+      <button type="button" id="next">Next</button>
+      <button type="button" id="finish" hidden>Create my profile</button>
+      <span class="note" id="wizard-status"></span>
+    </div>
+  </form>
+
+  <div class="done" id="setup-done" hidden></div>
+
+  <section class="panel" id="phone-panel">
+    <h2>JobDesk on your phone</h2>
+    <p class="note">
+      Turns this window into something your phone can open: a token is written
+      to <code>.env</code>, JobDesk starts answering on this machine&#39;s
+      network address as well as on loopback, and a task brings it back up at
+      every logon &mdash; because the phone is the device you use when you are
+      not at the desk. Scan the code once and the phone stays paired.
+    </p>
+    <div class="phone-grid">
+      <div class="phone-qr" id="phone-qr"></div>
+      <div class="phone-facts" id="phone-facts"></div>
+    </div>
+    <div class="panel-foot">
+      <button id="phone-toggle">Turn phone access on</button>
+      <button id="phone-rotate" class="ghost" hidden>New token</button>
+      <span class="note" id="phone-status"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Put JobDesk on the desktop</h2>
+    <p class="note">
+      Writes a shortcut that opens this window without a console behind it.
+      Safe to click again after moving the project.
+    </p>
+    <div class="panel-foot">
+      <button id="make-shortcut" class="ghost">Create the shortcut</button>
+      <span class="note" id="shortcut-status"></span>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
