@@ -22,10 +22,14 @@
   --bad:        #a33a2c;
   --shadow:     0 1px 2px rgba(20, 22, 26, .06);
   --radius:     6px;
+  --cell-y:     8px;
 }
 
+/* The dark palette, twice. Once for "match this computer", which follows the
+   system setting unless Settings has picked light, and once for an explicit
+   dark choice, which has to win even on a computer set to light. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink:       #e6e6e4;
     --ink-soft:  #a3a8b0;
     --ink-faint: #757b85;
@@ -41,6 +45,32 @@
     --shadow:    none;
   }
 }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink:       #e6e6e4;
+  --ink-soft:  #a3a8b0;
+  --ink-faint: #757b85;
+  --ground:    #16181b;
+  --card:      #1d2024;
+  --line:      #32363c;
+  --line-soft: #26292e;
+  --accent:    #5fb2cf;
+  --accent-ink:#10161a;
+  --good:      #6dc08c;
+  --warn:      #d3a250;
+  --bad:       #e08573;
+  --shadow:    none;
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Text size is a zoom on the whole page rather than a font-size, because
+   every size below is in px and a table that grows its text but not its
+   padding looks broken. */
+:root[data-size="90"]  { zoom: .9; }
+:root[data-size="115"] { zoom: 1.15; }
+:root[data-size="130"] { zoom: 1.3; }
+:root[data-density="compact"] { --cell-y: 4px; }
+:root[data-density="roomy"]   { --cell-y: 13px; }
 
 * { box-sizing: border-box; }
 
@@ -62,9 +92,19 @@ button { font: inherit; }
   padding: 0 18px; height: 46px;
   background: var(--card);
   border-bottom: 1px solid var(--line);
+  position: relative;
 }
 .brand { font-weight: 650; letter-spacing: .2px; }
-.tabs { display: flex; gap: 2px; }
+/* The tabs sit in the middle of the window rather than after the wordmark.
+   Taking them out of the flex flow is what keeps them centred on the window
+   and not on the space left over, which moves every time the run badge or the
+   profile name changes width. Under 900px there is not enough room for that,
+   so they go back in line and the bar wraps. */
+.tabs { display: flex; gap: 2px;
+        position: absolute; left: 50%; transform: translateX(-50%); }
+@media (max-width: 900px) {
+  .tabs { position: static; transform: none; }
+}
 .tab {
   background: none; border: 0; padding: 6px 12px; border-radius: var(--radius);
   color: var(--ink-soft); cursor: pointer;
@@ -78,7 +118,7 @@ button { font: inherit; }
 }
 .banner.bad { background: var(--bad); }
 
-.view { padding: 18px; max-width: 1500px; }
+.view { padding: 18px; max-width: 1500px; margin: 0 auto; }
 
 /* -- jobs table --------------------------------------------------------- */
 
@@ -140,7 +180,7 @@ button:disabled { opacity: .45; cursor: default; }
 .grid th.sortable:hover { color: var(--ink); }
 .grid th[data-dir]::after { content: " ↑"; }
 .grid th[data-dir="desc"]::after { content: " ↓"; }
-.grid td { padding: 8px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.grid td { padding: var(--cell-y) 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 .grid tr.row { cursor: pointer; }
 .grid tr.row:hover td { background: var(--line-soft); }
 .grid tr.applied td { color: var(--ink-faint); }
@@ -157,6 +197,47 @@ button:disabled { opacity: .45; cursor: default; }
 .moved.down { color: var(--bad); }
 .pill { font-size: 11px; border: 1px solid var(--line); border-radius: 99px;
         padding: 1px 7px; color: var(--ink-soft); margin-left: 6px; }
+
+/* -- market context ----------------------------------------------------- */
+
+/* The arrow in the table. Green up is the applicant's side of the median.
+   A group too small to lean on is drawn thinner rather than hidden, because
+   "we looked and there were nine of these" is still worth saying. */
+.grid td.mkt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mktv { font-size: 12.5px; font-weight: 600; }
+.mktv.up { color: var(--good); }
+.mktv.down { color: var(--bad); }
+.mktv.flat { color: var(--ink-faint); font-weight: 500; }
+.mktv.thin { opacity: .55; font-weight: 500; }
+
+/* An estimated band is never the employer's number, so it never gets the
+   colour the employer's number has. */
+.grid td.salary.est { color: var(--accent); font-style: italic; }
+.grid td.salary.est span { border-bottom: 1px dotted currentColor; cursor: help; }
+
+.market { margin: 10px 0 12px; padding: 10px 12px;
+          border: 1px solid var(--line); border-radius: var(--radius);
+          background: var(--card); }
+.market-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.market-head .note { margin: 0; font-size: 12.5px; }
+.factor { display: grid; grid-template-columns: 88px 90px 44px 1fr auto;
+          align-items: center; gap: 10px; font-size: 12.5px;
+          padding: 3px 0; }
+.factor-name { color: var(--ink-soft); }
+.factor-bar { height: 6px; border-radius: 99px; background: var(--line-soft);
+              overflow: hidden; }
+.factor-bar i { display: block; height: 100%; background: var(--accent); }
+.factor-pct { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.factor-why { color: var(--ink-soft); }
+.factor-share { color: var(--ink-faint); font-size: 11.5px; white-space: nowrap; }
+.market-est { margin-top: 8px; padding-top: 8px;
+              border-top: 1px solid var(--line-soft); font-size: 12.5px;
+              color: var(--accent); }
+.market-est .note { color: var(--ink-soft); }
+@media (max-width: 780px) {
+  .factor { grid-template-columns: 1fr; gap: 2px; }
+  .factor-bar { width: 120px; }
+}
 
 .detail td { background: var(--ground); }
 .detail .why { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -185,18 +266,45 @@ button:disabled { opacity: .45; cursor: default; }
 
 .panel-head { max-width: 62ch; margin-bottom: 16px; }
 .note { color: var(--ink-soft); margin: 4px 0; }
-.criteria {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
+.explain {
+  max-width: 78ch; background: var(--card); border: 1px solid var(--line);
+  border-left: 3px solid var(--accent); border-radius: var(--radius);
+  padding: 12px 16px; margin-bottom: 18px;
 }
-.criteria label {
-  display: flex; flex-direction: column; gap: 4px;
+.explain h3 { margin: 0 0 6px; font-size: 14px; }
+.explain p { margin: 6px 0; }
+.explain .tier { margin: 0 3px 0 6px; }
+.points { display: flex; flex-wrap: wrap; gap: 6px; list-style: none;
+          padding: 0; margin: 8px 0; }
+.points li { border: 1px solid var(--line); border-radius: 99px; padding: 2px 10px;
+             font-size: 12.5px; color: var(--ink-soft); }
+.points b { color: var(--ink); font-weight: 600; }
+
+.criteria { display: flex; flex-direction: column; gap: 14px; max-width: 900px; }
+.crit-section {
   background: var(--card); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 10px 12px;
+  border-radius: var(--radius); padding: 14px 16px; margin: 0;
 }
-.criteria .key { font-family: Consolas, ui-monospace, monospace; font-size: 12px;
-                 color: var(--ink-faint); }
-.criteria textarea { resize: vertical; min-height: 68px; }
+.crit-section h3 { margin: 0 0 2px; font-size: 15px; }
+.crit-section > .note { max-width: 70ch; }
+.crit-fields {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 14px; margin-top: 12px;
+}
+.crit-field { display: flex; flex-direction: column; gap: 4px; }
+.crit-field .label { font-weight: 600; }
+.crit-field .help { font-size: 12.5px; color: var(--ink-soft); }
+.crit-field textarea { resize: vertical; min-height: 68px; }
+.crit-field .unit { display: flex; align-items: center; gap: 6px; }
+.crit-field .unit input { width: 9rem; text-align: right;
+                          font-variant-numeric: tabular-nums; }
+.crit-field .unit span { color: var(--ink-soft); }
+.crit-section .outro { font-size: 12.5px; color: var(--ink-faint); margin-top: 10px; }
+.panel-foot.sticky {
+  position: sticky; bottom: 0; background: var(--ground);
+  padding: 10px 0; margin-top: 10px; border-top: 1px solid var(--line);
+}
+button.small { padding: 3px 10px; font-size: 12.5px; margin-left: 6px; }
 .panel-foot { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
 
 /* -- wizard ------------------------------------------------------------- */
@@ -249,6 +357,33 @@ textarea { font: inherit; }
   white-space: nowrap;
 }
 .runbadge + .who { margin-left: 16px; }
+
+/* -- the gear ----------------------------------------------------------- */
+
+button.gear {
+  background: none; color: var(--ink-soft); border: 1px solid transparent;
+  padding: 5px; border-radius: var(--radius); display: flex; margin-left: -8px;
+}
+button.gear:hover { background: var(--line-soft); color: var(--ink); }
+button.gear[aria-current="true"] { color: var(--accent); border-color: var(--line); }
+
+/* -- settings ----------------------------------------------------------- */
+
+#view-settings .panel:first-of-type { margin-top: 0; }
+.settings-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.settings-grid label { display: flex; flex-direction: column; gap: 4px;
+                       color: var(--ink-soft); }
+.settings-checks { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.folders { display: flex; flex-direction: column; gap: 14px; margin-top: 12px; }
+.folder { display: flex; flex-direction: column; gap: 4px; }
+.folder .label { font-weight: 600; }
+.folder .row { display: flex; gap: 8px; align-items: center; }
+.folder .row input { flex: 1; min-width: 0; }
+.folder .help { font-size: 12.5px; color: var(--ink-soft); }
+.path-line code { word-break: break-all; }
 
 /* -- row actions and guards --------------------------------------------- */
 
@@ -407,6 +542,7 @@ textarea { font: inherit; }
   .tabs { order: 3; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .tab { white-space: nowrap; padding: 6px 10px; }
   .who { font-size: 12px; }
+  button.gear { margin-left: 0; }
   .view { padding: 12px; }
 
   input[type="search"] { min-width: 0; width: 100%; }
@@ -417,7 +553,8 @@ textarea { font: inherit; }
   .controls button, .panel-foot button { min-height: 40px; }
 
   .grid { font-size: 13px; }
-  .grid th, .grid td { padding: 7px 8px; }
+  .grid th { padding: 7px 8px; }
+  .grid td { padding: calc(var(--cell-y) - 1px) 8px; }
   /* Cells stop wrapping, so each column is as wide as its widest value and
      the table is wider than the screen, which is the whole point: `.scroller`
      then has something to scroll. Let the cells wrap instead and the table

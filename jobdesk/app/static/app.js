@@ -76,6 +76,7 @@ function show(view) {
   $$(".view").forEach((v) => { v.hidden = v.id !== "view-" + view; });
   $$(".tab").forEach((t) => t.setAttribute("aria-current",
     String(t.dataset.view === view)));
+  $("#gear").setAttribute("aria-current", String(view === "settings"));
   if (view === "jobs" && !state.jobs.length) loadJobs();
   if (view === "applied") loadApplications();
   if (view === "archive" && !archive.loaded) searchArchive(0);
@@ -85,7 +86,7 @@ function show(view) {
   // with the network, the firewall rule can be added in another window, and
   // "has a device arrived" is true only after one has. Re-read on each visit
   // rather than caching, the way the other tabs do with their data.
-  if (view === "setup") loadPhone();
+  if (view === "settings") { loadSettings(); loadPhone(); }
 }
 
 $("#tabs").addEventListener("click", (e) => {
@@ -212,7 +213,45 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 
 /* ============================================================ jobs table */
 
-const state = { jobs: [], sort: "score", dir: "desc", open: null };
+// Newest first until Settings says otherwise. A posting that went up this
+// morning has a few dozen applicants; the same posting next week has a few
+// hundred, and the recruiter reads them in the order they came in. So the
+// thing to see first when the window opens is what is new, and the score
+// breaks the tie between two postings from the same day.
+const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
+                market: {}, marketIndex: null };
+
+// The two orders the "Order" menu and Settings offer, as a column and a
+// direction. Clicking a column header picks a third, and the menu says so.
+const ORDERS = { newest: ["age_days", "asc"], score: ["score", "desc"] };
+
+function setOrder(order) {
+  const [key, dir] = ORDERS[order] || ORDERS.newest;
+  state.sort = key;
+  state.dir = dir;
+  $("#order").value = ORDERS[order] ? order : "newest";
+  markSort();
+}
+
+function markSort() {
+  $$(".grid#jobs th.sortable").forEach((th) => {
+    if (th.dataset.key === state.sort) th.dataset.dir = state.dir;
+    else th.removeAttribute("data-dir");
+  });
+}
+
+// Between two rows that sort level: the better score first, and between two
+// equal scores, the newer posting. Without it a table sorted by source is a
+// different shuffle every time it draws.
+function tiebreak(a, b) {
+  if (state.sort !== "score" && (b.score || 0) !== (a.score || 0)) {
+    return (b.score || 0) - (a.score || 0);
+  }
+  const x = a.age_days, y = b.age_days;
+  const bx = x === null || x === undefined, by = y === null || y === undefined;
+  if (bx !== by) return bx ? 1 : -1;
+  return bx ? 0 : x - y;
+}
 
 async function loadJobs() {
   try {
@@ -220,10 +259,36 @@ async function loadJobs() {
     state.jobs = data.jobs;
     stamp(data);
     draw();
+    loadMarket();
   } catch (err) {
     banner(err.message, true);
   }
 }
+
+// How a posting compares with the rest of its corner of the market, and a
+// salary band for the ones that never printed one. Both come from the same
+// index of past snapshots, which the server folds up in the background, so
+// this is a second request that the table does not wait for. While it is
+// still building, ask again; ten tries is about twenty seconds, and after
+// that the column simply stays empty.
+async function loadMarket(attempt) {
+  const tries = attempt || 0;
+  try {
+    const data = await get("/api/market");
+    state.marketIndex = data.index || null;
+    if (!data.ready) {
+      if (tries < 10) setTimeout(() => loadMarket(tries + 1), 2000);
+      return;
+    }
+    state.market = data.jobs || {};
+    draw();
+  } catch {
+    // A table that works without it stays a table that works without it.
+  }
+}
+
+const marketOf = (job) => (state.market[job.uid] || {}).market || null;
+const estimateOf = (job) => (state.market[job.uid] || {}).salary_estimate || null;
 
 function stamp(data) {
   const ran = data.last_run ? new Date(data.last_run) : null;
@@ -270,30 +335,97 @@ function visible() {
     if (!q) return true;
     return `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q);
   });
-  return sortRows(rows, state.sort, state.dir, (row, key) =>
-    key === "salary" ? (row.salary_min || row.salary_max || 0) : row[key]);
+  return sortRows(rows, state.sort, state.dir, (row, key) => {
+    // Salary sorts on what the cell shows, estimate included, so the column
+    // never appears to be out of order. Market sorts on the arrow's number.
+    if (key === "salary") {
+      const est = estimateOf(row);
+      return row.salary_min || row.salary_max
+        || (est ? est.salary_min : null) || null;
+    }
+    if (key === "market") {
+      const m = marketOf(row);
+      return m ? m.delta : null;
+    }
+    return row[key];
+  }, tiebreak);
 }
 
-function sortRows(rows, key, dir, pick) {
+// A missing value sorts last in both directions. It used to count as -1,
+// which put every posting with no date at the top of "newest first" -- the
+// exact rows the order was meant to push down.
+function sortRows(rows, key, dir, pick, tie) {
   const sign = dir === "desc" ? -1 : 1;
   const value = pick || ((row, k) => row[k]);
+  const blank = (v) => v === null || v === undefined || v === "";
+  const level = (a, b) => (tie ? tie(a, b) : 0);
   return rows.slice().sort((a, b) => {
-    let x = value(a, key), y = value(b, key);
-    if (x === null || x === undefined) x = typeof y === "number" ? -1 : "";
-    if (y === null || y === undefined) y = typeof x === "number" ? -1 : "";
-    if (typeof x === "string" || typeof y === "string") {
-      return sign * String(x).localeCompare(String(y));
+    const x = value(a, key), y = value(b, key);
+    if (blank(x) || blank(y)) {
+      if (blank(x) && blank(y)) return level(a, b);
+      return blank(x) ? 1 : -1;
     }
-    return sign * (x - y);
+    const d = typeof x === "string" || typeof y === "string"
+      ? String(x).localeCompare(String(y))
+      : x - y;
+    return d ? sign * d : level(a, b);
   });
 }
 
+// The arrow. Green up means this posting is friendlier to an applicant than
+// its peers -- better paid, fewer people chasing it, or newly posted. Red
+// down is the opposite. The number is the distance from the middle of the
+// group, so ▲12 reads as "twelve points better than the median posting in
+// this job family and region".
+function marketCell(job) {
+  const m = marketOf(job);
+  const td = el("td", { class: "mkt" });
+  if (!m) return td;
+  const glyph = m.direction === "up" ? "▲" : (m.direction === "down" ? "▼" : "•");
+  const text = m.direction === "flat" ? "even" : glyph + Math.abs(m.delta) + "%";
+  td.append(el("span", {
+    class: "mktv " + m.direction + (m.confident ? "" : " thin"),
+    text: text,
+    title: `Better than ${m.percentile}% of the ${m.peers} postings in `
+           + `this group: ${m.group}.`
+           + (m.confident ? "" : " A small group, so read it loosely."),
+  }));
+  return td;
+}
+
+function salaryCell(job) {
+  const estimate = estimateOf(job);
+  if (!estimate) return cell(money(job), "salary");
+  return el("td", { class: "salary est" }, el("span", {
+    text: money(estimate),
+    title: estimate.basis,
+  }));
+}
+
+// Roughly one posting in twenty quotes an hourly rate in the same fields as
+// the annual ones. Rounded to thousands those all read "$0k-$0k", which is
+// what the table used to show for every hourly job on it. Nothing in this
+// dataset pays under $1,000 a year or over $1,000 an hour, so the boundary
+// does the sorting.
 function money(job) {
-  const fmt = (n) => "$" + Math.round(n / 1000) + "k";
-  if (job.salary_min && job.salary_max) return fmt(job.salary_min) + "-" + fmt(job.salary_max);
-  if (job.salary_min) return fmt(job.salary_min) + "+";
-  if (job.salary_max) return "to " + fmt(job.salary_max);
+  const hourly = (n) => n > 0 && n < 1000;
+  const fmt = (n) => (hourly(n) ? "$" + Math.round(n) + "/hr"
+                                : "$" + Math.round(n / 1000) + "k");
+  const lo = job.salary_min || 0, hi = job.salary_max || 0;
+  if (lo && hi) return lo === hi ? fmt(lo) : fmt(lo) + "-" + fmt(hi);
+  if (lo) return fmt(lo) + "+";
+  if (hi) return "to " + fmt(hi);
   return "—";
+}
+
+// 1st, 2nd, 3rd, 4th... 11th through 13th are the exceptions everyone's first
+// attempt gets wrong, which is why this is a function and not a "th".
+function ordinal(n) {
+  const last = n % 10, pair = n % 100;
+  if (last === 1 && pair !== 11) return n + "st";
+  if (last === 2 && pair !== 12) return n + "nd";
+  if (last === 3 && pair !== 13) return n + "rd";
+  return n + "th";
 }
 
 function age(job) {
@@ -327,7 +459,7 @@ function draw() {
 
     tr.append(score, title, cell(job.company),
       cell(job.remote ? "Remote" : (job.location || "—")),
-      cell(age(job)), cell(money(job)), cell(job.source));
+      cell(age(job)), marketCell(job), salaryCell(job), cell(job.source));
     body.append(tr);
 
     if (state.open === job.uid) body.append(detailRow(job));
@@ -353,7 +485,7 @@ function jdBlocks(blocks) {
 }
 
 function detailRow(job) {
-  const td = el("td", { colSpan: 7 });
+  const td = el("td", { colSpan: 8 });
   const actions = el("div", { class: "actions" });
 
   actions.append(el("a", { href: job.url, target: "_blank",
@@ -400,6 +532,9 @@ function detailRow(job) {
     (job.reasons || []).map((r) => el("span", { text: r })));
   td.append(why);
 
+  const breakdown = marketPanel(job);
+  if (breakdown) td.append(breakdown);
+
   td.append(paste);
 
   const jd = el("div", { class: "jd", text: "Loading the description…" });
@@ -421,6 +556,45 @@ function detailRow(job) {
   const tr = el("tr", { class: "detail" });
   tr.append(td);
   return tr;
+}
+
+// Why the arrow points where it points. Four measures, each one a place in
+// the peer group rather than a raw number, because $95k means one thing for a
+// support role in Richmond and another for an engineer in San Francisco.
+function marketPanel(job) {
+  const m = marketOf(job);
+  const estimate = estimateOf(job);
+  if (!m && !estimate) return null;
+
+  const box = el("div", { class: "market" });
+  if (m) {
+    const head = el("div", { class: "market-head" });
+    head.append(el("span", { class: "mktv " + m.direction,
+      text: (m.direction === "up" ? "▲" : m.direction === "down" ? "▼" : "•")
+            + (m.direction === "flat" ? " even" : Math.abs(m.delta) + "%") }));
+    head.append(el("span", { class: "note",
+      text: `against ${m.peers} postings in ${m.group}`
+            + (m.confident ? "" : ", a small group to judge by") }));
+    box.append(head);
+
+    m.factors.forEach((f) => {
+      const line = el("div", { class: "factor" });
+      line.append(el("span", { class: "factor-name", text: f.label }));
+      const track = el("div", { class: "factor-bar" });
+      track.append(el("i", { style: `width:${Math.max(2, f.percentile)}%` }));
+      line.append(track);
+      line.append(el("span", { class: "factor-pct", text: ordinal(f.percentile) }));
+      line.append(el("span", { class: "factor-why", text: f.detail }));
+      line.append(el("span", { class: "factor-share", text: f.share + "% of the arrow" }));
+      box.append(line);
+    });
+  }
+  if (estimate) {
+    box.append(el("div", { class: "market-est" },
+      el("strong", { text: money(estimate) + " estimated" }),
+      el("span", { class: "note", text: " " + estimate.basis })));
+  }
+  return box;
 }
 
 function buildPacket(job, jd) {
@@ -490,11 +664,33 @@ function sortable(tableSel, onSort) {
   });
 }
 
+// A second click on the same column flips it. A first click picks the
+// direction a person means by that column: newest for Posted, highest for
+// everything numeric, A to Z for text.
+const FIRST_DIR = { age_days: "asc", title: "asc", company: "asc",
+                    location: "asc", source: "asc" };
+
 sortable(".grid#jobs", (key) => {
-  state.dir = state.sort === key && state.dir === "desc" ? "asc" : "desc";
+  if (state.sort === key) state.dir = state.dir === "desc" ? "asc" : "desc";
+  else state.dir = FIRST_DIR[key] || "desc";
   state.sort = key;
+  const named = Object.keys(ORDERS).find((o) =>
+    ORDERS[o][0] === state.sort && ORDERS[o][1] === state.dir);
+  $("#order").value = named || "column";
   draw();
   return state.dir;
+});
+
+$("#order").addEventListener("change", (ev) => {
+  if (ev.target.value === "column") return;
+  setOrder(ev.target.value);
+  draw();
+});
+
+$("#reset-filters").addEventListener("click", () => {
+  $("#search").value = "";
+  applyFilters(prefs);
+  draw();
 });
 
 ["#search", "#score-min", "#score-max", "#hide-applied", "#hide-prepared",
@@ -906,51 +1102,95 @@ $("#arc-next").addEventListener("click", () =>
   searchArchive(archive.offset + archive.limit));
 
 /* ========================================================== criteria tab */
+/*
+ * Drawn from what /api/targeting sends: sections, each with a plain title, a
+ * sentence or two of explanation, and fields that say what they are worth.
+ * The wording lives in `criteria.py` next to the validation, so the page and
+ * the server cannot disagree about what a box means.
+ */
 
-let criteriaTypes = {};
+const UNITS = { money: ["$", "per year"], years: ["", "years"],
+                days: ["", "days"], int: ["", ""] };
+let criteriaFile = "";
+
+function criteriaInput(field) {
+  const { key, kind, value } = field;
+  if (kind === "list" || kind === "weights") {
+    const lines = kind === "list"
+      ? (value || [])
+      : Object.entries(value || {}).map(([skill, pts]) => `${skill}: ${pts}`);
+    return el("textarea", {
+      name: key, value: lines.join("\n"),
+      rows: Math.min(10, Math.max(3, lines.length)),
+      placeholder: kind === "weights" ? "sql: 6\npython: 4" : "one per line",
+      spellcheck: false,
+    });
+  }
+  if (kind === "text") {
+    return el("input", { type: "text", name: key, value: value || "" });
+  }
+  const [before, after] = UNITS[kind] || ["", ""];
+  return el("span", { class: "unit" },
+    before ? el("span", { text: before }) : null,
+    el("input", { type: "number", name: key, min: 0, inputmode: "numeric",
+                  step: kind === "money" ? 1000 : 1,
+                  value: value === null || value === undefined ? "" : value }),
+    after ? el("span", { text: after }) : null);
+}
 
 async function loadCriteria() {
   const form = $("#criteria");
   try {
     const data = await get("/api/targeting");
-    criteriaTypes = data.types;
+    criteriaFile = data.file;
     $("#criteria-file").textContent = data.file;
     form.textContent = "";
-    Object.entries(data.values).forEach(([key, value]) => {
-      const label = el("label", {},
-        el("span", { text: key.replace(/_/g, " ") }),
-        el("span", { class: "key", text: key }));
-
-      let input;
-      if (data.types[key] === "list") {
-        input = el("textarea", {
-          value: (value || []).join("\n"),
-          rows: Math.min(10, Math.max(3, (value || []).length)),
-        });
-      } else {
-        input = el("input", {
-          type: data.types[key] === "int" ? "number" : "text",
-          value: value === null || value === undefined ? "" : value,
-        });
-      }
-      input.name = key;
-      label.append(input);
-      form.append(label);
+    data.sections.forEach((s) => {
+      const box = el("fieldset", { class: "crit-section" },
+        el("h3", { text: s.title }),
+        s.intro ? el("p", { class: "note", text: s.intro }) : null);
+      const grid = el("div", { class: "crit-fields" });
+      s.fields.forEach((f) => {
+        const field = el("label", { class: "crit-field" },
+          el("span", { class: "label", text: f.label }),
+          el("span", { class: "help", text: f.help }),
+          criteriaInput(f));
+        field.dataset.kind = f.kind;
+        grid.append(field);
+      });
+      box.append(grid);
+      if (s.outro) box.append(el("p", { class: "outro", text: s.outro }));
+      form.append(box);
     });
+    $("#save-criteria").disabled = false;
   } catch (err) {
     form.textContent = "";
-    $("#criteria-file").textContent = err.message;
+    form.append(el("p", { class: "note", text: err.message }));
+    $("#save-criteria").disabled = true;
   }
+}
+
+// "sql: 6" -> {sql: 6}. A line with no number sends a blank, and the server
+// fills in that group's default, so the page does not need to know it.
+function parseWeights(text) {
+  const out = {};
+  text.split("\n").forEach((line) => {
+    const m = line.trim().match(/^(.*?)(?:\s*[:=]\s*(-?\d+))?\s*$/);
+    if (!m || !m[1].trim()) return;
+    out[m[1].trim()] = m[2] === undefined ? "" : Number(m[2]);
+  });
+  return out;
 }
 
 $("#save-criteria").addEventListener("click", async () => {
   const changes = {};
-  Array.from($("#criteria").elements).forEach((input) => {
-    if (!input.name) return;
-    if (criteriaTypes[input.name] === "list") {
+  $$("#criteria .crit-field").forEach((field) => {
+    const input = field.querySelector("[name]");
+    const kind = field.dataset.kind;
+    if (kind === "list") {
       changes[input.name] = input.value.split("\n").map((s) => s.trim()).filter(Boolean);
-    } else if (criteriaTypes[input.name] === "int") {
-      changes[input.name] = input.value === "" ? 0 : Number(input.value);
+    } else if (kind === "weights") {
+      changes[input.name] = parseWeights(input.value);
     } else {
       changes[input.name] = input.value;
     }
@@ -963,11 +1203,20 @@ $("#save-criteria").addEventListener("click", async () => {
     stamp(data);
     draw();
     status.textContent = `Saved. ${plural(data.moved, "posting")} changed score.`;
+    banner(`Criteria saved. ${plural(data.moved, "posting")} changed score; `
+         + "the arrows next to each score show which way.");
     show("jobs");
   } catch (err) {
     status.textContent = err.message;
   }
 });
+
+$("#open-criteria-file").addEventListener("click", () => openPath(criteriaFile));
+
+async function openPath(path) {
+  if (!path) return;
+  try { await post("/api/open", { path }); } catch (err) { banner(err.message, true); }
+}
 
 /* ============================================================= setup tab */
 
@@ -1134,7 +1383,7 @@ function finished(done) {
       text: f + (done.carried.includes(f)
         ? " — copied from the example, yours to edit" : "") }))),
     el("p", { text: done.next }));
-  boot();
+  boot("setup");
 }
 
 /* ================================================================= phone */
@@ -1258,9 +1507,157 @@ $("#make-shortcut").addEventListener("click", async () => {
   } catch (err) { status.textContent = err.message; }
 });
 
+/* ============================================================== settings */
+/*
+ * Every control carries `data-pref="<key>"` and saves itself on change, one
+ * key at a time. The server keeps the file (data/settings.json) so the phone
+ * and the desktop window share it; the three appearance keys are also left in
+ * localStorage for theme.js, which applies them before the first paint.
+ */
+
+const LOOK_KEYS = ["theme", "text_size", "density"];
+let prefs = {
+  jobs_sort: "newest", score_min: 45, score_max: 100, hide_applied: true,
+  hide_prepared: false, remote_only: false, start_tab: "jobs",
+  theme: "system", text_size: 100, density: "normal",
+};
+let prefDefaults = Object.assign({}, prefs);   // replaced by the server's copy
+
+function applyLook(p) {
+  const root = document.documentElement;
+  if (p.theme === "light" || p.theme === "dark") root.dataset.theme = p.theme;
+  else delete root.dataset.theme;
+  root.dataset.size = String(p.text_size);
+  root.dataset.density = p.density;
+  const look = {};
+  LOOK_KEYS.forEach((k) => { look[k] = p[k]; });
+  try { localStorage.setItem("jobdesk.look", JSON.stringify(look)); } catch { /* private mode */ }
+  // The phone's status bar takes this colour, so it follows the theme too.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const card = getComputedStyle(root).getPropertyValue("--card").trim();
+  if (meta && card) meta.content = card;
+}
+
+function applyFilters(p) {
+  $("#score-min").value = p.score_min;
+  $("#score-max").value = p.score_max;
+  $("#hide-applied").checked = !!p.hide_applied;
+  $("#hide-prepared").checked = !!p.hide_prepared;
+  $("#remote-only").checked = !!p.remote_only;
+  setOrder(p.jobs_sort);
+}
+
+function drawPrefs() {
+  $$("[data-pref]").forEach((input) => {
+    const value = prefs[input.dataset.pref];
+    if (input.type === "checkbox") input.checked = !!value;
+    else input.value = String(value);
+  });
+}
+
+let savedTimer = null;
+function saved(text) {
+  const note = $("#settings-status");
+  note.textContent = text;
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => { note.textContent = ""; }, 2500);
+}
+
+$$("[data-pref]").forEach((input) => input.addEventListener("change", async () => {
+  const key = input.dataset.pref;
+  let value = input.type === "checkbox" ? input.checked : input.value;
+  if (input.type === "number" || key === "text_size") value = Number(value);
+  try {
+    const data = await post("/api/settings", { settings: { [key]: value } });
+    prefs = data.settings;
+    drawPrefs();
+    if (LOOK_KEYS.includes(key)) applyLook(prefs);
+    else if (key !== "start_tab") { applyFilters(prefs); draw(); }
+    saved("Saved.");
+  } catch (err) {
+    drawPrefs();
+    saved(err.message);
+  }
+}));
+
+let folderInfo = null;
+
+function drawFolders(f) {
+  folderInfo = f;
+  const box = $("#folders");
+  box.textContent = "";
+  const row = (key, label, builtin, example) => el("div", { class: "folder" },
+    el("span", { class: "label", text: label }),
+    el("div", { class: "row" },
+      el("input", { type: "text", name: key, value: f[key] || "",
+                    placeholder: `No copy. For example ${example}`,
+                    disabled: !f.editable, spellcheck: false }),
+      el("button", { class: "ghost desktop-only", type: "button", text: "Open",
+                     on: { click: () => openPath(f[key] || builtin) } })),
+    el("span", { class: "help",
+      text: `JobDesk's own copy is always in ${builtin}.`
+        + (f[key] ? " A second copy goes to the folder above." : "") }));
+  box.append(
+    row("packets", "Application packets", f.packets_builtin, "D:\\Job Search\\Applications"),
+    row("resumes", "Tailored resumes", f.resumes_builtin, "D:\\Job Search\\Resumes"));
+  $("#save-folders").disabled = !f.editable;
+  $("#folders-status").textContent = f.editable ? ""
+    : "Finish setup first. Until then JobDesk is using the example profile.";
+  $("#profile-dir").textContent = f.profile_dir || "No profile yet.";
+  $("#open-profile").disabled = !f.profile_dir;
+}
+
+async function loadSettings() {
+  try {
+    const data = await get("/api/settings");
+    prefs = data.settings;
+    prefDefaults = data.defaults;
+    drawPrefs();
+    drawFolders(data.folders);
+  } catch (err) {
+    saved(err.message);
+  }
+}
+
+$("#save-folders").addEventListener("click", async () => {
+  const status = $("#folders-status");
+  const body = {};
+  $$("#folders input[name]").forEach((input) => { body[input.name] = input.value; });
+  status.textContent = "Saving…";
+  try {
+    const data = await post("/api/settings/folders", body);
+    drawFolders(data.folders);
+    status.textContent = "Saved. The next packet or resume is copied there.";
+  } catch (err) {
+    status.textContent = err.message;
+  }
+});
+
+$("#open-profile").addEventListener("click", () =>
+  openPath(folderInfo && folderInfo.profile_dir));
+
+$("#reset-settings").addEventListener("click", async () => {
+  if (!confirm("Put every setting on this page back to its default?")) return;
+  try {
+    const data = await post("/api/settings", { settings: prefDefaults });
+    prefs = data.settings;
+    drawPrefs();
+    applyLook(prefs);
+    applyFilters(prefs);
+    draw();
+    $("#reset-status").textContent = "Done.";
+  } catch (err) {
+    $("#reset-status").textContent = err.message;
+  }
+});
+
+$("#gear").addEventListener("click", () => show("settings"));
+
 /* ================================================================== boot */
 
-async function boot() {
+// `stay` keeps the page where it is, for the end of the wizard: its "your
+// profile is written" message is on the Setup screen and should be read.
+async function boot(stay) {
   try {
     const s = await get("/api/status");
     $("#who").textContent = s.name
@@ -1274,7 +1671,14 @@ async function boot() {
     } else {
       banner("");
     }
-    show(s.configured ? "jobs" : "setup");
+    if (s.settings) prefs = s.settings;
+    applyLook(prefs);
+    applyFilters(prefs);
+    // Setup is a one-time wizard. Once it has written a profile its tab only
+    // invites someone to overwrite that profile, so it goes; the phone and
+    // shortcut panels that used to sit under it are in Settings now.
+    $('.tab[data-view="setup"]').hidden = s.configured;
+    show(stay || (s.configured ? prefs.start_tab : "setup"));
     drawSteps();
   } catch (err) {
     banner(err.message, true);

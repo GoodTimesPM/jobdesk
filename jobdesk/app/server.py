@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from . import access, api, net
+from . import access, api, market, net
 
 STATIC = Path(__file__).resolve().parent / "static"
 HOST = "127.0.0.1"
@@ -319,6 +319,9 @@ def start_background(port: int = DEFAULT_PORT, host=None):
 def serve(port: int = DEFAULT_PORT, open_browser: bool = True, host=None) -> None:
     httpd, url, kind = _bind(host, port)
     bound = httpd.server_address
+    # Fold the snapshot history into peer-group aggregates while the browser
+    # is still starting. Nothing waits on it; the table works without it.
+    market.start()
     print(f"JobDesk is at {url}")
     if kind != "loopback":
         print(f"On the network at http://{bound[0]}:{bound[1]}/ ({kind}) -- "

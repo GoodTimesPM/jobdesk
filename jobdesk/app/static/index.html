@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JobDesk</title>
+<!-- Before the stylesheet, so a dark theme is in place on the first paint
+     instead of flashing white while app.js fetches the settings. -->
+<script src="/theme.js"></script>
 <link rel="stylesheet" href="/app.css">
 <link rel="icon" href="/icon-192.png">
 <!-- Added to a phone's home screen, JobDesk should look and open like the
@@ -33,6 +36,13 @@
   </nav>
   <button class="runbadge" id="runbadge" hidden></button>
   <div class="who" id="who"></div>
+  <button class="gear" id="gear" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none"
+         stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+    </svg>
+  </button>
 </header>
 
 <div class="banner" id="banner" hidden></div>
@@ -61,6 +71,14 @@
     <label class="check"><input type="checkbox" id="hide-applied" checked> Hide applied</label>
     <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
     <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
+    <label class="pick">Order
+      <select id="order">
+        <option value="newest">newest first</option>
+        <option value="score">best score first</option>
+        <option value="column" hidden>by column</option>
+      </select>
+    </label>
+    <button id="reset-filters" class="ghost" title="Put the filters back to what Settings says">Reset filters</button>
     <button id="sweep" class="ghost">Run the radar</button>
     <button id="new-posting" class="ghost">A posting from elsewhere</button>
     <button id="rescore" class="ghost">Rescore</button>
@@ -99,6 +117,7 @@
           <th class="sortable" data-key="company">Company</th>
           <th class="sortable" data-key="location">Location</th>
           <th class="sortable num" data-key="age_days">Posted</th>
+          <th class="sortable num" data-key="market" title="How this posting compares with others in the same job family and region">Market</th>
           <th class="sortable" data-key="salary">Salary</th>
           <th class="sortable" data-key="source">Source</th>
         </tr>
@@ -292,18 +311,52 @@
 <main class="view" id="view-criteria" hidden>
   <div class="panel-head">
     <h2>What counts as a good job</h2>
-    <p class="note" id="criteria-file"></p>
     <p class="note">
-      These are the settings whose effect you can watch. Saving rewrites the
-      file, keeps every comment in it, and immediately rescores the postings
-      already on disk. Nothing is fetched and nothing is submitted.
+      This page is how JobDesk decides which postings to put at the top. Tell
+      it what you want here, press Save, and every posting it already has is
+      scored again straight away, so you can see what changed.
     </p>
   </div>
+
+  <section class="explain">
+    <h3>How a score works</h3>
+    <p>
+      Every posting gets a score out of 100. JobDesk adds up points for each
+      thing below that the posting matches, and takes points off for things
+      you do not want.
+    </p>
+    <ul class="points">
+      <li><b>Title</b> up to 35</li>
+      <li><b>Location</b> up to 25</li>
+      <li><b>Skills</b> up to 25</li>
+      <li><b>Experience</b> up to 15</li>
+      <li><b>How new it is</b> up to 10</li>
+      <li><b>Pay</b> up to 11, when listed</li>
+    </ul>
+    <p>
+      The letter next to each score is a shorthand for it:
+      <span class="tier A">A</span> 75 and up is worth applying to today,
+      <span class="tier B">B</span> 60 to 74 is a good fit,
+      <span class="tier C">C</span> 45 to 59 is worth a look.
+      Below 45 is hidden unless you ask for it.
+    </p>
+    <p class="note">
+      Not sure why a job scored the way it did? Click it on the Jobs tab. The
+      reasons are listed line by line, with the points each one was worth.
+    </p>
+  </section>
+
   <form id="criteria" class="criteria"></form>
-  <div class="panel-foot">
+  <div class="panel-foot sticky">
     <button id="save-criteria">Save and rescore</button>
     <span class="note" id="criteria-status"></span>
   </div>
+  <p class="note">
+    This page covers the settings people change. Everything else, like which
+    companies to watch and fine-tuning for unusual job titles, is in
+    <code id="criteria-file"></code>, with an explanation above each line.
+    <button id="open-criteria-file" class="ghost small" type="button">Open its folder</button>
+  </p>
 </main>
 
 <!-- == console ======================================================== -->
@@ -477,6 +530,112 @@
   </form>
 
   <div class="done" id="setup-done" hidden></div>
+</main>
+
+<!-- == settings ======================================================= -->
+<main class="view" id="view-settings" hidden>
+  <div class="panel-head">
+    <h2>Settings</h2>
+    <p class="note">
+      Changes save as you make them. They are kept on this computer, so a
+      phone paired with JobDesk uses the same ones.
+    </p>
+    <p class="note saved-note" id="settings-status" aria-live="polite"></p>
+  </div>
+
+  <section class="panel" id="set-jobs">
+    <h2>What the Jobs tab starts with</h2>
+    <p class="note">
+      What you see every time JobDesk opens. The filters on the Jobs tab can
+      still be changed for the moment, and <em>Reset filters</em> brings
+      them back to these.
+    </p>
+    <div class="settings-grid">
+      <label>Order
+        <select data-pref="jobs_sort">
+          <option value="newest">Newest postings first</option>
+          <option value="score">Best score first</option>
+        </select>
+      </label>
+      <label>Lowest score shown
+        <input type="number" data-pref="score_min" min="0" max="100" inputmode="numeric">
+      </label>
+      <label>Highest score shown
+        <input type="number" data-pref="score_max" min="0" max="100" inputmode="numeric">
+      </label>
+      <label>Open JobDesk on
+        <select data-pref="start_tab">
+          <option value="jobs">Jobs</option>
+          <option value="applied">Applied</option>
+          <option value="archive">Archive</option>
+          <option value="criteria">Criteria</option>
+          <option value="console">Console</option>
+        </select>
+      </label>
+    </div>
+    <div class="settings-checks">
+      <label class="check"><input type="checkbox" data-pref="hide_applied"> Hide jobs I have applied to</label>
+      <label class="check"><input type="checkbox" data-pref="hide_prepared"> Hide jobs I already built a packet for</label>
+      <label class="check"><input type="checkbox" data-pref="remote_only"> Show remote jobs only</label>
+    </div>
+  </section>
+
+  <section class="panel" id="set-look">
+    <h2>Appearance</h2>
+    <div class="settings-grid">
+      <label>Theme
+        <select data-pref="theme">
+          <option value="system">Match this computer</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label>Text size
+        <select data-pref="text_size">
+          <option value="90">Small</option>
+          <option value="100">Normal</option>
+          <option value="115">Large</option>
+          <option value="130">Largest</option>
+        </select>
+      </label>
+      <label>Table rows
+        <select data-pref="density">
+          <option value="compact">Compact, more rows on screen</option>
+          <option value="normal">Normal</option>
+          <option value="roomy">Roomy, easier to tap</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
+  <section class="panel" id="set-files">
+    <h2>Where your files go</h2>
+    <p class="note">
+      JobDesk always builds resumes and application packets inside its own
+      folder first. It can also copy each one to a folder of your choice,
+      like the one where you keep the rest of your job search. Leave a box
+      empty to skip the copy.
+    </p>
+    <div class="folders" id="folders"></div>
+    <div class="panel-foot">
+      <button id="save-folders">Save folders</button>
+      <span class="note" id="folders-status"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="set-profile">
+    <h2>Your profile</h2>
+    <p class="note">
+      Your details, work history and everything the Criteria tab edits live in
+      a folder of plain text files. The Criteria tab covers what most people
+      change. Open the folder to change anything else.
+    </p>
+    <p class="path-line"><code id="profile-dir"></code></p>
+    <div class="panel-foot">
+      <button id="open-profile" class="ghost">Open the folder</button>
+      <span class="note" id="profile-status"></span>
+    </div>
+  </section>
 
   <section class="panel" id="phone-panel">
     <h2>JobDesk on your phone</h2>
@@ -507,6 +666,18 @@
     <div class="panel-foot">
       <button id="make-shortcut" class="ghost">Create the shortcut</button>
       <span class="note" id="shortcut-status"></span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Start over</h2>
+    <p class="note">
+      Put every setting on this page back to how it was when JobDesk was
+      installed. Your profile, jobs and applications are not touched.
+    </p>
+    <div class="panel-foot">
+      <button id="reset-settings" class="ghost">Reset settings</button>
+      <span class="note" id="reset-status"></span>
     </div>
   </section>
 </main>
