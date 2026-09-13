@@ -40,12 +40,13 @@ your packets stay where they are, and the script prints the paths.
 
 | Tab | |
 |---|---|
-| **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Filter by score range, search, sort any column. Open a row for the full posting, and build a packet from it. |
+| **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Newest first by default. Filter by score range, search, sort any column. Open a row for the full posting, and build a packet from it. |
 | **Applied** | The submission log. What you sent, when, what came back, and which sources actually reply. |
 | **Archive** | Every posting ever seen, including the ones that scored too low to surface. Which employers post constantly and never score is a useful thing to know. |
 | **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. |
 | **Console** | Whatever is running, streaming. Discovery runs, engine builds, packet assembly. |
 | **Setup** | The first-run wizard, the phone pairing, the Desktop shortcut, the logon task. |
+| **Settings** | The gear at the top right. What the Jobs tab opens with, theme, text size, row spacing, and where packets get written. |
 
 ## On your phone
 
@@ -60,6 +61,37 @@ Anything that is not this machine needs the token. There is no password, no
 account and no cloud in the path -- the phone is talking to the computer on
 your desk. If a device turns up that should not have, `Rotate` in the same
 panel invalidates every paired device at once.
+
+## How a posting compares
+
+The Market column holds a green or red arrow and a percentage. It answers one
+question: out of everything else hiring for this kind of role in this kind of
+place, where does this one sit?
+
+The peer group is the posting's job family and region, and the comparison uses
+four measures, all read from the snapshot history already on your disk:
+
+| | weight | |
+|---|---|---|
+| Pay | 40% | the midpoint against the group's published bands |
+| Competition | 25% | how many other postings share the title, across how many employers |
+| Exposure | 15% | how many boards carry it |
+| Freshness | 20% | days up against the group's typical |
+
+Three of the four are inverted so an up arrow always means better for you.
+Exposure drops out, and the other weights grow to fill the gap, when every
+posting in the group sits on the same number of boards, which is most groups.
+
+Open the row and each measure is broken out with its percentile and a sentence
+saying what the number came from. Under eight comparable postings there is no
+arrow at all, and between eight and twenty-five it is drawn faintly, because a
+percentile over eleven postings is a number pretending to be a measurement.
+
+**Estimated salary bands.** Most postings publish no salary. A posting without
+one gets the medians of its peer group's published bands, shown in a different
+colour and flagged as an estimate everywhere it travels. It is the local
+snapshot corpus doing the work, not a third-party salary service, so no
+posting you are looking at leaves your machine.
 
 ## Your profile
 
@@ -183,6 +215,10 @@ employer ATS endpoints that are meant to be read.
 
 And it does not submit. Every path in this program ends at a folder and a
 checklist.
+
+## Version
+
+0.2.0. `CHANGELOG.md` has what changed and why.
 
 ## License
 
