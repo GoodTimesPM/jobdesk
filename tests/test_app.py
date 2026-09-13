@@ -38,8 +38,9 @@ sys.path.insert(0, str(ROOT))
 os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
 
 from jobdesk import paths
-from jobdesk.app import (access, actions, api, archive, jdstruct, net, phone,
-                         resume_import, runner, server, setup, tomlpatch)
+from jobdesk.app import (access, actions, api, archive, jdstruct, market, net,
+                         phone, resume_import, runner, server, setup,
+                         tomlpatch)
 
 PASS, FAIL = 0, 0
 
@@ -682,12 +683,316 @@ def test_no_writes() -> None:
                   for word in ("apply", "submit", "send")), str(routes))
 
 
+def test_patch_table() -> None:
+    section("skill tables are rewritten in place")
+    source = (ROOT / "profile.example" / "targeting.toml").read_text(encoding="utf-8")
+    before = tomllib.loads(source)
+    patched = tomlpatch.patch_table(source, "core_skills", {"sql": 7, "power bi": 3})
+    after = tomllib.loads(patched)
+    check("the table holds exactly what was sent",
+          after["core_skills"] == {"sql": 7, "power bi": 3}, str(after["core_skills"]))
+    check("the other skill table is untouched",
+          after.get("supporting_skills") == before.get("supporting_skills"))
+    check("top-level settings are untouched",
+          after["tier_1_titles"] == before["tier_1_titles"])
+    check("no comment is lost", comments(patched) == comments(source),
+          f"{comments(source)} -> {comments(patched)}")
+    emptied = tomllib.loads(tomlpatch.patch_table(source, "core_skills", {}))
+    check("a table can be emptied", emptied["core_skills"] == {})
+    crlf = source.replace("\n", "\r\n")
+    check("CRLF files stay CRLF",
+          "\r\n" in tomlpatch.patch_table(crlf, "core_skills", {"sql": 1})
+          and "\n" not in tomlpatch.patch_table(crlf, "core_skills", {"sql": 1})
+          .replace("\r\n", ""))
+    try:
+        tomlpatch.patch_table(source, "no_such_table", {"a": 1})
+        check("a missing table is an error", False, "it patched nothing silently")
+    except tomlpatch.PatchError:
+        check("a missing table is an error", True)
+
+
+def test_criteria() -> None:
+    section("the criteria panel")
+    from jobdesk.app import criteria
+    from jobdesk.radar import score
+
+    values = tomllib.loads(
+        (ROOT / "profile.example" / "targeting.toml").read_text(encoding="utf-8"))
+    sections = criteria.form(values)
+    keys = [f["key"] for s in sections for f in s["fields"]]
+    check("every field has a label and help",
+          all(f["label"] and f["help"] for s in sections for f in s["fields"]))
+    check("no key appears twice", len(keys) == len(set(keys)))
+    check("every key is a real setting in the example",
+          all(k in values for k in keys), str([k for k in keys if k not in values]))
+    skills = next(f for s in sections for f in s["fields"] if f["key"] == "core_skills")
+    check("skill tables arrive as skill -> points", isinstance(skills["value"], dict)
+          and all(isinstance(v, int) for v in skills["value"].values()))
+
+    top, tables = criteria.clean({
+        "tier_1_titles": ["Data Analyst", "data  analyst", ""],
+        "salary_floor": "$55,000", "salary_target": "70000",
+        "core_skills": {"SQL": 6, "Python": ""},
+    })
+    check("titles are lowercased and deduped", top["tier_1_titles"] == ["data analyst"],
+          str(top["tier_1_titles"]))
+    check("money accepts $ and commas", top["salary_floor"] == 55000)
+    check("a skill with no number gets the default",
+          tables["core_skills"] == {"sql": 6, "python": criteria.DEFAULT_WEIGHT["core_skills"]},
+          str(tables))
+
+    def refused(changes, word):
+        try:
+            criteria.clean(changes)
+            return False
+        except criteria.Invalid as exc:
+            return word in str(exc).lower()
+
+    check("new cannot outlast old",
+          refused({"fresh_days": 30, "stale_days": 10}, "brand new"))
+    check("target pay cannot be below the floor",
+          refused({"salary_floor": 90000, "salary_target": 60000}, "aiming"))
+    check("a skill worth more than the whole group is refused",
+          refused({"core_skills": {"sql": 40}}, "between 0 and 25"))
+    check("a key the panel does not own is refused",
+          refused({"equivalency_ceiling": 3}, "targeting.toml"))
+    check("a number that is not one is refused",
+          refused({"years_comfortable": "lots"}, "whole number"))
+
+    # The page quotes point values. If score.py changes one, these fail and
+    # the sentence in criteria.py or index.html has to change with it.
+    src = (ROOT / "jobdesk" / "radar" / "score.py").read_text(encoding="utf-8")
+    help_text = " ".join(f[3] for s in criteria.SECTIONS for f in s["fields"])
+    for points, needle in ((35, 'listed_why = 35, f"tier-1'),
+                           (24, 'listed_why = 24, f"tier-2'),
+                           (14, 'listed_why = 14, f"tier-3'),
+                           (25, "points += 25"), (22, "points += 22"),
+                           (10, "return -10 + points"), (8, "return 8 + points")):
+        check(f"{points} points is what score.py gives",
+              needle in src and f"{points} " in help_text, needle)
+    check("the tier lines on the page match tier_for",
+          (score.tier_for(75), score.tier_for(74), score.tier_for(60),
+           score.tier_for(59), score.tier_for(45), score.tier_for(44))
+          == ("A", "B", "B", "C", "C", "D"))
+    page = (ROOT / "jobdesk" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    check("the page's explainer says the same thing",
+          "75 and up" in page and "60 to 74" in page and "45 to 59" in page)
+
+
+def test_settings() -> None:
+    section("settings")
+    from jobdesk.app import prefs
+
+    original = prefs.FILE
+    tmp = Path(tempfile.mkdtemp())
+    prefs.FILE = tmp / "settings.json"
+    try:
+        check("no file means the defaults", prefs.load() == prefs.DEFAULTS)
+        check("newest first is the default order", prefs.DEFAULTS["jobs_sort"] == "newest")
+        saved = prefs.save({"theme": "dark", "score_min": "60", "text_size": 115})
+        check("a change is saved and read back",
+              prefs.load()["theme"] == "dark" and saved["score_min"] == 60
+              and saved["text_size"] == 115)
+        check("unchanged keys keep their defaults", saved["density"] == "normal")
+        for bad in ({"theme": "neon"}, {"score_min": 150}, {"nope": 1},
+                    {"hide_applied": "yes"}, {"text_size": 300}):
+            try:
+                prefs.save(bad)
+                check(f"{bad} is refused", False)
+            except prefs.Invalid:
+                check(f"{bad} is refused", True)
+        flipped = prefs.save({"score_min": 90, "score_max": 50})
+        check("a backwards range is swapped, not refused",
+              (flipped["score_min"], flipped["score_max"]) == (50, 90))
+        prefs.FILE.write_text('{"theme": "neon", "density": "roomy", "junk": 1',
+                              encoding="utf-8")
+        check("a broken file falls back to the defaults", prefs.load() == prefs.DEFAULTS)
+        prefs.FILE.write_text('{"theme": "neon", "density": "roomy", "junk": 1}',
+                              encoding="utf-8")
+        loaded = prefs.load()
+        check("a bad value costs that one setting",
+              loaded["theme"] == "system" and loaded["density"] == "roomy"
+              and "junk" not in loaded)
+
+        folder = prefs.check_folder(str(tmp / "copies"))
+        check("a new folder under an existing one is created", Path(folder).is_dir())
+        check("blank means no copy", prefs.check_folder("  ") == "")
+        for bad, word in (("relative\\path", "full path"),
+                          (str(tmp / "missing" / "deeper"), "does not exist")):
+            try:
+                prefs.check_folder(bad)
+                check(f"{word}: refused", False)
+            except prefs.Invalid as exc:
+                check(f"{word}: refused", word in str(exc))
+        try:
+            prefs.set_delivery({"packets": str(tmp)})
+            check("the example profile's folders cannot be changed", False)
+        except prefs.Invalid:
+            check("the example profile's folders cannot be changed", True)
+
+        with Live() as live:
+            code, body = live.get("/api/settings")
+            check("GET /api/settings answers",
+                  code == 200 and body["settings"]["density"] == "roomy"
+                  and "packets_builtin" in body["folders"], str(body)[:160])
+            check("the example profile's folders are not editable",
+                  body["folders"]["editable"] is False)
+            code, body = live.post("/api/settings", {"settings": {"density": "compact"}})
+            check("POST /api/settings saves", code == 200
+                  and body["settings"]["density"] == "compact")
+            code, body = live.post("/api/settings", {"settings": {"theme": "neon"}})
+            check("a bad setting is a readable 400", code == 400 and "theme" in body["error"])
+            code, body = live.post("/api/settings/folders", {"packets": str(tmp)})
+            check("folders refuse the example profile over the API", code == 400)
+            code, body = live.get("/api/status")
+            check("status carries the settings", body.get("settings", {}).get("density")
+                  == "compact")
+            code, raw = live.raw("/theme.js")
+            check("theme.js is served", code == 200 and b"jobdesk.look" in raw)
+    finally:
+        prefs.FILE = original
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_delivery_edit() -> None:
+    section("changing where copies go")
+    from jobdesk import profile
+    from jobdesk.app import prefs
+
+    tmp = Path(tempfile.mkdtemp())
+    real, example = profile.REAL, profile.EXAMPLE
+    saved_env = os.environ.pop("JOBDESK_PROFILE", None)
+    try:
+        # A profile of our own in a temp dir, so "is it the example" is no.
+        shutil.copytree(example, tmp / "profile")
+        profile.REAL = tmp / "profile"
+        os.environ["JOBDESK_PROFILE"] = str(tmp / "profile")
+        profile._read.cache_clear()
+        target = tmp / "profile" / "delivery.toml"
+        before = comments(target.read_text(encoding="utf-8"))
+
+        info = prefs.set_delivery({"packets": str(tmp / "apps")})
+        data = tomllib.loads(target.read_text(encoding="utf-8"))
+        check("a path is written and uncommented", data.get("packets") == str(tmp / "apps"),
+              str(data))
+        check("the untouched key stays off", "resumes" not in data)
+        check("what Settings shows is what was saved", info["packets"] == str(tmp / "apps"))
+        check("the explanation stays", comments(target.read_text(encoding="utf-8"))
+              >= before - 1)
+
+        prefs.set_delivery({"packets": str(tmp / "other")})
+        data = tomllib.loads(target.read_text(encoding="utf-8"))
+        check("a second change replaces rather than duplicates",
+              data.get("packets") == str(tmp / "other"))
+
+        prefs.set_delivery({"packets": ""})
+        data = tomllib.loads(target.read_text(encoding="utf-8"))
+        check("a blank turns the copy off", "packets" not in data, str(data))
+    finally:
+        profile.REAL = real
+        if saved_env is not None:
+            os.environ["JOBDESK_PROFILE"] = saved_env
+        profile._read.cache_clear()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_market() -> None:
+    """The peer-group arrow: the maths, and what it refuses to say.
+
+    The index itself is built from whatever snapshots are on this machine, so
+    the test builds its own groups instead of asserting numbers that depend on
+    a data directory. What is worth pinning is the shape of the answer and the
+    two places it declines: a group too small to judge by, and a salary
+    estimate for a posting that already published a band.
+    """
+    section("market")
+
+    check("hourly rates become annual", market._annual(30) == 30 * 2080)
+    check("annual rates pass through", market._annual(82000) == 82000)
+    check("remote beats the city", market.region("Richmond, VA", True) == "Remote")
+    check("a state code is the region", market.region("Richmond, VA", False) == "VA")
+    check("a state name is the region",
+          market.region("Austin, Texas, United States", False) == "TX")
+    check("an unparseable location is Elsewhere",
+          market.region("3 Locations", False) == "Elsewhere")
+    check("seniority does not split a role",
+          market._role_key("Senior Data Analyst II") == market._role_key("Data Analyst"))
+    check("a tie sits at the median", market._percentile([5.0, 5.0, 5.0], 5.0) == 50)
+
+    saved = market._index
+    try:
+        group = {
+            "pay": sorted(float(v) for v in range(60000, 160000, 5000)),
+            "low": sorted(float(v) for v in range(50000, 70000, 1000)),
+            "high": sorted(float(v) for v in range(90000, 110000, 1000)),
+            "age": sorted(float(d) for d in range(0, 40)),
+            "reach": sorted(float(r) for r in [1] * 10 + [2] * 10),
+            "employers": 30, "roles": {"data analyst": 4}, "count": 40,
+        }
+        market._index = {"groups": {"analysis/reporting\u0000VA": group},
+                         "files": 1, "postings": 40, "built_at": "now"}
+
+        rich = {"job_family": "analysis/reporting", "location": "Richmond, VA",
+                "salary_min": 150000, "salary_max": 160000, "remote": False,
+                "posted_at": None, "source": "greenhouse"}
+        poor = dict(rich, salary_min=40000, salary_max=45000)
+        up, down = market.assess(rich), market.assess(poor)
+        check("a well-paid posting points up", up and up["direction"] == "up",
+              str(up))
+        check("an underpaid posting points down", down and down["direction"] == "down",
+              str(down))
+        check("the factors add up to the whole arrow",
+              up and sum(f["share"] for f in up["factors"]) == 100)
+        check("every factor explains itself",
+              up and all(f["detail"] and f["label"] for f in up["factors"]))
+        check("40 peers is enough to be confident", up and up["confident"])
+
+        nothing = market.assess(dict(rich, job_family="nursing"))
+        check("an unknown peer group says nothing", nothing is None)
+
+        check("a published band is not re-estimated",
+              market.estimate_salary(rich) is None)
+        band = market.estimate_salary(dict(rich, salary_min=None, salary_max=None))
+        check("a blank band is estimated from peers", bool(band), str(band))
+        check("an estimate is flagged as one", band and band["estimated"] is True)
+        check("an estimate says where it came from", band and "did not state" in band["basis"])
+
+        group["count"] = 3
+        check("three peers is not a market",
+              market.assess(rich) is None)
+    finally:
+        market._index = saved
+
+
+def test_market_route() -> None:
+    """/api/market answers, and answers about the current list only."""
+    section("market over a socket")
+    with Live() as live:
+        code, body = live.get("/api/market")
+        check("the route answers", code == 200, str(body)[:80])
+        check("it says whether the index is ready", "ready" in body)
+        check("it returns a uid map", isinstance(body.get("jobs"), dict))
+        if body.get("ready"):
+            _, listing = live.get("/api/jobs")
+            listed = {row["uid"] for row in listing["jobs"]}
+            extra = set(body["jobs"]) - listed
+            check("it says nothing about postings outside the list", not extra,
+                  str(sorted(extra)[:3]))
+            check("every entry carries something",
+                  all(("market" in v or "salary_estimate" in v)
+                      for v in body["jobs"].values()))
+
+
 def main() -> int:
     test_tomlpatch()
+    test_patch_table()
+    test_criteria()
     test_resume_import()
     test_validation()
     test_write()
     test_api()
+    test_settings()
+    test_delivery_edit()
     test_jdstruct()
     test_runner()
     test_archive()
@@ -696,6 +1001,8 @@ def main() -> int:
     test_home_screen()
     test_pasted_jd()
     test_no_writes()
+    test_market()
+    test_market_route()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
