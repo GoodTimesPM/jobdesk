@@ -34,6 +34,12 @@ from .models import Job
 # truth and it is the schema, which is the only copy that can actually reject a
 # row. The map below is a fallback for the case where information_schema cannot
 # be read; it is deliberately conservative.
+#
+# 2026-09-12: `location` is TEXT in the live table (schema/002_raw_lossless.sql),
+# so information_schema reports no width for it and _fit stops trimming it. That
+# is the intended end state. A landing table should never reject or silently
+# shorten what a source sent -- length rules belong in the cleaned layer, where
+# a violation can be flagged and looked at instead of disappearing.
 _FALLBACK_WIDTHS = {
     "run_stamp": 20, "dedupe_key": 255, "uid": 16, "source": 50,
     "title": 500, "company": 255, "location": 255,
