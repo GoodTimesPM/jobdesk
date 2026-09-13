@@ -48,5 +48,9 @@ data/apply/notion_sync_state.json
 data/apply/applications.json
 data/calibration/
 
+# The Settings screen's choices: theme, text size, what the Jobs tab opens
+# with. One person's taste, so a fresh clone starts from the defaults.
+data/settings.json
+
 # data/engine/jds/ is deliberately NOT ignored: it is the corpus behind the
 # keyword gap report, and postings come down.
