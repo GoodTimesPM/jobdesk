@@ -146,3 +146,55 @@ def patch(text: str, changes: dict[str, object],
         lines[start:end + 1] = block
 
     return newline.join(lines)
+
+# A bare or quoted key at the start of a `key = value` line inside a table.
+_TABLE_KEY = re.compile(
+    r"""^(\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)\s*=\s*(.*)$""")
+
+
+def patch_table(text: str, section: str, mapping: dict[str, object]) -> str:
+    """Make the flat table `[section]` hold exactly `mapping`, keeping comments.
+
+    For `[core_skills]` and `[supporting_skills]`, where the keys are the data
+    ("sql" = 6) rather than fixed setting names. `patch` cannot do this: it
+    refuses a key that is not already in the file, and here adding and
+    removing keys is the whole point.
+
+    Existing keys are updated where they sit. Keys no longer in `mapping` are
+    removed. New keys go after the last existing one, so a comment above the
+    table or between two of its lines stays where it was. Every value has to
+    fit on one line, which is true of any weight table; a multi-line value
+    raises rather than being half-rewritten.
+    """
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.replace("\r\n", "\n").split("\n")
+    floor, limit = _span(lines, section)
+
+    remaining = dict(mapping)
+    keep: list[str] = []
+    last_key = -1
+    indent = ""
+    for line in lines[floor:limit]:
+        hit = _TABLE_KEY.match(line)
+        if not hit or line.lstrip().startswith("#"):
+            keep.append(line)
+            continue
+        indent, raw_key, rest = hit.group(1), hit.group(2), hit.group(3)
+        if rest.count('"""') == 1 or rest.count("'''") == 1:
+            raise PatchError(f"[{section}] has a multi-line value; edit it by hand")
+        _value_end([line], 0)            # raises on a bracket left open
+        key = raw_key[1:-1] if raw_key[0] in "\"'" else raw_key
+        if key not in remaining:
+            continue
+        keep.append(f"{indent}{dump_value(key)} = {dump_value(remaining.pop(key))}")
+        last_key = len(keep) - 1
+
+    added = [f"{indent}{dump_value(k)} = {dump_value(v)}"
+             for k, v in remaining.items()]
+    if last_key < 0:
+        # No surviving key to follow, so the new ones open the table.
+        keep[0:0] = added
+    else:
+        keep[last_key + 1:last_key + 1] = added
+    lines[floor:limit] = keep
+    return newline.join(lines)

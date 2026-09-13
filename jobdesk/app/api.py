@@ -24,7 +24,8 @@ from pathlib import Path
 
 from .. import paths, profile
 from ..radar import config as radar_config
-from . import actions, archive, jdstruct, resume_import, runner, setup, tomlpatch
+from . import (actions, archive, criteria, jdstruct, market, prefs,
+               resume_import, runner, setup, tomlpatch)
 
 
 class BadRequest(RuntimeError):
@@ -70,6 +71,7 @@ def status(query, body) -> dict:
         "name": profile.identity().get("name", "") if not problems else "",
         "job_count": len(rows),
         "last_run": stamp,
+        "settings": prefs.load(),
     }
 
 
@@ -270,10 +272,48 @@ def job(query, body) -> dict:
             full["age_days"] = _age_days(full.get("posted_at"))
             _mark_rows([full])
             full["guards"] = actions.check_guards(actions.candidate(uid))
+            market.start()
+            context = market.assess(row)
+            if context:
+                full["market"] = context
+            estimate = market.estimate_salary(row)
+            if estimate:
+                full["salary_estimate"] = estimate
             return full
     raise BadRequest(
         f"no posting with id {uid} in the current list. It may have aged out "
         f"of the cache -- the radar keeps 30 days.")
+
+
+def market_context(query, body) -> dict:
+    """Peer-group context for every posting in the current list.
+
+    A separate call from `/api/jobs` on purpose. The index is three months of
+    snapshots folded into per-group aggregates, and it is built in the
+    background; the table has to render whether or not it is finished. So the
+    page draws first, asks for this second, and fills the arrows in when the
+    answer arrives. If it is still building, that is what comes back and the
+    page asks again.
+    """
+    market.start()
+    if not market.ready():
+        return {"ready": False, "jobs": {}, "index": market.summary()}
+    rows, _ = _candidates()
+    out: dict[str, dict] = {}
+    for row in rows:
+        uid = row.get("uid")
+        if not uid:
+            continue
+        entry = {}
+        context = market.assess(row)
+        if context:
+            entry["market"] = context
+        estimate = market.estimate_salary(row)
+        if estimate:
+            entry["salary_estimate"] = estimate
+        if entry:
+            out[uid] = entry
+    return {"ready": True, "jobs": out, "index": market.summary()}
 
 
 def _age_days(posted: str | None) -> int | None:
@@ -337,24 +377,15 @@ def _mark_rows(rows: list[dict]) -> None:
 # The criteria panel
 # ---------------------------------------------------------------------------
 
-# What the panel is allowed to edit. A deliberately short list: these are the
-# settings whose effect you can see in the table the moment they change.
-# Everything else in targeting.toml stays a file you open, because a checkbox
-# for `equivalency_ceiling` without the paragraph above it explaining what it
-# means is a worse interface than the paragraph.
-EDITABLE = {
-    "tier_1_titles": list, "tier_2_titles": list, "tier_3_titles": list,
-    "hard_disqualifiers": list, "local_terms": list, "remote_terms": list,
-    "hybrid_terms": list, "core_skills": list, "supporting_skills": list,
-    "salary_floor": int, "salary_target": int,
-    "years_comfortable": int, "max_years_stretch": int,
-    "fresh_days": int, "stale_days": int,
-    "home_metro": str,
-}
-
-
 def targeting(query, body) -> dict:
-    """The editable settings and their current values."""
+    """The Criteria tab: every editable setting, grouped and explained.
+
+    What is editable, what each thing is called on screen and what it is worth
+    all live in `criteria.py`. Everything else in targeting.toml stays a file
+    you open, because a checkbox for `equivalency_ceiling` without the
+    paragraph above it explaining what it means is a worse interface than the
+    paragraph.
+    """
     if profile.is_example():
         raise BadRequest(
             "You are running on the example profile, which is shared code -- "
@@ -363,8 +394,7 @@ def targeting(query, body) -> dict:
     data = profile.load("targeting.toml")
     return {
         "file": str(profile.path("targeting.toml")),
-        "values": {key: data.get(key) for key in EDITABLE},
-        "types": {key: kind.__name__ for key, kind in EDITABLE.items()},
+        "sections": criteria.form(data),
     }
 
 
@@ -381,30 +411,17 @@ def save_targeting(query, body) -> dict:
     changes = body.get("changes")
     if not isinstance(changes, dict) or not changes:
         raise BadRequest("no changes were sent")
-
-    clean: dict[str, object] = {}
-    for key, value in changes.items():
-        kind = EDITABLE.get(key)
-        if kind is None:
-            raise BadRequest(f"{key} is not editable from this panel. "
-                             f"Open targeting.toml to change it.")
-        if kind is list:
-            if not isinstance(value, list):
-                raise BadRequest(f"{key} has to be a list")
-            clean[key] = [" ".join(str(v).lower().split()) for v in value
-                          if str(v).strip()]
-        elif kind is int:
-            try:
-                clean[key] = int(value)
-            except (TypeError, ValueError):
-                raise BadRequest(f"{key} has to be a whole number, not {value!r}")
-        else:
-            clean[key] = str(value).strip()
+    try:
+        top, tables = criteria.clean(changes)
+    except criteria.Invalid as exc:
+        raise BadRequest(str(exc))
 
     path = profile.path("targeting.toml")
     original = path.read_text(encoding="utf-8")
     try:
-        patched = tomlpatch.patch(original, clean)
+        patched = tomlpatch.patch(original, top)
+        for name, mapping in tables.items():
+            patched = tomlpatch.patch_table(patched, name, mapping)
     except tomlpatch.PatchError as exc:
         raise BadRequest(f"targeting.toml could not be edited: {exc}")
 
@@ -418,8 +435,38 @@ def save_targeting(query, body) -> dict:
         path.write_text(original, encoding="utf-8")
         profile._read.cache_clear()
         raise
-    result["saved"] = list(clean)
+    result["saved"] = list(top) + list(tables)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+def settings(query, body) -> dict:
+    """Everything the Settings screen shows: preferences and folders."""
+    return {"settings": prefs.load(), "defaults": prefs.DEFAULTS,
+            "folders": prefs.folders()}
+
+
+def save_settings(query, body) -> dict:
+    changes = body.get("settings")
+    try:
+        saved = prefs.save(changes)
+    except prefs.Invalid as exc:
+        raise BadRequest(str(exc))
+    return {"settings": saved}
+
+
+def save_folders(query, body) -> dict:
+    """Change where finished resumes and packets get copied."""
+    changes = {k: body[k] for k in ("resumes", "packets") if k in body}
+    if not changes:
+        raise BadRequest("no folders were sent")
+    try:
+        return {"folders": prefs.set_delivery(changes)}
+    except prefs.Invalid as exc:
+        raise BadRequest(str(exc))
 
 
 def rescore(query, body) -> dict:
@@ -757,9 +804,13 @@ ROUTES = {
     ("POST", "/api/setup/save"): save_setup,
     ("GET", "/api/jobs"): jobs,
     ("GET", "/api/job"): job,
+    ("GET", "/api/market"): market_context,
     ("GET", "/api/targeting"): targeting,
     ("POST", "/api/targeting"): save_targeting,
     ("POST", "/api/rescore"): rescore,
+    ("GET", "/api/settings"): settings,
+    ("POST", "/api/settings"): save_settings,
+    ("POST", "/api/settings/folders"): save_folders,
     ("GET", "/api/archive"): archive_search,
     ("GET", "/api/archive/companies"): archive_companies,
     ("GET", "/api/applications"): applications,
