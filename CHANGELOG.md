@@ -2,6 +2,80 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.2.3 — 2026-09-14
+
+The packet, read rather than dumped.
+
+### Changed
+
+- **A packet file is rendered as markdown.** APPLY.md is a checklist with a
+  table at the end, and it arrived in the panel as one paragraph with every
+  newline collapsed. Headings, bullets, checkboxes, tables, code, blockquotes
+  and links now come through as themselves. The cover letter gets its
+  paragraphs back. `.txt` files stay unformatted, since being unformatted is
+  the only thing they are for. Nothing is parsed as HTML, so a posting's own
+  text still cannot put markup on the page.
+- **The section headers read as a contents page.** Seven of them stack up under
+  a packet, so each is now a row with a visible edge instead of a line of
+  coloured text. The label is plain ink, the row is what says "click here", and
+  one triangle turns to say which section is open. A column of seven cyan
+  headings read as seven warnings, so the accent is gone from the label and
+  kept for the focus ring. Text selection got a colour too: the browser's
+  default blue over a dark panel is a slab you cannot read through.
+
+## 0.2.2 — 2026-09-14
+
+Three things the Applied tab was missing, all of them noticed in use.
+
+### Added
+
+- **A row can be removed.** A packet gets built, the posting closes before you
+  reach the form, and the log now holds an application that was never made.
+  There was no way to take it off. "Remove this row" is at the end of the
+  detail panel; it arms on the first click and removes on the second, so there
+  is no dialog to aim at on a phone. The packet folder on disk is left alone.
+  What goes is the claim that it was sent, which is the part that was wrong,
+  and the posting goes back into the queue in case it reopens.
+
+### Changed
+
+- **The banner leaves on its own.** The message after a packet build is a
+  receipt, and it used to sit across the top of every tab until something
+  replaced it. It clears itself after eight seconds now and has an X on the
+  right. Errors stay, and so does the standing "example profile" notice.
+- **The funnel tiles are coloured like the status dropdowns.** "157 rejected"
+  at the top of the tab and a red dropdown in the row below it are the same
+  fact. Same four colours: grey prepared, blue in play, green offer, red
+  closed. A tile at zero stays grey.
+
+## 0.2.1 — 2026-09-14
+
+Three phone fixes, all of them things the desktop layout hid.
+
+### Fixed
+
+- **The Market column was unreachable on a phone.** It is the sixth of eight
+  columns, and the table scrolls sideways there, so the arrow sat about two
+  thirds of a swipe off the right edge. It now sits second, next to the score,
+  on screens under 700px. The header reorders with it, and rotating the phone
+  moves it back without a reload.
+- **The page sat off-centre on narrow screens.** The two report cards under the
+  application table were laid out with a hard 320px minimum, so on anything
+  under about 350px they refused to shrink and pushed the document wider than
+  the window. Everything then rendered against a page wider than the screen,
+  with a dead strip down one side.
+
+### Changed
+
+- **The status colour moved to the status dropdown.** A rejected row used to
+  say so twice: a red bubble beside the company name and the word in the
+  dropdown next to it. The bubble is gone, and the dropdown carries the colour
+  instead, on the control you actually change. Every option in the open menu is
+  coloured too, so the list reads as a legend before you pick from it: grey for
+  prepared, blue for anything in flight, green for an offer, red for rejected,
+  ghosted and withdrawn. The border is tinted as well as the text, because iOS
+  ignores a colour on an `<option>`.
+
 ## 0.2.0 — 2026-09-13
 
 ### Added

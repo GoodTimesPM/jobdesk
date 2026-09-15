@@ -218,7 +218,7 @@ checklist.
 
 ## Version
 
-0.2.0. `CHANGELOG.md` has what changed and why.
+0.2.3. `CHANGELOG.md` has what changed and why.
 
 ## License
 
