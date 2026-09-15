@@ -484,6 +484,23 @@ def test_applog() -> None:
           rej_log.rejection_report() == {"interview": 1, "applied": 1},
           str(rej_log.rejection_report()))
 
+    # A posting that closes before you reach the form leaves a packet behind
+    # and no application. The row has to be able to go, or the funnel counts a
+    # submission that never happened and the guard holds a slot against the
+    # company forever.
+    gone = temp_log()
+    keep = gone.add(app(id="k1", company="Keep Co"))
+    drop = gone.add(app(id="d1", company="Drop Co"))
+    gone.remove(drop)
+    check("removing a row takes it out of the log",
+          [r.id for r in gone.rows] == [keep.id],
+          str([r.id for r in gone.rows]))
+    check("the removal is written to disk, not just to memory",
+          [r.id for r in Log(gone.path).rows] == [keep.id])
+    check("a removed row stops being found by id", gone.get("d1") is None)
+    check("...and stops counting against the funnel",
+          gone.funnel()["prepared"] == 1, str(gone.funnel()))
+
 
 def test_notion_sync() -> None:
     section("Notion sync -- Job Radar Tracker Applied Date -> OG tracker + auto")

@@ -374,6 +374,12 @@ def test_api() -> None:
         check("marking applied needs an id", code == 400)
         code, body = live.post("/api/application/manual", {"company": "", "role": ""})
         check("a manual application needs a company and a role", code == 400)
+        code, body = live.post("/api/application/forget", {"id": ""})
+        check("removing a row needs an id", code == 400)
+        code, body = live.post("/api/application/forget", {"id": "no-such-packet"})
+        check("removing a row that is not there says so rather than 500ing",
+              code == 400 and "no-such-packet" in body.get("error", ""),
+              f"{code} {body}")
 
         code, body = live.get("/api/archive?q=analyst&limit=5")
         check("the archive answers",
