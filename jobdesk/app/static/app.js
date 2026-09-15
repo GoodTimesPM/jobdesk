@@ -55,12 +55,31 @@ const post = (path, body) => call(path, {
   body: JSON.stringify(body || {}),
 });
 
-function banner(text, bad) {
+/* The message after a packet build is a receipt. It has been read by the time
+   the folder opens, and then it sits there taking a line off the top of every
+   tab until something else replaces it. So it leaves on its own after eight
+   seconds, and there is an X for the times eight is seven too many.
+
+   Errors stay put. An error is the one message you may want to read twice, and
+   a warning that vanishes while you are reading it is worse than no warning.
+   `sticky` is for the standing notices -- "you are on the example profile" is
+   a fact about the whole session, not news. */
+const BANNER_SECONDS = 8;
+let bannerTimer = null;
+
+function banner(text, bad, sticky) {
   const box = $("#banner");
-  box.textContent = text || "";
+  clearTimeout(bannerTimer);
+  bannerTimer = null;
+  $("#banner-text").textContent = text || "";
   box.hidden = !text;
   box.classList.toggle("bad", !!bad);
+  if (text && !bad && !sticky) {
+    bannerTimer = setTimeout(() => { box.hidden = true; }, BANNER_SECONDS * 1000);
+  }
 }
+
+$("#banner-close").addEventListener("click", () => banner(""));
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
 
@@ -436,6 +455,26 @@ function age(job) {
 
 const cell = (text, cls) => el("td", { class: cls, text: text });
 
+/* Phone width, asked once and cached by the browser. The listener redraws
+   rather than reloads, because the only thing that changes is which column
+   the market arrow sits in. */
+const PHONE = window.matchMedia("(max-width: 700px)");
+const narrow = () => PHONE.matches;
+
+const JOB_COLUMNS = ["score", "title", "company", "location", "age_days",
+                    "market", "salary", "source"];
+const JOB_COLUMNS_PHONE = ["score", "title", "market", "company", "location",
+                           "age_days", "salary", "source"];
+
+function orderJobsHead() {
+  const head = $("#jobs thead tr");
+  (narrow() ? JOB_COLUMNS_PHONE : JOB_COLUMNS).forEach((key) =>
+    head.append(head.querySelector(`th[data-key="${key}"]`)));
+}
+
+PHONE.addEventListener("change", () => { orderJobsHead(); draw(); });
+
+
 function draw() {
   const rows = visible();
   const body = $("#rows");
@@ -457,9 +496,16 @@ function draw() {
     if (job.applied) title.append(el("span", { class: "pill", text: job.app_status }));
     else if (job.prepared) title.append(el("span", { class: "pill", text: "packet ready" }));
 
-    tr.append(score, title, cell(job.company),
+    const rest = [cell(job.company),
       cell(job.remote ? "Remote" : (job.location || "—")),
-      cell(age(job)), marketCell(job), salaryCell(job), cell(job.source));
+      cell(age(job)), salaryCell(job), cell(job.source)];
+    // Market is the sixth column, and on a phone the sixth column is two
+    // thirds of a sideways scroll away -- far enough that it reads as
+    // missing rather than as off-screen. It moves up next to the score
+    // there, which is the other number you scan a queue for.
+    tr.append(score, title, ...(narrow() ? [marketCell(job)] : []),
+      ...rest.slice(0, 3), ...(narrow() ? [] : [marketCell(job)]),
+      ...rest.slice(3));
     body.append(tr);
 
     if (state.open === job.uid) body.append(detailRow(job));
@@ -755,8 +801,11 @@ function drawFunnel(data) {
   ["screening", "interview", "offer", "rejected", "ghosted"].forEach((s) => {
     tiles.push([s, data.funnel[s] || 0]);
   });
+  // Same four colours as the status dropdowns, so a tile and the rows it
+  // counts read as the same thing. A tile at zero stays grey: the colour is
+  // there to pull your eye to a number that exists.
   tiles.forEach(([label, n]) => {
-    box.append(el("div", { class: "stat" + (n ? "" : " zero") },
+    box.append(el("div", { class: `stat ${statusKind(label)}` + (n ? "" : " zero") },
       el("b", { text: String(n) }), el("span", { text: label })));
   });
 
@@ -810,6 +859,17 @@ function visibleApps() {
   return sortRows(rows, apps.sort, apps.dir);
 }
 
+// Four states worth telling apart by colour, which is fewer than there are
+// statuses. "screening" and "interview" differ in how far along you are, not
+// in what you should do about them, and a nine-colour legend is not a legend.
+const DEAD = ["rejected", "ghosted", "withdrawn"];
+
+function statusKind(status) {
+  if (status === "prepared") return "prepared";
+  if (status === "offer") return "offer";
+  return DEAD.includes(status) ? "dead" : "live";
+}
+
 function drawApps() {
   const rows = visibleApps();
   const body = $("#app-rows");
@@ -820,19 +880,23 @@ function drawApps() {
     tr.dataset.id = row.id;
 
     const company = el("td", {}, row.company);
-    const kind = row.status === "prepared" ? "prepared"
-      : (["rejected", "ghosted", "withdrawn"].includes(row.status) ? "dead" : "sent");
-    company.append(el("span", { class: "badge " + kind, text: kind === "prepared"
-      ? "not sent" : (kind === "dead" ? row.status : "sent") }));
 
+    // The colour used to be a badge in this cell, next to the company name,
+    // which meant the row said "rejected" twice: once in a red bubble and
+    // once in the dropdown right beside it. The dropdown is the thing you
+    // actually change, so it is the thing that carries the colour now -- and
+    // every option in the open menu carries its own, so the list reads as a
+    // legend before you pick from it.
     const status = el("td", {},
       el("select", {
+        class: "status " + statusKind(row.status),
         on: {
           click: (e) => e.stopPropagation(),
           change: (e) => changeStatus(row.id, e.target.value),
         },
       }, apps.statuses.map((s) =>
-        el("option", { value: s, text: s, selected: s === row.status }))));
+        el("option", { value: s, text: s, class: statusKind(s),
+                       selected: s === row.status }))));
 
     tr.append(company, cell(row.role), status,
       cell(when(row.applied_on), "when"),
@@ -873,6 +937,152 @@ const PACKET_TITLES = {
   "jd.txt": "The posting itself, as it was read",
 };
 
+/* Markdown, the small part of it these files actually use.
+
+   A packet file arrived here as one `<p>`, so every newline collapsed and
+   APPLY.md -- a list of things to do in order, with a table at the bottom --
+   read as one grey paragraph you had to re-find your place in twice. The files
+   are written as markdown by the packet builder. This reads them back as
+   markdown.
+
+   Headings, bullets, checkboxes, tables, fenced code, bold, italic, inline
+   code, links. No images, no nesting, no HTML passthrough. A packet is
+   generated by this project, and anything fancier than the list above means
+   the generator changed and this should be looked at rather than guessed at.
+
+   Still no innerHTML. The posting's own text ends up in jd.txt and in the
+   cover letter, and a renderer that trusts markup is a renderer that runs
+   whatever an employer put on their careers page. */
+
+const MD_INLINE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*|\[[^\]]+\]\([^)\s]+\))/g;
+
+function mdInline(text) {
+  return String(text).split(MD_INLINE).filter(Boolean).map((part) => {
+    if (part.length > 1 && part.startsWith("`") && part.endsWith("`")) {
+      return el("code", { text: part.slice(1, -1) });
+    }
+    if (part.startsWith("**")) return el("strong", {}, mdInline(part.slice(2, -2)));
+    if (part.startsWith("*")) return el("em", {}, mdInline(part.slice(1, -1)));
+    const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(part);
+    if (link) {
+      // Only the two schemes a job posting has any business using. Anything
+      // else, javascript: and data: included, keeps its text and loses its link.
+      return /^(https?:|mailto:)/i.test(link[2])
+        ? el("a", { href: link[2], target: "_blank", rel: "noopener noreferrer",
+                    text: link[1] })
+        : document.createTextNode(link[1]);
+    }
+    return document.createTextNode(part);
+  });
+}
+
+const mdCells = (line) =>
+  line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+
+function markdown(text) {
+  const out = document.createDocumentFragment();
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i += 1; continue; }
+
+    const head = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (head) {
+      // One level down from where the file puts them. The panel's own "The
+      // packet" is the h4 above all of this, and a packet's `#` title at the
+      // same weight makes the page look like it starts over halfway down.
+      out.append(el("h" + Math.min(head[1].length + 3, 6), {}, mdInline(head[2])));
+      i += 1; continue;
+    }
+
+    if (/^\s*```/.test(line)) {
+      const buf = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+      i += 1;  // the closing fence, or the end of the file if it is missing
+      out.append(el("pre", { text: buf.join("\n") }));
+      continue;
+    }
+
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        rows.push(lines[i]); i += 1;
+      }
+      // Row two is the ---|--- rule. It carries the alignment, which nothing
+      // in these files ever sets, so it is dropped rather than read.
+      const rest = rows.slice(1).filter((r) => !/^[\s|:-]+$/.test(r));
+      out.append(el("table", { class: "md-table" },
+        el("thead", {}, el("tr", {},
+          mdCells(rows[0]).map((c) => el("th", {}, mdInline(c))))),
+        el("tbody", {}, rest.map((r) =>
+          el("tr", {}, mdCells(r).map((c) => el("td", {}, mdInline(c))))))));
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quoted = [];
+      while (i < lines.length) {
+        if (/^\s*>\s?/.test(lines[i])) {
+          quoted.push(lines[i].replace(/^\s*>\s?/, "")); i += 1; continue;
+        }
+        // A blank line between two quoted blocks is a paragraph break inside
+        // one quote, not the end of it. ANSWERS.md puts a blank line between
+        // its warning and the list the warning is about, and two boxes with a
+        // hairline gap between them read as two separate warnings.
+        if (!lines[i].trim() && /^\s*>/.test(lines[i + 1] || "")) {
+          quoted.push(""); i += 1; continue;
+        }
+        break;
+      }
+      // The marker comes off and what is left goes through this same function.
+      // The warning block at the top of ANSWERS.md is a quoted bullet list, and
+      // a blockquote that cannot hold a list would print its own dashes.
+      out.append(el("blockquote", { class: "md-quote" }, markdown(quoted.join("\n"))));
+      continue;
+    }
+
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      const ordered = /^\s*\d+\./.test(line);
+      const items = [];
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+        let item = lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, "");
+        i += 1;
+        // A wrapped item continues on an indented line. It is joined back into
+        // one item, because a hard wrap in the source is not a new bullet.
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) &&
+               !/^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+          item += " " + lines[i].trim(); i += 1;
+        }
+        const box = /^\[([ xX])\]\s*/.exec(item);
+        items.push(box
+          ? el("li", { class: "md-task" },
+              el("span", { class: "md-box", text: box[1] === " " ? "\u2610" : "\u2611" }),
+              el("span", {}, mdInline(item.slice(box[0].length))))
+          : el("li", {}, mdInline(item)));
+      }
+      out.append(el(ordered ? "ol" : "ul", { class: "md-list" }, items));
+      continue;
+    }
+
+    const para = [];
+    while (i < lines.length && lines[i].trim() &&
+           !/^\s*(#{1,6}\s|```|\||>)/.test(lines[i]) &&
+           !/^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+      para.push(lines[i].trim()); i += 1;
+    }
+    // A newline is a line break here, which is not what markdown normally says.
+    // Nothing writing these files hard-wraps: one line is one paragraph of the
+    // cover letter. Folding them together the way a strict reader would is what
+    // turned a five-paragraph letter into one eleven-line block.
+    out.append(el("p", {}, para.flatMap((ln, n) =>
+      n ? [el("br"), ...mdInline(ln)] : mdInline(ln))));
+  }
+  return out;
+}
+
 function packetBox(appId, data) {
   const box = el("div", { class: "packet" });
   box.append(el("h4", { text: "The packet" }));
@@ -896,16 +1106,26 @@ function packetBox(appId, data) {
     (a !== "APPLY.md") - (b !== "APPLY.md") || a.localeCompare(b));
   names.forEach((name) => {
     const open = name === "APPLY.md";
-    const body = el("p", { class: "raw", text: data.texts[name] });
+    // .txt files are in a packet precisely because something wanted them
+    // unformatted: the paste-into-a-box resume, the posting as it was read.
+    // Rendering those would undo the only thing they are for.
+    const body = name.endsWith(".md")
+      ? el("div", { class: "md" }, markdown(data.texts[name]))
+      : el("p", { class: "raw", text: data.texts[name] });
     body.hidden = !open;
-    const head = el("button", {
-      class: "disclose", text: (open ? "▾ " : "▸ ") + (PACKET_TITLES[name] || name),
+    // The caret and the label are separate nodes so the title is never rebuilt.
+    // One triangle, always the same character: CSS turns it when the section
+    // opens, so the row moves rather than flickering a different glyph in.
+    const caret = el("span", { class: "caret", text: "▶" });
+    const head = el("button", { class: "disclose" + (open ? " open" : ""),
+      "aria-expanded": open ? "true" : "false",
       on: { click: (e) => {
         e.stopPropagation();
         body.hidden = !body.hidden;
-        head.textContent = (body.hidden ? "▸ " : "▾ ") + (PACKET_TITLES[name] || name);
+        head.classList.toggle("open", !body.hidden);
+        head.setAttribute("aria-expanded", body.hidden ? "false" : "true");
       } },
-    });
+    }, caret, el("span", { class: "label", text: PACKET_TITLES[name] || name }));
     box.append(head, body);
   });
   return box;
@@ -936,6 +1156,22 @@ function appDetail(row) {
     actions.append(stage, el("button", { class: "ghost", text: "They said no",
       on: { click: (e) => { e.stopPropagation(); reject(row, stage.value); } } }));
   }
+  // A posting can close between the packet being built and you getting to the
+  // form, and then there is a row saying you applied to something you never
+  // got to apply to. Every number on this tab is wrong by one until it goes.
+  //
+  // Two clicks rather than a confirm dialog, because the second click is in
+  // the same place as the first and a dialog on a phone is a modal you have to
+  // aim at. The button says what it will not do, since "remove" next to a
+  // folder full of tailored documents reads like it takes the folder too.
+  const forget = el("button", { class: "ghost danger", text: "Remove this row",
+    on: { click: (e) => {
+      e.stopPropagation();
+      if (forget.dataset.armed) return forgetApp(row);
+      forget.dataset.armed = "1";
+      forget.textContent = "Really remove it? The packet folder stays.";
+    } } });
+  actions.append(forget);
   td.append(actions);
 
   if (row.notes) td.append(el("p", { class: "note", text: row.notes }));
@@ -969,6 +1205,19 @@ async function changeStatus(id, status) {
     await post("/api/application/status", { id, status });
     await loadApplications();
     loadJobs();
+  } catch (err) { banner(err.message, true); }
+}
+
+async function forgetApp(row) {
+  try {
+    await post("/api/application/forget", { id: row.id });
+    apps.open = null;
+    await loadApplications();
+    // The posting is hidden from the queue while a row claims it, so the queue
+    // has to be reloaded or it stays missing from both tabs at once.
+    loadJobs();
+    banner(`Removed ${row.company} · ${row.role}. The packet folder is still `
+         + `on disk.`);
   } catch (err) { banner(err.message, true); }
 }
 
@@ -1658,6 +1907,7 @@ $("#gear").addEventListener("click", () => show("settings"));
 // `stay` keeps the page where it is, for the end of the wizard: its "your
 // profile is written" message is on the Setup screen and should be read.
 async function boot(stay) {
+  orderJobsHead();
   try {
     const s = await get("/api/status");
     $("#who").textContent = s.name
@@ -1667,7 +1917,7 @@ async function boot(stay) {
       banner(s.problems.join(" "), true);
     } else if (s.using_example) {
       banner("Running on the example profile. Every score below belongs to a "
-           + "made-up candidate until you finish setup.");
+           + "made-up candidate until you finish setup.", false, true);
     } else {
       banner("");
     }

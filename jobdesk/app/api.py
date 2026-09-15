@@ -582,6 +582,21 @@ def application_status(query, body) -> dict:
         raise BadRequest(str(exc))
 
 
+def application_forget(query, body) -> dict:
+    """Remove a row that was never an application.
+
+    The packet on disk survives. Only the log entry goes, which is the only
+    part of it that was claiming something untrue.
+    """
+    app_id = _text(body, "id")
+    if not app_id:
+        raise BadRequest("which application? send an id")
+    try:
+        return actions.forget(app_id)
+    except actions.ActionError as exc:
+        raise BadRequest(str(exc))
+
+
 def application_manual(query, body) -> dict:
     """Log an application made somewhere this tool never touched."""
     try:
@@ -816,6 +831,7 @@ ROUTES = {
     ("GET", "/api/applications"): applications,
     ("POST", "/api/application/status"): application_status,
     ("POST", "/api/application/manual"): application_manual,
+    ("POST", "/api/application/forget"): application_forget,
     ("GET", "/api/packet"): packet,
     ("GET", "/api/packet/file"): packet_file,
     ("POST", "/api/open"): open_folder,
