@@ -218,6 +218,23 @@ class Log:
         self.save()
         return app
 
+    def remove(self, app: Application) -> Application:
+        """Drop a row entirely, for the packets that were never applications.
+
+        A posting can close between the packet being built and you getting to
+        the form. Nothing was submitted, so nothing belongs in a submission
+        log: leaving the row in overstates the funnel, blocks the company
+        against the concurrency cap, and hides the posting from the queue if
+        it ever reopens.
+
+        The packet folder on disk is left alone. This file is the record of
+        what was sent, and deleting someone's tailored resume because they
+        tidied a row is not a trade worth making.
+        """
+        self.rows = [r for r in self.rows if r.id != app.id]
+        self.save()
+        return app
+
     def mark_applied(self, app: Application, when: str = "") -> Application:
         app.applied_on = when or date.today().isoformat()
         app.status = "applied"
