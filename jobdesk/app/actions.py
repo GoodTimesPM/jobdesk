@@ -343,6 +343,20 @@ def set_status(app_id: str, status: str, note: str = "") -> dict:
     return {"id": app.id, "status": app.status}
 
 
+def forget(app_id: str) -> dict:
+    """Take a row off the log, for a packet that never became an application.
+
+    Deliberately not called "delete": the packet folder stays on disk. What
+    goes is the claim that this was applied to, which is the claim that was
+    wrong.
+    """
+    log = Log()
+    app = _find(log, app_id)
+    log.remove(app)
+    return {"id": app.id, "company": app.company, "role": app.role,
+            "removed": True}
+
+
 def mark_rejected(app_id: str, *, stage: str = "", reason: str = "",
                   when: str = "") -> dict:
     log = Log()

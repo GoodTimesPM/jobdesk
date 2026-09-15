@@ -114,9 +114,16 @@ button { font: inherit; }
 .who { margin-left: auto; color: var(--ink-faint); font-size: 12.5px; }
 
 .banner {
+  display: flex; align-items: center; gap: 12px;
   padding: 9px 18px; background: var(--warn); color: #fff; font-size: 13px;
 }
+.banner[hidden] { display: none; }
 .banner.bad { background: var(--bad); }
+.banner-x {
+  margin-left: auto; flex: none; background: none; border: 0; color: inherit;
+  font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; opacity: .7;
+}
+.banner-x:hover { opacity: 1; }
 
 .view { padding: 18px; max-width: 1500px; margin: 0 auto; }
 
@@ -149,6 +156,12 @@ button.ghost {
   background: var(--card); color: var(--ink); border: 1px solid var(--line);
 }
 button:disabled { opacity: .45; cursor: default; }
+
+/* Quiet until you touch it, red once it is armed. A destructive button that is
+   red before you mean it becomes the thing your eye avoids on the whole panel. */
+button.danger { color: var(--bad); border-color: var(--line); }
+button.danger[data-armed] { background: var(--bad); color: #fff;
+                            border-color: var(--bad); }
 
 /* Every table is wrapped in one of these. A table is the one block of a
    page that has a width of its own: seven columns of postings need the room
@@ -406,8 +419,22 @@ button.gear[aria-current="true"] { color: var(--accent); border-color: var(--lin
 }
 .stat b { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
 .stat span { font-size: 12px; color: var(--ink-faint); }
-.stat.zero { color: var(--ink-faint); }
-.stat.live { border-color: var(--accent); }
+
+/* The same four colours the status dropdowns use, so "157 rejected" up here and
+   a red dropdown down in the table are visibly the same fact. The count carries
+   the colour and the border echoes it; the label under it stays grey, because
+   nine tinted words in a row is a paint chart, not a summary. */
+.stat.live  { border-color: var(--accent); }
+.stat.offer { border-color: var(--good); }
+.stat.dead  { border-color: var(--bad); }
+.stat.live b  { color: var(--accent); }
+.stat.offer b { color: var(--good); }
+.stat.dead b  { color: var(--bad); }
+
+/* Last, so it beats the four above: a tile at zero is not news and should not
+   pull your eye. Colour is for the numbers that exist. */
+.stat.zero, .stat.zero b { color: var(--ink-faint); }
+.stat.zero { border-color: var(--line); }
 
 .due { border-left: 3px solid var(--warn); padding: 6px 12px;
        margin-bottom: 14px; color: var(--warn); }
@@ -415,10 +442,24 @@ button.gear[aria-current="true"] { color: var(--accent); border-color: var(--lin
 .grid select { padding: 3px 6px; font-size: 13px; }
 .grid tr.overdue td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .grid td.when { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.badge { font-size: 11px; border-radius: 3px; padding: 1px 7px; color: #fff; }
-.badge.prepared { background: var(--ink-faint); }
-.badge.sent { background: var(--good); }
-.badge.dead { background: var(--bad); }
+/* The status dropdown carries the colour. It used to be a filled bubble in
+   the company cell, which put the word "rejected" twice on one row and put
+   it in the cell you never click. Here the colour is on the control you do
+   click, and on every option inside it, so the open menu is its own legend.
+
+   The border is tinted as well as the text, because iOS ignores a colour on
+   an <option> and would otherwise show a nine-item menu in one grey. */
+select.status { color: var(--ink-soft); font-weight: 600; }
+select.status.prepared { color: var(--ink-faint); font-weight: 400;
+                         border-color: var(--line); }
+select.status.live  { color: var(--accent); border-color: var(--accent); }
+select.status.offer { color: var(--good);   border-color: var(--good); }
+select.status.dead  { color: var(--bad);    border-color: var(--bad); }
+
+option.prepared { color: var(--ink-faint); }
+option.live     { color: var(--accent); }
+option.offer    { color: var(--good); }
+option.dead     { color: var(--bad); }
 
 .fields label.wide { grid-column: 1 / -1; }
 .manual textarea, .full textarea { width: 100%; box-sizing: border-box; resize: vertical;
@@ -427,8 +468,15 @@ button.gear[aria-current="true"] { color: var(--accent); border-color: var(--lin
 .jd-paste textarea { width: 100%; box-sizing: border-box; resize: vertical;
                      font-family: inherit; font-size: 13px; }
 
+/* `minmax(320px, ...)` was a hard floor, so on any screen narrower than
+   about 350px the two cards refused to shrink and pushed the document wider
+   than the window. Everything on the page then sat off-centre, with a strip
+   of dead space down one side that had nothing in it. `min(320px, 100%)`
+   keeps the two-column layout where there is room and gives it up where
+   there is not. */
 .report {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 18px; margin-top: 24px; align-items: start;
 }
 .report .card {
@@ -579,13 +627,94 @@ button.gear[aria-current="true"] { color: var(--accent); border-color: var(--lin
 .packet h4 { margin: 0 0 2px; }
 .downloads { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 12px; }
 .downloads .chip { text-decoration: none; }
+/* Seven of these stacked up is a contents page, so each one is a row you can
+   see the edges of rather than a line of coloured text. The accent is gone from
+   the label: a column of seven cyan headings reads as seven warnings. The label
+   is plain ink, the row itself says where you can click, and the caret says
+   which one is open. */
 .disclose {
-  display: block; width: 100%; text-align: left; background: none; border: 0;
-  border-top: 1px solid var(--line-soft); padding: 8px 0; color: var(--ink);
-  font: inherit; cursor: pointer;
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; text-align: left; margin-bottom: 4px;
+  background: var(--line-soft); border: 1px solid transparent;
+  border-radius: var(--radius); padding: 8px 11px; color: var(--ink-soft);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
 }
-.disclose:hover { color: var(--accent); }
-.packet .raw { margin: 0 0 10px; }
+/* The caret is one triangle that turns, so opening a section is a movement
+   rather than a character swap. */
+.disclose .caret {
+  width: 9px; flex: none; color: var(--ink-faint); font-size: 9px;
+  transition: transform .12s ease;
+}
+.disclose.open .caret { transform: rotate(90deg); }
+.disclose:hover { color: var(--ink); border-color: var(--line); }
+.disclose:hover .caret { color: var(--ink-soft); }
+.disclose:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* The open row keeps the same box and just firms up, so the column does not
+   jump and the one you are reading is still obvious. */
+.disclose.open { color: var(--ink); border-color: var(--line); }
+.disclose.open .caret { color: var(--ink-soft); }
+.packet .raw { margin: 2px 0 12px; padding-left: 20px;
+               white-space: pre-wrap; }
+
+/* ── a packet file, read as markdown ────────────────────────────────────── */
+
+/* The measure is capped because these files are prose. A checklist run to the
+   full width of a desktop table is a line your eye loses its place on halfway
+   across, which is the complaint that got this written. */
+.md { margin: 2px 0 14px; padding-left: 20px; max-width: 78ch;
+      font-size: 13px; line-height: 1.55; color: var(--ink-soft); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 9px; }
+/* The file's own `#` title, which is a company and a role. Left in sentence
+   case: setting a company name in small caps is shouting someone's name. */
+.md h4 { margin: 14px 0 7px; color: var(--ink); font-size: 13.5px;
+         font-weight: 650; }
+/* The `##` sections, which are labels rather than titles: "Before you submit",
+   "Files". Small and spaced, so they divide the file without competing with it. */
+.md h5, .md h6 {
+  margin: 16px 0 6px; color: var(--ink-faint); font-size: 11px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase;
+}
+.md strong { color: var(--ink); font-weight: 650; }
+.md code { background: var(--line-soft); border-radius: 3px; padding: 1px 4px;
+           color: var(--ink); }
+.md pre { background: var(--line-soft); border-radius: var(--radius);
+          padding: 9px 11px; overflow-x: auto; white-space: pre;
+          font-family: Consolas, "SF Mono", ui-monospace, monospace;
+          font-size: 12.5px; }
+.md pre code { background: none; padding: 0; }
+.md-list { margin: 0 0 9px; padding-left: 18px; }
+.md-list li { margin-bottom: 3px; }
+
+/* The checkboxes are the point of APPLY.md, so they get the hanging box and
+   the bullet gets out of the way. Not real inputs: ticking one would look like
+   it was saved somewhere, and nothing here saves anything. */
+.md-task { list-style: none; display: flex; gap: 8px; margin-left: -18px; }
+.md-box { flex: none; color: var(--ink-faint); font-size: 14px; line-height: 1.4; }
+
+.md-table { border-collapse: collapse; margin: 0 0 10px; font-size: 12.5px; }
+.md-table th, .md-table td {
+  border-bottom: 1px solid var(--line-soft); padding: 5px 14px 5px 0;
+  text-align: left; vertical-align: top;
+}
+.md-table th { color: var(--ink-faint); font-weight: 600; font-size: 11px;
+               letter-spacing: .04em; text-transform: uppercase; }
+
+/* Every blockquote in a packet is a warning. ANSWERS.md uses one to say which
+   answers are still drafts, which is the single sentence in the packet you
+   most want to have read before you paste anything. */
+.md-quote {
+  margin: 0 0 10px; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--warn);
+}
+.md-quote > :last-child { margin-bottom: 0; }
+
+/* The browser's own selection blue over a dark panel is a slab you cannot read
+   through, and selecting a packet file to copy it turns the whole section into
+   one. This keeps the text legible while it is selected. */
+::selection { background: color-mix(in srgb, var(--accent) 28%, transparent);
+              color: var(--ink); }
 
 /* Explorer is on the machine running the server, so this button does nothing
    for the phone that is looking at the page. Hidden there rather than left to
