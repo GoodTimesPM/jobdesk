@@ -2,7 +2,8 @@
 
     py tests/test_radar.py                 # every source
     py tests/test_radar.py capital         # only sources matching "capital"
-    py tests/test_radar.py --scoring       # scoring self-check on synthetic jobs
+    py tests/test_radar.py --scoring       # scoring + salary self-check
+    py tests/test_radar.py --salary        # just the salary reader
     py tests/test_radar.py --discord       # post the synthetic jobs to the webhook
     py tests/test_radar.py --plugins       # delivery registry self-check, no network
 
@@ -37,6 +38,7 @@ if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from jobdesk.radar import config, dedupe, render, score, sources   # noqa: E402
+from jobdesk.radar.sources import ats                               # noqa: E402
 from jobdesk.radar.models import Job                                # noqa: E402
 
 
@@ -220,6 +222,124 @@ def scoring_check() -> int:
     return 0
 
 
+def salary_check() -> int:
+    """Hold the salary reader to the shapes that actually appear in postings.
+
+    Every case here is copied from a live body in `data/radar/candidates.json`
+    on 2026-09-15, including the ones that must NOT parse. Before this, 181
+    postings had a description and no salary; 63 of those had a dollar figure
+    sitting in the text. The split between the two halves of this list is the
+    whole job: an ad is full of money that is not pay.
+    """
+    print("Salary parsing self-check")
+    print("=" * 72)
+
+    def body(text: str) -> Job:
+        job = Job(title="Analyst", company="Example", url="https://x/1",
+                  source="greenhouse")
+        job.description = text
+        return job
+
+    pays = [
+        # Greenhouse renders the band as markup with an entity for the dash.
+        ('<div class="pay-range"><span>$72,000</span>'
+         '<span class="divider">&mdash;</span><span>$115,000 USD</span></div>',
+         (72_000, 115_000), "greenhouse pay-range markup"),
+        # Workday puts the unit between the number and the separator.
+        ("Our cash compensation amount for this role is $111,160/yr to "
+         "$138,950/yr in Denver.",
+         (111_160, 138_950), "a range with /yr on both ends"),
+        # An hourly band. Read as thousands it would be $14,780, below the
+        # floor, and the posting would be discarded as unpaid.
+        ("The pay range estimated for this position based in Virginia is "
+         "$14.78-$19.00.",
+         (14.78 * 2080, 19.00 * 2080), "an hourly range becomes annual"),
+        # A starting salary and a raise schedule, which is not a band. Reading
+        # it as $40k-$42k would invent a ceiling the employer never wrote, so
+        # the floor is all that comes back and the table shows "$40k+".
+        ("Compensation & Benefits $40,000, with an increase to $42,000 after "
+         "the initial 90-day probationary period.",
+         (40_000, None), "one figure on a cue is a floor, not a band"),
+        ("Salary Range: $60,000 - $70,000", (60_000, 70_000), "the plain case"),
+        ("This role pays $95k - $115k depending on experience.",
+         (95_000, 115_000), "k suffixes"),
+        ("Compensation: $32.50 per hour", (32.5 * 2080, 32.5 * 2080),
+         "a lone hourly rate"),
+        ("The base salary range is US$90,000 - US$120,000.",
+         (90_000, 120_000), "US$ is still dollars"),
+    ]
+
+    does_not_pay = [
+        # Workday's unfilled template. It is a real string in real postings.
+        ("The annual full time base salary range for this role is "
+         "$1.00 - $1.00. Specific compensation is determined through "
+         "interviews.", "a $1.00 placeholder is not a salary"),
+        ("We automate how over $200B in annualized spend flows in and out of "
+         "70,000+ companies.", "company metrics are not pay"),
+        ("Over 100,000 cleaning professionals have earned $250M+ through our "
+         "platform.", "platform totals are not pay"),
+        ("Educational assistance up to $2500 per year. Life insurance & AD&D: "
+         "100% employer-paid coverage valued at $10,000 each.",
+         "benefits are not a salary band"),
+        # Cayman Islands dollars, on a Cayman Islands job. Read as USD it is a
+        # plausible $60k-$80k band, which is the worst kind of wrong.
+        ("SALARY: CI$60,000 - CI$80,000 pa WORKING HOURS: 40 HOURS PER WEEK",
+         "another country's dollars are not a US salary"),
+        ("", "an empty body says nothing"),
+    ]
+
+    failures = []
+    def near(got, want):
+        if want is None:
+            return got is None
+        return got is not None and abs(got - want) < 1
+
+    for text, (want_low, want_high), label in pays:
+        got = score.parse_salary(body(text))
+        ok = near(got[0], want_low) and near(got[1], want_high)
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}: {got}")
+        if not ok:
+            failures.append(f"{label}: got {got}, wanted "
+                            f"({want_low}, {want_high})")
+
+    for text, label in does_not_pay:
+        got = score.parse_salary(body(text))
+        ok = got == (None, None)
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}: {got}")
+        if not ok:
+            failures.append(f"{label}: got {got}, wanted nothing")
+
+    # schema.org baseSalary, which the sitemap lane reads off a posting page.
+    schema = [
+        ({"value": {"minValue": 48721, "maxValue": 79172, "unitText": "YEAR"}},
+         (48_721, 79_172), "an annual MonetaryAmount"),
+        ({"value": {"minValue": 23.50, "maxValue": 38.07, "unitText": "HOUR"}},
+         (23.50 * 2080, 38.07 * 2080), "an hourly MonetaryAmount"),
+        ({"value": {"value": 65000, "unitText": "YEAR"}},
+         (65_000, 65_000), "a single stated figure"),
+        ({"value": {"minValue": 0, "maxValue": 0, "unitText": "YEAR"}},
+         (None, None), "a zeroed band is not a band"),
+    ]
+    for base, want, label in schema:
+        got = ats._schema_salary({"baseSalary": base})
+        ok = (got == want if want[0] is None else
+              got[0] is not None and abs(got[0] - want[0]) < 1
+              and abs(got[1] - want[1]) < 1)
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}: {got}")
+        if not ok:
+            failures.append(f"{label}: got {got}, wanted {want}")
+
+    print("\n" + "=" * 72)
+    if failures:
+        print(f"{len(failures)} salary expectation(s) broke:")
+        for line in failures:
+            print("  " + line)
+        return 1
+    print(f"all {len(pays) + len(does_not_pay) + len(schema)} "
+          f"salary expectations hold")
+    return 0
+
+
 def plugins_check() -> int:
     """Hold the delivery registry to its two promises, with no network.
 
@@ -331,7 +451,9 @@ if __name__ == "__main__":
     if "--plugins" in args:
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
-        raise SystemExit(scoring_check())
+        raise SystemExit(scoring_check() or salary_check())
+    elif "--salary" in args:
+        raise SystemExit(salary_check())
     elif "--discord" in args:
         discord_check()
     else:
