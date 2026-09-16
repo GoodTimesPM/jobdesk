@@ -19,7 +19,7 @@ import time
 import traceback
 from datetime import datetime
 
-from .. import paths
+from .. import __version__, paths
 from . import server, shortcut
 
 TITLE = "JobDesk"
@@ -95,6 +95,60 @@ def _app_window(title: str):
     return found[0] if found else None
 
 
+def _raise_other_window(title: str) -> bool:
+    """Bring another process's JobDesk window to the front. Did it work?
+
+    The companion to `_app_window`, which deliberately only finds our own.
+    This one wants the opposite: a JobDesk belonging to some other process,
+    which is what a second launch of the icon has found.
+
+    Same two guards as the local search, and for the same reason -- visible,
+    and no owner -- so this cannot fasten onto the invisible shell stand-in
+    that copies our title for taskbar thumbnails. Raising that succeeds and
+    shows you nothing.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return False
+
+    user32 = ctypes.windll.user32
+    me = os.getpid()
+    found = []
+
+    def visit(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == me or not user32.IsWindowVisible(hwnd):
+            return True
+        if user32.GetWindow(hwnd, 4):          # GW_OWNER: a dialog, not a frame
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if buf.value == title:
+            found.append(hwnd)
+            return False
+        return True
+
+    try:
+        callback = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(visit)
+        user32.EnumWindows(callback, 0)
+        if not found:
+            return False
+        SW_RESTORE = 9
+        user32.ShowWindow(found[0], SW_RESTORE)
+        # Windows refuses SetForegroundWindow to a process that is not the
+        # one the user is currently interacting with, and reports the refusal
+        # as a plain zero. The restore above has already un-minimised it, so
+        # a refusal still leaves the window on screen -- just not in front.
+        user32.SetForegroundWindow(found[0])
+        return True
+    except Exception:
+        return False
+
+
 def _set_window_icon(title: str, tries: int = 40) -> None:
     """Hang the JobDesk icon on the window frame.
 
@@ -148,12 +202,68 @@ def _idle() -> int:
         return 0
 
 
-def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
-    _set_app_id()
+def _existing(port: int) -> str | None:
+    """The address of a JobDesk already running here, if this window should use it.
+
+    Opening the icon twice used to mean two JobDesks. The second one found its
+    port busy, quietly took the next one, and served its own copy of the code
+    and its own read of the data -- so a window left open for a week kept
+    answering out of the week-old process while the file on disk moved on
+    underneath it, and nothing on screen said which one you were looking at.
+
+    A window is a view. If JobDesk is already running here, point at it.
+
+    A different version answering is the one case worth a second server: that
+    process is running code this one has since replaced, and silently
+    attaching to it is how an update appears not to have happened. Say both
+    numbers out loud and take the next port.
+    """
+    running = server.probe(port)
+    if running == __version__:
+        log(f"JobDesk {running} is already running on {port}.")
+        return f"http://{server.HOST}:{port}/"
+    if running:
+        log(f"A JobDesk running {running} already holds port {port}, and this "
+            f"one is {__version__}. Starting a second server rather than "
+            f"showing you the old code. Close the other window.")
+    return None
+
+
+def _server_for(port: int) -> tuple[str, bool]:
+    """Where this window points, and whether this process owns what is there."""
+    attach = _existing(port)
+    if attach:
+        return attach, False
     url, _httpd = server.start_background(port)
+    return url, True
+
+
+def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
+    """Open JobDesk. One of these per machine, not one per double-click.
+
+    Opening the icon twice used to mean two JobDesks: the second found its
+    port busy, quietly took the next one, and served its own copy of the code
+    and its own read of the data. A window left open for a week then kept
+    answering out of the week-old process while the files on disk moved on
+    underneath it, and nothing on screen said which one you were looking at.
+
+    So a second launch raises the window that is already open and stops. It is
+    what a person double-clicking an icon a second time means by it, and it
+    leaves exactly one process owning the server.
+    """
+    _set_app_id()
+    if window and server.probe(port) == __version__ and _raise_other_window(TITLE):
+        log("JobDesk is already open. Raised that window instead of "
+            "starting a second one.")
+        return 0
+
+    url, ours = _server_for(port)
     log(f"JobDesk is at {url}")
 
     if not window:
+        # Nothing to hold open if the server belongs to another process.
+        if not ours:
+            return 0
         print("Ctrl-C to stop.")
         return _idle()
 
@@ -162,7 +272,7 @@ def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
     except ImportError:
         log("pywebview is not installed, so there is no window. The address "
             "above works in any browser; `pip install pywebview` for the app.")
-        return _idle()
+        return _idle() if ours else 0
 
     webview.create_window(
         TITLE, url,
@@ -184,5 +294,5 @@ def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
     except Exception:  # no WebView2 runtime, no display, a driver that refused
         log("could not open a window, so JobDesk is running headless at the "
             "address above:\n" + traceback.format_exc())
-        return _idle()
+        return _idle() if ours else 0
     return 0
