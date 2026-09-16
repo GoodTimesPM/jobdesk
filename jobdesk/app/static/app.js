@@ -238,7 +238,8 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 // thing to see first when the window opens is what is new, and the score
 // breaks the tie between two postings from the same day.
 const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
-                market: {}, marketIndex: null, starsGone: [] };
+                market: {}, marketIndex: null, starsGone: [],
+                lastRun: null };
 
 // The two orders the "Order" menu and Settings offer, as a column and a
 // direction. Clicking a column header picks a third, and the menu says so.
@@ -277,6 +278,7 @@ async function loadJobs() {
     const data = await get("/api/jobs");
     state.jobs = data.jobs;
     state.starsGone = data.stars_gone || [];
+    state.lastRun = data.last_run || null;
     stamp(data);
     drawStarsGone();
     draw();
@@ -285,6 +287,61 @@ async function loadJobs() {
     banner(err.message, true);
   }
 }
+
+/* ------------------------------------------------------------ the radar ran
+
+   This window stays open for days, and the radar runs to a schedule behind
+   it -- 7:00, 12:30 and 17:00 by default. A page that loaded its rows once
+   is showing yesterday by breakfast, and the only sign is a timestamp under
+   the filters that nobody reads until the table looks wrong.
+
+   So ask. `/api/pulse` stats one file and answers in bytes, which is cheap
+   enough to do on a timer; the rows are only refetched when the answer
+   changes. The tab also asks the moment it comes back to the front, because
+   the most likely minute for the table to be stale is the one where you
+   have just walked back to it. */
+
+const PULSE_SECONDS = 60;
+let pulsing = false;
+
+async function checkRadar() {
+  // Not while the previous check is still out, and not while the page is
+  // hidden: a minimised window polling every minute all night is a battery
+  // cost for an answer nobody is looking at.
+  if (pulsing || document.hidden || !state.lastRun) return;
+  pulsing = true;
+  try {
+    const beat = await get("/api/pulse");
+    if (beat.last_run && beat.last_run !== state.lastRun) await refreshJobs();
+  } catch {
+    // The server restarting is not news. The next beat will find it.
+  } finally {
+    pulsing = false;
+  }
+}
+
+/* Reload in place. Every filter, the sort, the open row and the stars are
+   held in `state` and on the controls, so redrawing keeps all of them; what
+   moves is the rows. Say how many are new rather than refreshing silently,
+   because a table that changes under you with no explanation reads as a
+   bug. */
+async function refreshJobs() {
+  const before = new Set(state.jobs.map((j) => j.uid));
+  await loadJobs();
+  const added = state.jobs.filter((j) => !before.has(j.uid)).length;
+  const ran = state.lastRun ? new Date(state.lastRun) : null;
+  const at = ran && !isNaN(ran)
+    ? ran.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  banner(added
+    ? `The radar ran${at ? " at " + at : ""}. ${plural(added, "new posting")}.`
+    : `The radar ran${at ? " at " + at : ""}. Nothing new above your floor.`);
+}
+
+setInterval(checkRadar, PULSE_SECONDS * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkRadar();
+});
+window.addEventListener("focus", checkRadar);
 
 // How a posting compares with the rest of its corner of the market, and a
 // salary band for the ones that never printed one. Both come from the same

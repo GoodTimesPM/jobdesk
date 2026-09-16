@@ -91,6 +91,31 @@ def _candidates() -> tuple[list[dict], str]:
     return [r for r in rows if isinstance(r, dict)], stamp
 
 
+def pulse(query, body) -> dict:
+    """Has the radar written since you last looked? Nothing else.
+
+    The window is open for days at a time and the radar runs to a schedule
+    behind it, so a page that loads its rows once is showing yesterday by
+    morning. This is what the page asks on a timer instead.
+
+    It stats the candidate file and does not parse it. `/api/status` would
+    answer the same question, but it reads and decodes a couple of megabytes
+    of JSON to do it, and a request that costs that much is one nobody can
+    afford to make every minute. mtime and size are enough: the radar
+    rewrites the whole file every run.
+    """
+    path = radar_config.CANDIDATES
+    try:
+        info = path.stat()
+    except OSError:
+        return {"last_run": "", "size": 0}
+    return {
+        "last_run": datetime.fromtimestamp(info.st_mtime,
+                                           timezone.utc).isoformat(),
+        "size": info.st_size,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Setup wizard
 # ---------------------------------------------------------------------------
@@ -838,6 +863,7 @@ ROUTES = {
     ("POST", "/api/setup/check"): check_setup,
     ("POST", "/api/setup/save"): save_setup,
     ("GET", "/api/jobs"): jobs,
+    ("GET", "/api/pulse"): pulse,
     ("GET", "/api/job"): job,
     ("GET", "/api/market"): market_context,
     ("POST", "/api/star"): set_star,

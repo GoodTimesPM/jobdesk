@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
+from .. import __version__
 from . import access, api, market, net
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -65,6 +66,19 @@ class Handler(BaseHTTPRequestHandler):
         # a future edit fails loudly instead of quietly phoning home.
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; style-src 'self' 'unsafe-inline'")
+        # Nothing here is worth caching and a stale copy is expensive. The
+        # files are on the same disk as the process reading them, so a cache
+        # saves a read of a few kilobytes; what it costs is an updated page
+        # that keeps serving the old one, and a /api/jobs answer from before
+        # the radar ran. Neither announces itself -- you just see numbers
+        # that are quietly wrong.
+        self.send_header("Cache-Control", "no-store")
+        # Who answered, and running what. This is how another JobDesk starting
+        # up tells "something is on my port" from "I am already running", and
+        # it rides on every response including the refusals, because a server
+        # behind the token gate still has to be identifiable to the machine
+        # it is sitting on.
+        self.send_header("X-JobDesk-Version", __version__)
         self.end_headers()
         self.wfile.write(body)
 
@@ -247,15 +261,58 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, target.read_bytes(), kind or "application/octet-stream")
 
 
-def _free_port(start: int) -> int:
+def probe(port: int = DEFAULT_PORT, host: str = HOST, timeout: float = 0.6):
+    """The version of the JobDesk already answering there, or None.
+
+    None means nothing answered, or something answered that is not us. The
+    version comes off a header rather than out of a body because a server
+    with phone access turned on refuses an untokened request -- and a 403
+    from JobDesk still answers the question being asked here, which is "is
+    this my own program on this port".
+
+    Written against a raw socket rather than urllib: this runs before a window
+    opens and the only interesting outcome is a quick no.
+    """
+    try:
+        with socket.create_connection((host, port), timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(f"GET /api/pulse HTTP/1.1\r\nHost: {host}\r\n"
+                         f"Connection: close\r\n\r\n".encode())
+            head = b""
+            while b"\r\n\r\n" not in head and len(head) < 4096:
+                chunk = sock.recv(1024)
+                if not chunk:
+                    break
+                head += chunk
+    except OSError:
+        return None
+    text = head.decode("latin-1", "replace")
+    if "JobDesk" not in text:
+        return None
+    for line in text.split("\r\n"):
+        name, _, value = line.partition(":")
+        if name.strip().lower() == "x-jobdesk-version":
+            return value.strip() or "unknown"
+    # An older build that has the name in its Server: header but not the
+    # version header. Still us, still worth not starting a second copy of.
+    return "unknown"
+
+
+def _free_port(start: int, address: str = HOST) -> int:
     """The first port at or after `start` nothing is listening on.
+
+    The address matters and used to be assumed. This probed loopback whatever
+    it was about to bind, so a server going onto the tailnet address would
+    step over a port that was free on the tailnet address because the desktop
+    window happened to hold it on 127.0.0.1 -- and land on a port nobody was
+    told about. Probe the socket that is actually going to be opened.
 
     A stale JobDesk left running in another window should not be a startup
     error. Taking the next port and printing it is friendlier than refusing.
     """
     for port in range(start, start + 20):
-        with socket.socket() as probe:
-            if probe.connect_ex((HOST, port)) != 0:
+        with socket.socket() as sock:
+            if sock.connect_ex((address, port)) != 0:
                 return port
     raise SystemExit(f"no free port in {start}-{start + 19}")
 
@@ -275,7 +332,7 @@ def _bind(host, port: int):
     global REQUIRE_TOKEN
     address, kind = net.resolve(host)
     REQUIRE_TOKEN = access.check(address)
-    port = _free_port(port)
+    port = _free_port(port, address)
     httpd = ThreadingHTTPServer((address, port), Handler)
     return httpd, f"http://{HOST}:{port}/", kind
 
