@@ -37,10 +37,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
 
+import jobdesk
 from jobdesk import paths
-from jobdesk.app import (access, actions, api, archive, jdstruct, market, net,
-                         phone, resume_import, runner, server, setup, stars,
-                         tomlpatch)
+from jobdesk.app import (access, actions, api, archive, desktop, jdstruct,
+                         market, net, phone, resume_import, runner, server,
+                         setup, stars, tomlpatch)
 
 PASS, FAIL = 0, 0
 
@@ -346,6 +347,16 @@ def test_api() -> None:
         code, missing = live.get("/api/job?uid=nope")
         check("an unknown posting is a readable 400",
               code == 400 and "no posting" in missing["error"])
+
+        # The page polls this every minute to notice a scheduled radar run,
+        # so it has to answer the same stamp the list did and cost nothing.
+        code, beat = live.get("/api/pulse")
+        check("the pulse answers", code == 200 and "last_run" in beat, str(beat))
+        check("the pulse agrees with the list about when the radar ran",
+              beat["last_run"] == body["last_run"],
+              f"{beat.get('last_run')} != {body.get('last_run')}")
+        check("the pulse carries no postings",
+              "jobs" not in beat and len(beat) == 2, str(beat))
 
         code, body = live.post("/api/rescore", {})
         check("rescore answers", code == 200 and "moved" in body)
@@ -989,6 +1000,41 @@ def test_market_route() -> None:
                       for v in body["jobs"].values()))
 
 
+# -- one window, one server -------------------------------------------------
+
+def test_one_server() -> None:
+    """A second window finds the first one instead of starting a rival."""
+    section("one server, however many windows")
+
+    check("nothing answers on a port nothing is on",
+          server.probe(59999, timeout=0.3) is None)
+
+    with Live() as live:
+        here = f"http://{server.HOST}:{live.port}/"
+        found = server.probe(live.port)
+        check("a running JobDesk is recognised by another process",
+              found == jobdesk.__version__, str(found))
+
+        # What the window does with that answer. Same version, and it is a
+        # view of what is already up rather than a second server.
+        check("a second window attaches to the first",
+              desktop._existing(live.port) == here,
+              str(desktop._existing(live.port)))
+        check("and nothing is attached to on a free port",
+              desktop._existing(59999) is None)
+
+        # A different version is the one case worth a second server: that
+        # process runs code this one has replaced, and attaching to it would
+        # make an update look like it never happened.
+        original = desktop.__version__
+        try:
+            desktop.__version__ = "0.0.0-not-this-one"
+            check("a version that is not this one is not attached to",
+                  desktop._existing(live.port) is None)
+        finally:
+            desktop.__version__ = original
+
+
 # -- the star ---------------------------------------------------------------
 
 def test_stars() -> None:
@@ -1067,6 +1113,7 @@ def main() -> int:
     test_write()
     test_api()
     test_stars()
+    test_one_server()
     test_settings()
     test_delivery_edit()
     test_jdstruct()
