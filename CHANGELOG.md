@@ -2,6 +2,43 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.2.6 — 2026-09-16
+
+### Fixed
+
+- **The Jobs tab notices that the radar ran.** The window stays open for days
+  and the radar runs to a schedule behind it, but the page loaded its rows
+  once and never asked again, so a window left open overnight showed
+  yesterday evening's scoring all morning. It now asks `/api/pulse` once a
+  minute, and again the moment the window comes back to the front. When the
+  answer changes it reloads the rows in place, keeps your filters, sort, open
+  row and stars, and says how many postings are new.
+- **`/api/pulse`.** One `stat` of the candidate file, no parse. `/api/status`
+  answered the same question by reading and decoding two and a half megabytes
+  of JSON, which is not a request anything can afford to make every minute.
+- **Nothing the server sends is cached.** Every response now carries
+  `Cache-Control: no-store`. The files are on the same disk as the process
+  reading them, so a cache saves nothing worth having, and what it costs is a
+  page that keeps serving the old copy after an update and a job list from
+  before the last run. Neither failure announces itself.
+- **One JobDesk, however many times you open the icon.** A second launch used
+  to start a second server: it found the port busy, quietly took the next one,
+  and served its own copy of the code and its own read of the data. A window
+  left open for a week then kept answering out of the week-old process while
+  the files on disk moved on underneath it, with nothing on screen saying
+  which one you were looking at. A second launch now raises the window that is
+  already open and exits.
+- **The port search probes the address it is about to bind.** It always probed
+  loopback, whatever it was really binding, so the headless server going onto
+  the tailnet address stepped over a port that was free on that address
+  because the desktop window happened to hold it on 127.0.0.1 -- and landed on
+  a port nobody had been told about. That is how two servers on "the same
+  port" ended up being two different ports.
+- **`X-JobDesk-Version` on every response.** How one JobDesk tells "something
+  is on my port" from "I am already running", and which build is answering.
+  It rides on the refusals too, because a server behind the phone-access token
+  still has to be identifiable to the machine it is sitting on.
+
 ## 0.2.5 — 2026-09-15
 
 ### Added
