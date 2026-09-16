@@ -2,6 +2,101 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.2.5 — 2026-09-15
+
+### Added
+
+- **A star on every row in the Jobs tab.** A posting worth coming back to,
+  marked in one click. The stars live in `data/stars.json` on the server
+  rather than in the browser, because JobDesk is one app opened from a
+  desktop window and a phone, and a star put on a row at lunch should be on
+  that row in the evening. `Starred only` is a filter next to the others and
+  a default in Settings, and the star column sorts like any other.
+- **A star outlives the posting it is on.** The radar keeps thirty days and
+  then drops a posting, which would turn a star into an id pointing at
+  nothing. So each star also keeps the title, the company and the link as
+  they were when it was set, and the Jobs tab says "2 starred postings aged
+  out of the list" underneath the table with both still linked. Losing one
+  quietly is the failure this is here to prevent.
+
+### Fixed
+
+- **`Install.cmd` survives being downloaded.** Everything extracted from a ZIP
+  carries a mark saying it came from the internet, and Windows refuses to run
+  a marked script. The symptom was not an error anyone could act on: a window
+  opened, something mentioned a digital signature, and nothing installed. The
+  installer now clears the mark on the way in.
+- **Running it from inside the ZIP says so.** Double-clicking a `.cmd` without
+  extracting first does not fail; Windows copies that one file somewhere else
+  and runs it there, alone, away from everything it needs. The error that
+  followed was about a missing `requirements.txt`, which sends you looking for
+  the wrong problem. The installer now recognises the temporary folder
+  Explorer uses and tells you to extract first.
+
+## 0.2.4 — 2026-09-15
+
+A salary on every row, the right icon on the window, and a survey of the
+other forty-nine states.
+
+### Added
+
+- **Salaries are read out of the JD body.** The APIs publish a band on 201 of
+  435 live candidates. The rest often state one in prose and nothing was
+  looking: `parse_salary` now handles Greenhouse's markup band
+  (`<span>$72,000</span><span class="divider">&mdash;</span>`), Workday's
+  `$111,160/yr to $138,950/yr`, hourly ranges, a lone hourly rate, and a lone
+  figure sitting on a compensation cue, which is reported as a floor rather
+  than inflated into a band. That is 36 more employer-stated figures, 46.2% to
+  54.7%. The other half of the job is refusal: `$200B in annualized spend`,
+  `$250M+ earned through our platform`, `educational assistance up to $2500`,
+  Workday's unfilled `$1.00 - $1.00` template and another country's dollars
+  (`CI$60,000`, a Cayman Islands job) all have to stay out, and each of them
+  is a test case taken from a real posting.
+- **schema.org `baseSalary` on the sitemap lane.** The sitemap sources parse a
+  `JobPosting` block for the title, the location and the description and threw
+  the salary away, so that lane published a band 0% of the time.
+  `MonetaryAmount` now comes through, hourly and weekly and monthly converted
+  to annual.
+- **A survey of the other states' job indexes.** `scripts/radar/
+  discover_state_boards.py` probes all 51 state and DC career sites against
+  the same three gates a source has to clear to be added: robots.txt permits
+  the path, the sitemap lists individual postings, a sample posting carries
+  JobPosting markup. The candidate list is in `state_board_candidates.py`.
+  The honest result is that one state clears all three. Ten run on NEOGOV,
+  whose terms forbid harvesting, and the codebase already said so.
+
+### Changed
+
+- **The estimator widens instead of giving up.** A posting with no published
+  band was compared against its own job family in its own region and nothing
+  else, and 48 of 435 postings fell through that cell because it held fewer
+  than eight published bands. It now steps out: the family anywhere, then the
+  region across families, then the whole series. Every row shows a figure,
+  `basis` says how wide the comparison had to go, and `estimated: true` still
+  travels with it so nothing can show it as the employer's number.
+- **A bot challenge is reported, not swallowed.** `fetch_details` caught every
+  exception and continued, so a host that stopped returning bodies looked
+  exactly like a host whose postings are all short. jobs.virginia.gov answers
+  202 with an empty body, and 52 Commonwealth postings sat in the candidate
+  set with no description and no salary and nothing anywhere saying why. An
+  empty 2xx now raises `Challenged`, the run log names the source, and the
+  rest of the detail budget stops being spent on it. The challenge itself is
+  not worked around.
+
+### Fixed
+
+- **The window wears the JobDesk icon.** It had a Python logo. `_set_window_icon`
+  found its target with `FindWindowW`, which walks every window on the desktop
+  in Z-order and returns the first title match. On Windows 11 that match is
+  `Windows.Internal.Shell.TabProxyWindow`, an invisible stand-in the shell
+  makes for taskbar thumbnails, which copies the app title. Loading an icon
+  onto it succeeds and reports success and changes nothing you can see. The
+  real frame is found by `EnumWindows` filtered to this process's own visible
+  unowned top-level window. `LR_DEFAULTSIZE` is gone too, because it overrode
+  the 16 and 32 pixel sizes being asked for. The process also declares an
+  AppUserModelID, so JobDesk gets its own taskbar button instead of sharing
+  one with every other `pythonw.exe` app.
+
 ## 0.2.3 — 2026-09-14
 
 The packet, read rather than dumped.
