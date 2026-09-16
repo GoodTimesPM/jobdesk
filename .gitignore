@@ -52,5 +52,10 @@ data/calibration/
 # with. One person's taste, so a fresh clone starts from the defaults.
 data/settings.json
 
+# Which postings were starred to come back to, with the titles and
+# links as they were. One person's bookmarks, and they name employers.
+data/stars.json
+data/stars.tmp
+
 # data/engine/jds/ is deliberately NOT ignored: it is the corpus behind the
 # keyword gap report, and postings come down.
