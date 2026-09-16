@@ -75,6 +75,7 @@
     <label class="check"><input type="checkbox" id="hide-applied" checked> Hide applied</label>
     <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
     <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
+    <label class="check"><input type="checkbox" id="starred-only"> Starred only</label>
     <label class="pick">Order
       <select id="order">
         <option value="newest">newest first</option>
@@ -116,6 +117,7 @@
     <table class="grid" id="jobs">
       <thead>
         <tr>
+          <th class="sortable star" data-key="starred" title="Postings you starred to come back to">&#9733;</th>
           <th class="sortable" data-key="score">Score</th>
           <th class="sortable" data-key="title">Title</th>
           <th class="sortable" data-key="company">Company</th>
@@ -130,6 +132,7 @@
     </table>
   </div>
   <p class="empty" id="jobs-empty" hidden></p>
+  <p class="note" id="stars-gone" hidden></p>
 </main>
 
 <!-- == applied ======================================================== -->
@@ -581,6 +584,7 @@
       <label class="check"><input type="checkbox" data-pref="hide_applied"> Hide jobs I have applied to</label>
       <label class="check"><input type="checkbox" data-pref="hide_prepared"> Hide jobs I already built a packet for</label>
       <label class="check"><input type="checkbox" data-pref="remote_only"> Show remote jobs only</label>
+      <label class="check"><input type="checkbox" data-pref="starred_only"> Show starred jobs only</label>
     </div>
   </section>
 

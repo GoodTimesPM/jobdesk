@@ -13,6 +13,7 @@ silently is a GUI you debug by guessing.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -38,6 +39,62 @@ def log(message: str) -> None:
     print(message)
 
 
+# Windows groups taskbar buttons by AppUserModelID, and a process that never
+# sets one is grouped by its executable. Every pywebview app on this machine
+# runs under the same pythonw.exe, so without this JobDesk shares a taskbar
+# button -- and an icon -- with whatever else is open. Must run before the
+# first window exists, which is why launch() calls it first.
+APP_ID = "GoodTimesPM.JobDesk"
+
+
+def _set_app_id() -> None:
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    except Exception:
+        pass
+
+
+def _app_window(title: str):
+    """Our own visible top-level window with this title, or None.
+
+    Not `FindWindowW`, which walks every window on the desktop in Z-order and
+    returns the first title match. On Windows 11 that match is usually
+    `Windows.Internal.Shell.TabProxyWindow` -- an invisible stand-in the shell
+    creates for taskbar thumbnails, which copies our title. Setting an icon on
+    it succeeds, reports success, and changes nothing you can see, which is
+    exactly what JobDesk shipped doing.
+
+    So the window is identified by what actually distinguishes it: it belongs
+    to this process, it is visible, and it has no owner.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    me = os.getpid()
+    found = []
+
+    def visit(hwnd, _lparam):
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value != me or not user32.IsWindowVisible(hwnd):
+            return True
+        if user32.GetWindow(hwnd, 4):          # GW_OWNER: a dialog, not the frame
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if buf.value == title:
+            found.append(hwnd)
+            return False
+        return True
+
+    callback = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(visit)
+    user32.EnumWindows(callback, 0)
+    return found[0] if found else None
+
+
 def _set_window_icon(title: str, tries: int = 40) -> None:
     """Hang the JobDesk icon on the window frame.
 
@@ -57,22 +114,22 @@ def _set_window_icon(title: str, tries: int = 40) -> None:
         return
     try:
         import ctypes
-        from ctypes import wintypes
     except Exception:
         return
 
-    IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x0010, 0x0040
+    # LR_DEFAULTSIZE is deliberately absent: it overrides the size asked for,
+    # and the point of the two calls is one icon drawn for the title bar and a
+    # larger one for the taskbar and alt-tab.
+    IMAGE_ICON, LR_LOADFROMFILE = 1, 0x0010
     WM_SETICON, ICON_SMALL, ICON_BIG = 0x0080, 0, 1
     try:
         user32 = ctypes.windll.user32
-        user32.FindWindowW.restype = wintypes.HWND
         for _ in range(tries):
-            hwnd = user32.FindWindowW(None, title)
+            hwnd = _app_window(title)
             if hwnd:
                 for which, size in ((ICON_SMALL, 16), (ICON_BIG, 32)):
                     handle = user32.LoadImageW(None, str(path), IMAGE_ICON,
-                                               size, size,
-                                               LR_LOADFROMFILE | LR_DEFAULTSIZE)
+                                               size, size, LR_LOADFROMFILE)
                     if handle:
                         user32.SendMessageW(hwnd, WM_SETICON, which, handle)
                 return
@@ -92,6 +149,7 @@ def _idle() -> int:
 
 
 def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
+    _set_app_id()
     url, _httpd = server.start_background(port)
     log(f"JobDesk is at {url}")
 

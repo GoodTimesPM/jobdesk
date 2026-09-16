@@ -178,7 +178,9 @@ def _age_days(posted, now) -> float | None:
 # -- the index -----------------------------------------------------------
 
 def _blank() -> dict:
-    return {"groups": {}, "files": 0, "postings": 0, "built_at": None}
+    return {"groups": {}, "families": {}, "places": {},
+            "everything": {"low": [], "high": []},
+            "files": 0, "postings": 0, "built_at": None}
 
 
 def _read_snapshots() -> dict:
@@ -227,16 +229,32 @@ def _read_snapshots() -> dict:
             seen[key] = row
 
     groups: dict[str, dict] = {}
+    # The same published bands, pooled three more ways. A family-by-place cell
+    # is the sharpest comparison and also the emptiest: "governance/controls
+    # in VA" held two of them on 2026-09-15. Keeping the wider pools costs
+    # four more lists and is what lets the estimator widen instead of give up.
+    families: dict[str, dict] = {}
+    places: dict[str, dict] = {}
+    everything: dict = {"low": [], "high": []}
+
     for row in seen.values():
+        family = row.get("job_family") or "other"
+        place = region(row.get("location") or "", row.get("remote"))
         group = groups.setdefault(
-            f"{row.get('job_family') or 'other'}\u0000"
-            f"{region(row.get('location') or '', row.get('remote'))}",
+            f"{family}\u0000{place}",
             {"pay": [], "low": [], "high": [], "age": [], "reach": [],
              "employers": set(), "roles": {}},
         )
         low = _annual(row.get("salary_min"))
         high = _annual(row.get("salary_max"))
         if low or high:
+            for pool in (families.setdefault(family, {"low": [], "high": []}),
+                         places.setdefault(place, {"low": [], "high": []}),
+                         everything):
+                if low:
+                    pool["low"].append(low)
+                if high:
+                    pool["high"].append(high)
             group["pay"].append((low or high) / 2 + (high or low) / 2)
             if low:
                 group["low"].append(low)
@@ -257,8 +275,13 @@ def _read_snapshots() -> dict:
         group["employers"] = len(group["employers"])
         group["count"] = max(len(group["reach"]), 1)
 
-    return {"groups": groups, "files": len(files), "postings": len(seen),
-            "built_at": now.isoformat()}
+    for pool in (*families.values(), *places.values(), everything):
+        pool["low"].sort()
+        pool["high"].sort()
+
+    return {"groups": groups, "families": families, "places": places,
+            "everything": everything, "files": len(files),
+            "postings": len(seen), "built_at": now.isoformat()}
 
 
 def _build() -> None:
@@ -436,10 +459,18 @@ def assess(job: dict) -> dict | None:
 def estimate_salary(job: dict) -> dict | None:
     """A salary band for a posting that did not publish one.
 
-    Medians of what comparable postings in the same peer group actually pay.
-    It is a guess from local evidence and the UI must label it as one -- the
-    `estimated` flag exists so no part of the app can show it as a figure the
-    employer stated.
+    Medians of what comparable postings actually pay. It is a guess from local
+    evidence and the UI must label it as one -- the `estimated` flag exists so
+    no part of the app can show it as a figure the employer stated.
+
+    Four rungs, narrowest first. The sharpest comparison is the same job
+    family in the same place, and that cell is frequently too thin to median:
+    48 of 435 live candidates fell through it, every one of them because the
+    family-by-place cell held fewer than eight published bands. So the search
+    widens -- the family anywhere, then the place across families, then the
+    whole corpus -- and `basis` says which rung answered. A wide comparison is
+    worth less than a narrow one and the user should be able to see that, but
+    it is worth considerably more than an empty cell.
     """
     if _annual(job.get("salary_min")) or _annual(job.get("salary_max")):
         return None
@@ -450,24 +481,34 @@ def estimate_salary(job: dict) -> dict | None:
 
     family = job.get("job_family") or "other"
     place = region(job.get("location") or "", job.get("remote"))
-    group = index["groups"].get(f"{family}\u0000{place}")
-    if not group:
-        return None
-    lows, highs = group["low"], group["high"]
-    if len(lows) < MIN_PEERS or len(highs) < MIN_PEERS:
-        return None
+    rungs = [
+        (index.get("groups", {}).get(f"{family}\u0000{place}"),
+         f"{family} postings in {_place_name(place)}"),
+        (index.get("families", {}).get(family),
+         f"{family} postings everywhere"),
+        (index.get("places", {}).get(place),
+         f"postings in {_place_name(place)}, across every job family"),
+        (index.get("everything"),
+         "postings in the whole series, across every family and place"),
+    ]
 
-    low, high = _median(lows), _median(highs)
-    if not low or not high or high < low:
-        return None
-    return {
-        "salary_min": round(low),
-        "salary_max": round(high),
-        "estimated": True,
-        "basis": f"Median of {len(lows)} {family} postings in "
-                 f"{_place_name(place)} that published a band. The employer "
-                 f"did not state one.",
-    }
+    for pool, described in rungs:
+        if not pool:
+            continue
+        lows, highs = pool["low"], pool["high"]
+        if len(lows) < MIN_PEERS or len(highs) < MIN_PEERS:
+            continue
+        low, high = _median(lows), _median(highs)
+        if not low or not high or high < low:
+            continue
+        return {
+            "salary_min": round(low),
+            "salary_max": round(high),
+            "estimated": True,
+            "basis": f"Median of {len(lows)} {described} that published a "
+                     f"band. The employer did not state one.",
+        }
+    return None
 
 
 def _place_name(place: str) -> str:

@@ -25,7 +25,7 @@ from pathlib import Path
 from .. import paths, profile
 from ..radar import config as radar_config
 from . import (actions, archive, criteria, jdstruct, market, prefs,
-               resume_import, runner, setup, tomlpatch)
+               resume_import, runner, setup, stars, tomlpatch)
 
 
 class BadRequest(RuntimeError):
@@ -225,6 +225,7 @@ def jobs(query, body) -> dict:
     return {
         "jobs": listed,
         "last_run": stamp,
+        "stars_gone": stars.gone({r.get("uid") or "" for r in listed}),
         "using_example": profile.is_example(),
         "tiers": {t: sum(1 for r in listed if r.get("tier") == t)
                   for t in ("A", "B", "C", "D", "F")},
@@ -365,7 +366,9 @@ _SENT = ("applied", "followed-up", "screening", "interview", "offer",
 def _mark_rows(rows: list[dict]) -> None:
     """Stamp each posting with what the application log knows about it."""
     state = _log_state()
+    starred = stars.marked()
     for row in rows:
+        row["starred"] = (row.get("uid") or "") in starred
         known = state.get(row.get("uid") or "")
         row["applied"] = bool(known and known["status"] in _SENT)
         row["prepared"] = bool(known and known["status"] == "prepared")
@@ -801,6 +804,23 @@ def phone_rotate(query, body) -> dict:
         raise BadRequest(f"could not write the new token: {exc}")
 
 
+def set_star(query, body) -> dict:
+    """Star or unstar one posting.
+
+    The label travels with the request rather than being looked up here. The
+    page already has the row it just drew, and a star set on the last day of
+    a posting's thirty should survive the sweep that drops it.
+    """
+    about = {k: _text(body, k) for k in ("title", "company", "url", "source")}
+    on = body.get("starred")
+    try:
+        return stars.set_star(_text(body, "uid"), bool(on), about)
+    except ValueError as exc:
+        raise BadRequest(str(exc))
+    except OSError as exc:
+        raise BadRequest(f"the star could not be saved: {exc}")
+
+
 def _int_query(query, name: str, fallback: int) -> int:
     raw = (query.get(name) or [""])[0]
     try:
@@ -820,6 +840,7 @@ ROUTES = {
     ("GET", "/api/jobs"): jobs,
     ("GET", "/api/job"): job,
     ("GET", "/api/market"): market_context,
+    ("POST", "/api/star"): set_star,
     ("GET", "/api/targeting"): targeting,
     ("POST", "/api/targeting"): save_targeting,
     ("POST", "/api/rescore"): rescore,
