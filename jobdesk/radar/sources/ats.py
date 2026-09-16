@@ -380,6 +380,15 @@ def _deslug(slug: str) -> tuple[str, str]:
     return title.replace("-", " ").title(), location
 
 
+class Challenged(RuntimeError):
+    """A site answered without content -- a bot check, not a posting.
+
+    Raised rather than returned because it is not a fact about this posting.
+    Every other posting on the same host is about to do the same thing, and
+    the caller should stop asking and say so.
+    """
+
+
 def sitemap(entry: dict) -> list[Job]:
     """Read an employer's sitemap and turn its job URLs into Jobs.
 
@@ -426,6 +435,61 @@ def sitemap(entry: dict) -> list[Job]:
     return out
 
 
+# schema.org publishes pay as a MonetaryAmount, and a JobPosting that carries
+# one is an employer stating a figure rather than a regex inferring it. The
+# sitemap lane ignored it until 2026-09-15, which is why every posting from a
+# statewide board arrived with a blank salary while the markup beside the
+# description said $48,721 to $79,172.
+#
+# unitText is the whole game: the same shape carries an annual band and an
+# hourly rate, and reading one as the other is off by a factor of 2080.
+_PERIOD_HOURS = {"HOUR": 2080, "DAY": 260, "WEEK": 52, "MONTH": 12,
+                 "YEAR": 1}
+
+
+def _schema_salary(node: dict) -> tuple[float | None, float | None]:
+    """(min, max) annual, from a JobPosting's baseSalary. Blanks on anything odd."""
+    base = node.get("baseSalary")
+    if isinstance(base, list):
+        base = base[0] if base else None
+    if not isinstance(base, dict):
+        return None, None
+    value = base.get("value")
+    if isinstance(value, list):
+        value = value[0] if value else None
+
+    if isinstance(value, dict):
+        period = str(value.get("unitText") or "YEAR").upper()
+        raw = (value.get("minValue"), value.get("maxValue"))
+        if raw == (None, None):
+            raw = (value.get("value"), value.get("value"))
+    elif isinstance(value, (int, float, str)):
+        period = str(base.get("unitText") or "YEAR").upper()
+        raw = (value, value)
+    else:
+        return None, None
+
+    factor = _PERIOD_HOURS.get(period)
+    if not factor:
+        return None, None
+
+    out = []
+    for item in raw:
+        try:
+            number = float(str(item).replace(",", "").replace("$", ""))
+        except (TypeError, ValueError):
+            out.append(None)
+            continue
+        annual = number * factor
+        # The same sanity band the body parser uses. Boards publish zeroes and
+        # placeholder ones in this field as readily as they do in prose.
+        out.append(annual if 15_000 <= annual <= 900_000 else None)
+    low, high = out
+    if low and high and high < low:
+        low, high = high, low
+    return low, high
+
+
 def sitemap_detail(job: Job, entry: dict) -> bool:
     """Fill in one posting's body from its schema.org JSON-LD.
 
@@ -436,6 +500,15 @@ def sitemap_detail(job: Job, entry: dict) -> bool:
     resp = http.get(job.url, timeout=TIMEOUT, spacing=entry.get("spacing", 5.0))
     if resp is None or resp.status_code >= 400:
         return False
+    # A bot challenge answers 2xx with nothing in it, which is indistinguishable
+    # from a posting that simply has no markup unless you look at the length.
+    # jobs.virginia.gov started returning 202 and an empty body at some point
+    # before 2026-09-15, and because the only signal was "no JSON-LD found",
+    # 52 Commonwealth postings sat in the candidate set with no description,
+    # no salary and nothing anywhere saying why. Silence is the bug.
+    if not resp.text.strip():
+        raise Challenged(f"{entry.get('name', job.company)} returned "
+                         f"{resp.status_code} with an empty body")
     for raw in _JSONLD.findall(resp.text):
         try:
             data = json.loads(raw)
@@ -446,6 +519,9 @@ def sitemap_detail(job: Job, entry: dict) -> bool:
                 continue
             if node.get("description"):
                 job.description = clean_text(node["description"])
+            low, high = _schema_salary(node)
+            if low or high:
+                job.salary_min, job.salary_max = low, high
             job.title = node.get("title") or job.title
             job.posted_at = parse_date(node.get("datePosted")) or job.posted_at
             place = node.get("jobLocation")
