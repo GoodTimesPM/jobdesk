@@ -18,10 +18,23 @@ not a default you can turn off.
 
 Windows, Python 3.11 or newer.
 
-Download or clone this repository, then double-click **`Install.cmd`**. It
-checks for Python and tells you where to get it if it is missing, builds a
-private environment inside the folder, installs the dependencies, and puts a
-JobDesk icon on your Desktop. It is safe to run again if something breaks.
+Download the ZIP, **extract it** somewhere you want to keep it, and
+double-click **`Install.cmd`** inside the extracted folder. That is the whole
+install. It clears the downloaded-file mark Windows puts on everything out of
+a ZIP, checks for Python and tells you where to get it if it is missing,
+builds a private environment inside the folder, installs the dependencies, and
+puts a JobDesk icon on your Desktop. It is safe to run again if something
+breaks, so it doubles as the repair.
+
+Extracting first matters. Double-clicking a `.cmd` from inside a ZIP looks
+like it works: Windows copies that one file to a scratch folder and runs it
+there, away from everything it needs. The installer checks for this and says
+so rather than failing on a missing file.
+
+Windows SmartScreen may show a blue "Windows protected your PC" box the first
+time, because the file is not signed by a company that paid for a certificate.
+**More info** then **Run anyway**. Everything the installer does is in
+`install.ps1`, in plain text, and it is worth a read before you trust it.
 
 JobDesk opens on its Setup tab the first time. Drop in your resume and it
 fills in what it can read; the rest is six short screens about what you are
