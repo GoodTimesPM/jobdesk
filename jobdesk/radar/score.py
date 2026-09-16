@@ -42,11 +42,58 @@ _WORD_NUMBERS = {
 _WORD_YEARS = re.compile(
     r"\b(" + "|".join(_WORD_NUMBERS) + r")\s*(?:\+)?\s*years", re.I)
 
-# Salary written in the JD body, e.g. "$65,000 - $85,000" or "$32/hour".
-_SALARY_RANGE = re.compile(
-    r"\$\s?(\d{2,3}(?:,\d{3})?(?:\.\d+)?)\s*(?:k\b)?\s*(?:-|to|–)\s*\$?\s?(\d{2,3}(?:,\d{3})?(?:\.\d+)?)\s*(?:k\b)?",
+# Salary written in the JD body.
+#
+# Most money in a job ad is not pay. Live bodies offered "$200B in annualized
+# spend", "$250M+ earned through our platform", "educational assistance up to
+# $2500" and "AD&D coverage valued at $10,000 each" -- none of them a wage,
+# all of them one naive regex away from becoming one. So an amount has to
+# either sit near a compensation cue or clear a plausibility band on its own.
+#
+# The separator is the other half of the problem. Greenhouse renders its band
+# as markup -- <span>$72,000</span><span class="divider">&mdash;</span>
+# <span>$115,000 USD</span> -- and Workday writes "$111,160/yr to $138,950/yr".
+# Both are ordinary ranges wearing something between the numbers, so the two
+# amounts are joined by a required dash-or-"to" with markup, entities and unit
+# suffixes allowed on either side of it.
+# A letter glued to the dollar sign usually names a different currency. A
+# live Dart posting reads "SALARY: CI$60,000 - CI$80,000 pa" and those are
+# Cayman Islands dollars, which is a Cayman Islands job -- a figure worth
+# roughly $72,000 USD attached to a role nobody here can take. US$ is the one
+# prefix that means what it says, so it is the one exception.
+_USD = r"(?<![A-Za-z])(?:US)?\$"
+_AMOUNT = _USD + r"\s?(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(k\b)?"
+_DASHY = r"(?:-|–|—|&[mn]dash;|\bto\b)"
+_FILLER = (r"(?:\s|<[^>]{0,120}>|&nbsp;|&amp;|USD|/\s*(?:yr|year|hr|hour)"
+           r"|per\s+(?:year|hour|annum)|annually|hourly)*")
+_SALARY_RANGE = re.compile(_AMOUNT + _FILLER + _DASHY + _FILLER + _AMOUNT, re.I)
+_SINGLE = re.compile(_AMOUNT, re.I)
+_HOURLY = re.compile(
+    _USD + r"\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:/|\s+per\s+|\s+an\s+)\s*(?:hr|hour)",
     re.I)
-_HOURLY = re.compile(r"\$\s?(\d{2,3}(?:\.\d{1,2})?)\s*(?:/|\s+per\s+)\s*(?:hr|hour)", re.I)
+
+# Where a real band is usually written. A hit opens a 300-character window
+# that the range regex gets first refusal on, which is how a band buried in
+# benefits copy is read as pay while "$200B in annualized spend" three
+# paragraphs up is not.
+_PAY_CUE = re.compile(
+    r"(?i)\b(?:salary|compensation|pay\s*[-\s]?range|pay\s+band|pay\s+rate"
+    r"|base\s+pay|hourly\s+rate|wage|remuneration|hiring\s+range"
+    r"|class=\"pay-range\")")
+
+# An hourly rate and an annual figure cannot be told apart by size alone once
+# "$95k" is allowed, so the bands do it. Nothing below the federal minimum
+# wage is a real rate, which is what rejects Workday's "$1.00 - $1.00"
+# placeholder -- a string that appears verbatim in live postings.
+_HOUR_BAND = (7.0, 300.0)
+_YEAR_BAND = (15_000.0, 900_000.0)
+_HOURS_A_YEAR = 2080
+
+# "$200B in annualized spend" and "$250M+ earned through our platform" both
+# hand a bare 200 or 250 to anything reading digits, and both land inside the
+# hourly band as a $416,000 and a $520,000 job. The suffix is the only thing
+# that says otherwise, so an amount wearing one is thrown out.
+_MAGNITUDE = re.compile(r"\s*(?:[bm]\b|bn\b|billion|million|trillion)", re.I)
 
 
 # Most large employers split the JD into "Basic Qualifications" (the real
@@ -176,29 +223,87 @@ def blocking_years(job: Job) -> int | None:
     return years
 
 
+def _annualise(raw: str, kilo: str | None) -> float | None:
+    """One written amount as an annual figure, or None if it is not pay.
+
+    "$95k" is 95,000. "$18.50" is a rate, times 2080 hours. "$72,000" is
+    already annual. Anything landing between the two bands -- a $2,500 tuition
+    benefit, a $1.00 placeholder -- is not a wage and comes back None.
+    """
+    try:
+        value = float(raw.replace(",", ""))
+    except ValueError:
+        return None
+    if kilo:
+        value *= 1000
+    if _YEAR_BAND[0] <= value <= _YEAR_BAND[1]:
+        return value
+    if _HOUR_BAND[0] <= value <= _HOUR_BAND[1] and not kilo:
+        return value * _HOURS_A_YEAR
+    return None
+
+
+def _range_in(text: str) -> tuple[float, float] | None:
+    """The first plausible pay range in a stretch of text."""
+    for m in _SALARY_RANGE.finditer(text):
+        if _MAGNITUDE.match(text, m.end()):
+            continue
+        lo = _annualise(m.group(1), m.group(2))
+        hi = _annualise(m.group(3), m.group(4))
+        if lo and hi and lo <= hi <= lo * 6:
+            # The ceiling matters: "$18/hr to $95,000" is two different things
+            # quoted side by side, and a real band never spans six times.
+            return lo, hi
+    return None
+
+
 def parse_salary(job: Job) -> tuple[float | None, float | None]:
-    """Pull a salary range out of the JD body when the API didn't give one."""
+    """Pull a salary range out of the JD body when the API didn't give one.
+
+    Four passes, widening as they go. A range inside a compensation cue's
+    window is trusted on sight. A range anywhere else has to clear the bands
+    alone. Then a lone hourly rate, because "$32/hour" says what it is in a
+    way a bare annual figure does not. Then one figure on a cue, as a floor.
+
+    Returns (low, high); `high` is None when the posting gave a number but no
+    ceiling. The table already renders that as "$40k+", so a floor is worth
+    keeping rather than rounding down to nothing.
+    """
     if job.salary_min or job.salary_max:
         return job.salary_min, job.salary_max
     text = job.description
     if not text:
         return None, None
 
-    m = _SALARY_RANGE.search(text)
-    if m:
-        def norm(raw: str) -> float:
-            v = float(raw.replace(",", ""))
-            return v * 1000 if v < 1000 else v
-        lo, hi = norm(m.group(1)), norm(m.group(2))
-        if 15_000 <= lo <= 400_000 and hi >= lo:
-            return lo, hi
+    for cue in _PAY_CUE.finditer(text):
+        found = _range_in(text[cue.start():cue.start() + 300])
+        if found:
+            return found
+
+    found = _range_in(text)
+    if found:
+        return found
 
     m = _HOURLY.search(text)
     if m:
         rate = float(m.group(1))
-        if 10 <= rate <= 200:
-            annual = rate * 2080
+        if _HOUR_BAND[0] <= rate <= _HOUR_BAND[1]:
+            annual = rate * _HOURS_A_YEAR
             return annual, annual
+
+    # Last: one figure sitting on a cue, reported as a floor and not a band.
+    # "Compensation & Benefits $40,000, with an increase to $42,000 after the
+    # probationary period" is a starting salary and a raise schedule, and
+    # reading it as a $40k-$42k range would be inventing a ceiling the
+    # employer never wrote. A floor is the most the text supports.
+    for cue in _PAY_CUE.finditer(text):
+        window = text[cue.start():cue.start() + 200]
+        for hit in _SINGLE.finditer(window):
+            if _MAGNITUDE.match(window, hit.end()):
+                continue
+            value = _annualise(hit.group(1), hit.group(2))
+            if value:
+                return value, None
     return None, None
 
 

@@ -104,11 +104,14 @@ def fetch_details(jobs: list[Job], log: Callable[[str], None] = print) -> int:
     """
     budget = config.MAX_DETAIL_FETCHES
     filled = 0
+    blocked_sources: set[str] = set()
     for job in jobs:
         if budget <= 0:
             break
         fetcher = DETAIL_FETCHERS.get(job.source)
         if fetcher is None or job.description:
+            continue
+        if job.source in blocked_sources:
             continue
         if job.score < config.DETAIL_FETCH_MIN_SCORE:
             continue
@@ -121,8 +124,20 @@ def fetch_details(jobs: list[Job], log: Callable[[str], None] = print) -> int:
                 filled += 1
         except http.RateLimited:
             break
+        except ats.Challenged as blocked:
+            # Every remaining posting on that host will answer the same way, so
+            # there is nothing to gain by spending the rest of the budget on it.
+            # It gets said out loud: a source that quietly stops returning
+            # bodies looks identical to a source whose postings are all short,
+            # and the difference is two months of blank descriptions.
+            blocked_sources.add(job.source)
+            log(f"  {job.source}: {blocked}")
+            continue
         except Exception:
             continue
     if filled:
         log(f"  fetched {filled} job descriptions")
+    if blocked_sources:
+        log(f"  no bodies from {', '.join(sorted(blocked_sources))} "
+            f"- the site is serving a bot check, not the posting")
     return filled
