@@ -97,6 +97,30 @@ Write-Host ""
 Write-Host "JobDesk" -ForegroundColor Cyan
 Note $Root
 
+# --- 0. are we actually extracted? -------------------------------------------
+# Double-clicking a .cmd inside a .zip does not fail. Explorer quietly copies
+# it, alone, to a scratch folder and runs it there, so the installer starts up
+# in a directory that has none of the files it is about to install. The error
+# that follows is about a missing requirements.txt, which sends people looking
+# for the wrong problem. Say the real one instead.
+
+if ($Root -match '\.zip\\' -or $Root -match '\\Temp\d+_') {
+    Fail "This is still inside the .zip file." @"
+Windows ran this out of a temporary copy, so nothing here is really on your
+disk yet and nothing would survive the install.
+
+Close this window. Right-click the .zip, choose "Extract All", pick a folder
+you will keep it in, and run Install.cmd from there.
+"@
+}
+
+if (-not (Test-Path (Join-Path $Root "requirements.txt"))) {
+    Fail "This does not look like the JobDesk folder." @"
+Install.cmd has to sit next to requirements.txt and the jobdesk folder. If you
+copied it out on its own, put it back beside them and run it there.
+"@
+}
+
 # --- uninstall ---------------------------------------------------------------
 
 if ($Uninstall) {
