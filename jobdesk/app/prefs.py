@@ -30,6 +30,7 @@ DEFAULTS: dict[str, object] = {
     "hide_applied": True,
     "hide_prepared": False,
     "remote_only": False,
+    "starred_only": False,
     # Where the app opens
     "start_tab": "jobs",
     # Appearance

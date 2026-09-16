@@ -211,6 +211,25 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
 .pill { font-size: 11px; border: 1px solid var(--line); border-radius: 99px;
         padding: 1px 7px; color: var(--ink-soft); margin-left: 6px; }
 
+/* -- the star ----------------------------------------------------------- */
+
+/* A filled star is yellow and always there. An empty one is nearly invisible
+   until the row is under the pointer, because an outline on every row of a
+   300-row table reads as a column of noise rather than as something to
+   press. It stays visible on touch, where there is no hover to wait for. */
+.grid th.star, .grid td.star { width: 1%; padding-left: 12px; padding-right: 2px; }
+.grid th.star { color: var(--ink-faint); }
+.starbtn {
+  background: none; border: 0; padding: 0 2px; cursor: pointer; line-height: 1;
+  font-size: 16px; color: var(--ink-faint); opacity: 0;
+  transition: opacity .12s, color .12s;
+}
+.starbtn.on { color: #e0a32b; opacity: 1; }
+.row:hover .starbtn, .starbtn:focus-visible { opacity: 1; }
+.starbtn:hover { color: #e0a32b; }
+.starbtn:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+@media (hover: none) { .starbtn { opacity: .5; } }
+
 /* -- market context ----------------------------------------------------- */
 
 /* The arrow in the table. Green up is the applicant's side of the median.

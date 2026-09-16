@@ -238,7 +238,7 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 // thing to see first when the window opens is what is new, and the score
 // breaks the tie between two postings from the same day.
 const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
-                market: {}, marketIndex: null };
+                market: {}, marketIndex: null, starsGone: [] };
 
 // The two orders the "Order" menu and Settings offer, as a column and a
 // direction. Clicking a column header picks a third, and the menu says so.
@@ -276,7 +276,9 @@ async function loadJobs() {
   try {
     const data = await get("/api/jobs");
     state.jobs = data.jobs;
+    state.starsGone = data.stars_gone || [];
     stamp(data);
+    drawStarsGone();
     draw();
     loadMarket();
   } catch (err) {
@@ -344,6 +346,7 @@ function visible() {
   const hideApplied = $("#hide-applied").checked;
   const hidePrepared = $("#hide-prepared").checked;
   const remoteOnly = $("#remote-only").checked;
+  const starredOnly = $("#starred-only").checked;
 
   const rows = state.jobs.filter((j) => {
     const score = j.score || 0;
@@ -351,6 +354,7 @@ function visible() {
     if (hideApplied && j.applied) return false;
     if (hidePrepared && j.prepared) return false;
     if (remoteOnly && !j.remote) return false;
+    if (starredOnly && !j.starred) return false;
     if (!q) return true;
     return `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q);
   });
@@ -455,6 +459,62 @@ function age(job) {
 
 const cell = (text, cls) => el("td", { class: cls, text: text });
 
+/* The star. A filled one is yellow, an empty one only appears on hover or
+   focus, because 300 grey outlines down the left of a table is noise. The
+   button carries its own label so a screen reader gets "Star" rather than a
+   character it has to guess at. */
+function starCell(job) {
+  const on = !!job.starred;
+  const button = el("button", {
+    class: "starbtn" + (on ? " on" : ""),
+    type: "button",
+    title: on ? "Starred. Click to unstar." : "Star this to come back to it",
+    "aria-pressed": on ? "true" : "false",
+    "aria-label": on ? "Starred" : "Star this posting",
+    text: on ? "\u2605" : "\u2606",
+  });
+  return el("td", { class: "star" }, button);
+}
+
+/* Written on the server, so a star set on the phone is on the row in the
+   window. The row updates before the round trip finishes and puts itself
+   back if the write fails -- a star is not worth a spinner, but it is worth
+   telling the truth about. */
+async function toggleStar(job) {
+  const want = !job.starred;
+  job.starred = want;
+  draw();
+  try {
+    await post("/api/star", { uid: job.uid, starred: want, title: job.title,
+      company: job.company, url: job.url, source: job.source });
+  } catch (err) {
+    job.starred = !want;
+    draw();
+    banner(err.message, true);
+  }
+}
+
+/* A star outlives the posting it is on: the radar keeps thirty days, and a
+   starred row that ages out would otherwise disappear without a word. The
+   file kept the title and the link, so say so and keep the link alive. */
+function drawStarsGone() {
+  const note = $("#stars-gone");
+  note.textContent = "";
+  note.hidden = state.starsGone.length === 0;
+  if (note.hidden) return;
+  note.append(document.createTextNode(
+    plural(state.starsGone.length, "starred posting") +
+    " aged out of the list: "));
+  state.starsGone.forEach((s, i) => {
+    if (i) note.append(document.createTextNode(", "));
+    const label = `${s.title || "a posting"}${s.company ? " at " + s.company : ""}`;
+    note.append(s.url
+      ? el("a", { href: s.url, target: "_blank", rel: "noopener noreferrer",
+                  text: label })
+      : document.createTextNode(label));
+  });
+}
+
 /* Phone width, asked once and cached by the browser. The listener redraws
    rather than reloads, because the only thing that changes is which column
    the market arrow sits in. */
@@ -503,7 +563,8 @@ function draw() {
     // thirds of a sideways scroll away -- far enough that it reads as
     // missing rather than as off-screen. It moves up next to the score
     // there, which is the other number you scan a queue for.
-    tr.append(score, title, ...(narrow() ? [marketCell(job)] : []),
+    tr.append(starCell(job), score, title,
+      ...(narrow() ? [marketCell(job)] : []),
       ...rest.slice(0, 3), ...(narrow() ? [] : [marketCell(job)]),
       ...rest.slice(3));
     body.append(tr);
@@ -531,7 +592,7 @@ function jdBlocks(blocks) {
 }
 
 function detailRow(job) {
-  const td = el("td", { colSpan: 8 });
+  const td = el("td", { colSpan: 9 });
   const actions = el("div", { class: "actions" });
 
   actions.append(el("a", { href: job.url, target: "_blank",
@@ -696,6 +757,13 @@ async function markApplied(appId) {
 $("#rows").addEventListener("click", (e) => {
   const row = e.target.closest("tr.row");
   if (!row) return;
+  // The star is a button inside a row that opens on click. Starring a
+  // posting should not also expand it.
+  if (e.target.closest(".starbtn")) {
+    const job = state.jobs.find((j) => j.uid === row.dataset.uid);
+    if (job) toggleStar(job);
+    return;
+  }
   state.open = state.open === row.dataset.uid ? null : row.dataset.uid;
   draw();
 });
@@ -740,7 +808,8 @@ $("#reset-filters").addEventListener("click", () => {
 });
 
 ["#search", "#score-min", "#score-max", "#hide-applied", "#hide-prepared",
- "#remote-only"].forEach((sel) => $(sel).addEventListener("input", draw));
+ "#remote-only", "#starred-only"].forEach((sel) =>
+  $(sel).addEventListener("input", draw));
 
 // The preset writes the two boxes and then gets out of the way. It is a
 // shortcut for typing the numbers, not a third filter that can disagree with
@@ -1767,7 +1836,8 @@ $("#make-shortcut").addEventListener("click", async () => {
 const LOOK_KEYS = ["theme", "text_size", "density"];
 let prefs = {
   jobs_sort: "newest", score_min: 45, score_max: 100, hide_applied: true,
-  hide_prepared: false, remote_only: false, start_tab: "jobs",
+  hide_prepared: false, remote_only: false, starred_only: false,
+  start_tab: "jobs",
   theme: "system", text_size: 100, density: "normal",
 };
 let prefDefaults = Object.assign({}, prefs);   // replaced by the server's copy
@@ -1793,6 +1863,7 @@ function applyFilters(p) {
   $("#hide-applied").checked = !!p.hide_applied;
   $("#hide-prepared").checked = !!p.hide_prepared;
   $("#remote-only").checked = !!p.remote_only;
+  $("#starred-only").checked = !!p.starred_only;
   setOrder(p.jobs_sort);
 }
 
