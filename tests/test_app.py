@@ -39,7 +39,7 @@ os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
 
 from jobdesk import paths
 from jobdesk.app import (access, actions, api, archive, jdstruct, market, net,
-                         phone, resume_import, runner, server, setup,
+                         phone, resume_import, runner, server, setup, stars,
                          tomlpatch)
 
 PASS, FAIL = 0, 0
@@ -989,6 +989,75 @@ def test_market_route() -> None:
                       for v in body["jobs"].values()))
 
 
+# -- the star ---------------------------------------------------------------
+
+def test_stars() -> None:
+    """Starring a row, over the socket, without touching the real file."""
+    section("the yellow star")
+    tmp = Path(tempfile.mkdtemp(prefix="jobdesk-stars-"))
+    original = stars.FILE
+    stars.FILE = tmp / "stars.json"
+    try:
+        check("no stars to begin with", stars.marked() == set())
+
+        with Live() as live:
+            code, body = live.post("/api/star", {"uid": "", "starred": True})
+            check("a star needs a posting", code == 400 and "uid" in body["error"])
+
+            code, body = live.post("/api/star", {
+                "uid": "demo-1", "starred": True,
+                "title": "Inventory Analyst", "company": "Ridgeline",
+                "url": "https://example.com/1"})
+            check("starring answers with the new state",
+                  code == 200 and body["starred"] is True and body["count"] == 1,
+                  str(body))
+
+            saved = stars.load()["demo-1"]
+            first_time = saved["at"]
+            check("the label is kept so the star outlives the posting",
+                  saved["title"] == "Inventory Analyst"
+                  and saved["company"] == "Ridgeline"
+                  and saved["url"] == "https://example.com/1", str(saved))
+
+            live.post("/api/star", {"uid": "demo-1", "starred": True,
+                                    "title": "Inventory Analyst"})
+            check("starring twice does not look like a fresh star",
+                  stars.load()["demo-1"]["at"] == first_time)
+
+            code, body = live.get("/api/jobs")
+            check("a posting nobody starred is not starred",
+                  all(row["starred"] is False for row in body["jobs"]),
+                  "something came back starred")
+            check("a star with no posting left is reported, not lost",
+                  [g["uid"] for g in body["stars_gone"]] == ["demo-1"],
+                  str(body.get("stars_gone")))
+
+            # And a star on a posting that is actually in the cache.
+            if body["jobs"]:
+                uid = body["jobs"][0]["uid"]
+                live.post("/api/star", {"uid": uid, "starred": True})
+                code, listed = live.get("/api/jobs")
+                starred = [r["uid"] for r in listed["jobs"] if r["starred"]]
+                check("the row comes back starred", starred == [uid], str(starred))
+                check("and it is not in the aged-out list",
+                      uid not in [g["uid"] for g in listed["stars_gone"]])
+                code, one = live.get("/api/job?uid=" + uid)
+                check("the expanded posting knows too", one.get("starred") is True)
+                live.post("/api/star", {"uid": uid, "starred": False})
+
+            code, body = live.post("/api/star", {"uid": "demo-1", "starred": False})
+            check("unstarring takes it off the list",
+                  code == 200 and body["starred"] is False
+                  and stars.marked() == set(), str(body))
+
+        stars.FILE.write_text("{ not json", encoding="utf-8")
+        check("a half-written file costs the stars, not the Jobs tab",
+              stars.load() == {} and stars.gone(set()) == [])
+    finally:
+        stars.FILE = original
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     test_tomlpatch()
     test_patch_table()
@@ -997,6 +1066,7 @@ def main() -> int:
     test_validation()
     test_write()
     test_api()
+    test_stars()
     test_settings()
     test_delivery_edit()
     test_jdstruct()
