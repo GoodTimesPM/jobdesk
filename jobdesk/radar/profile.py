@@ -57,11 +57,35 @@ _SHAPED = {
 _OPTIONAL = {
     "SEARCH_QUERIES": ("search_queries", []),
     "WORKDAY_SEARCH_TERMS": ("workday_search_terms", []),
+    "SYNONYMS_ENABLED": ("synonyms_enabled", True),
+    "SYNONYM_DISCOUNT": ("synonym_discount", 6),
+    "SEARCH_SYNONYM_LIMIT": ("search_synonym_limit", 6),
 }
 
 
 def _data() -> dict[str, Any]:
     return _profile.load(FILE)
+
+
+def synonyms() -> dict[str, list[str]]:
+    """Canonical term -> the other words a posting might use for it.
+
+    Flat dict rather than the array of tables it is written as, because every
+    reader wants the same lookup: "does this text say something that means
+    <term>". Returned empty when `synonyms_enabled` is false, so switching the
+    experiment off needs one line in the profile and no code path of its own.
+    """
+    data = _data()
+    if not data.get("synonyms_enabled", True):
+        return {}
+    out: dict[str, list[str]] = {}
+    for row in data.get("synonym", []):
+        term = str(row.get("for", "")).strip().lower()
+        if not term:
+            continue
+        also = [str(a).strip().lower() for a in row.get("also", [])]
+        out.setdefault(term, []).extend(a for a in also if a and a != term)
+    return out
 
 
 def __getattr__(name: str) -> Any:          # PEP 562
@@ -83,4 +107,4 @@ def __getattr__(name: str) -> Any:          # PEP 562
 
 
 def __dir__() -> list[str]:
-    return sorted([*_KEYS, *_SHAPED, *_OPTIONAL, "FILE"])
+    return sorted([*_KEYS, *_SHAPED, *_OPTIONAL, "FILE", "synonyms"])

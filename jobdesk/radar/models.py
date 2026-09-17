@@ -9,6 +9,7 @@ between `sources/*` and `report.py`.
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -21,20 +22,22 @@ _TAGS = re.compile(r"<[^>]+>")
 
 
 def clean_text(raw: str | None) -> str:
-    """Strip HTML tags and collapse whitespace. JD bodies arrive as HTML."""
+    """Strip HTML tags and collapse whitespace. JD bodies arrive as HTML.
+
+    Tags first, then entities: decoding first would turn a written `&lt;`
+    into a `<` that the tag stripper then eats along with everything up to
+    the next `>`.
+
+    `html.unescape` rather than the seven hand-written replacements this used
+    to do, because the eighth one mattered. A live Comcast posting reads
+    "5&#43; years of experience" -- a numeric entity for a plus sign -- and
+    with the plus still spelled out as five characters the years regex saw no
+    years at all. The req asked for five and was scored as asking for none,
+    which is worth +6 and a clean bill of health.
+    """
     if not raw:
         return ""
-    txt = _TAGS.sub(" ", raw)
-    txt = (
-        txt.replace("&amp;", "&")
-        .replace("&nbsp;", " ")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", '"')
-        .replace("&#39;", "'")
-        .replace("&rsquo;", "'")
-    )
-    return _WS.sub(" ", txt).strip()
+    return _WS.sub(" ", html.unescape(_TAGS.sub(" ", raw))).strip()
 
 
 def parse_date(value: Any) -> datetime | None:
