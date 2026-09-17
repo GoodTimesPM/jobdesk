@@ -3,9 +3,9 @@
     Set up JobDesk on this machine.
 
 .DESCRIPTION
-    Everything between a fresh download and a working app: a check that Python
-    is new enough, a private environment, the dependencies, the folders the
-    app writes into, and a Desktop shortcut.
+    Everything between a fresh download and a working app: Python itself if
+    the machine has none, a private environment, the dependencies, the folders
+    the app writes into, and a Desktop shortcut.
 
     Nothing here touches your system Python. The dependencies go into a
     `.venv` folder inside this checkout, so uninstalling is deleting a folder
@@ -32,8 +32,13 @@
     so you can delete them yourself if that is what you meant. Asks first,
     unless -Force.
 
+.PARAMETER NoPythonInstall
+    Do not offer to install Python. If there is no suitable one already on the
+    machine, stop and print the instructions for installing it by hand.
+
 .PARAMETER Force
-    Skip the confirmation prompt on -Uninstall.
+    Skip the confirmation prompts: the one on -Uninstall, and the one before
+    installing Python.
 
 .EXAMPLE
     .\Install.cmd
@@ -47,6 +52,7 @@ param(
     [switch]$NoShortcut,
     [switch]$NoLaunch,
     [switch]$Uninstall,
+    [switch]$NoPythonInstall,
     [switch]$Force
 )
 
@@ -57,6 +63,13 @@ $Venv    = Join-Path $Root ".venv"
 $VenvPy  = Join-Path $Venv "Scripts\python.exe"
 $VenvPyw = Join-Path $Venv "Scripts\pythonw.exe"
 $MinPython = [Version]"3.11"
+
+# What gets installed when the machine has nothing. 3.12 rather than the
+# newest: PyMuPDF and pywebview ship prebuilt wheels for it, and the first
+# weeks of a new Python release are spent watching packages compile from
+# source or refuse to.
+$PyVersion = "3.12.10"
+$PyWinget  = "Python.Python.3.12"
 
 # `py -m jobdesk.app` finds the package on the working directory, not on the
 # path to this script. Without this the installer would build whichever
@@ -176,42 +189,213 @@ if ($Uninstall) {
 # --- 1. python ---------------------------------------------------------------
 # The single most common way a first run fails, and the one worth the most
 # words: "python is not recognized" tells a person nothing about what to do.
-
-Step "Looking for Python $MinPython or newer"
+# Better than telling them well is not making them do it, so this installs
+# Python when the machine has none.
 
 $InstallHelp = @"
 Install Python from https://www.python.org/downloads/ and tick
 "Add python.exe to PATH" on the first screen of the installer. Or, if you
 have winget:
 
-    winget install --id Python.Python.3.12 -e
+    winget install --id $PyWinget -e
 
 Close this window, open a new one, and run Install.cmd again. A new window
 matters: a program that was not on the PATH when this one started is not on
 the PATH for this one either.
 "@
 
-$SystemPy = $null
-foreach ($candidate in @("py", "python3", "python")) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if (-not $found) { continue }
-    # The Microsoft Store ships a stub `python.exe` that exists, runs, and
-    # does nothing but open the Store. It reports no version, so asking for
-    # one is also the test for it.
-    $reported = & $found.Source -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $reported) { continue }
-    try { $version = [Version]$reported.Trim() } catch { continue }
-    if ($version -ge $MinPython) {
-        $SystemPy = $found.Source
-        Ok "$candidate is Python $version"
-        break
-    }
-    Note "$candidate is Python $version, too old"
+function Get-PythonVersion([string]$Exe) {
+    # The version that exe reports, or nothing if it is not a real Python.
+    if (-not $Exe) { return $null }
+    # try/catch around the call itself, not only around the parse: this now
+    # runs against anything called python.exe anywhere on the machine, and a
+    # broken one is a thing to walk past rather than an install failure.
+    try {
+        $reported = & $Exe -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+    } catch { return $null }
+    if ($LASTEXITCODE -ne 0 -or -not $reported) { return $null }
+    try { return [Version]($reported | Select-Object -First 1).Trim() }
+    catch { return $null }
 }
 
-if (-not $SystemPy) {
-    Fail "No Python $MinPython or newer on this machine." $InstallHelp
+function Find-Python {
+    # The best Python on this machine at or above $MinPython, or nothing.
+    #
+    # The PATH is checked first and then the two directories the official
+    # installer actually writes to. That second sweep is not belt and braces:
+    # a Python installed a minute ago by this very script is not on this
+    # process's PATH and cannot be, because a process inherits its environment
+    # at birth. Without the sweep, installing Python would be followed by
+    # failing to find it.
+    $best = $null
+    $bestVersion = $null
+
+    $candidates = @()
+    foreach ($name in @("py", "python3", "python")) {
+        $found = Get-Command $name -ErrorAction SilentlyContinue
+        if ($found) { $candidates += $found.Source }
+    }
+    foreach ($base in @((Join-Path $env:LOCALAPPDATA "Programs\Python"),
+                        $env:ProgramFiles, ${env:ProgramFiles(x86)}, "C:\")) {
+        if (-not $base -or -not (Test-Path $base)) { continue }
+        $dirs = Get-ChildItem -Path $base -Directory -Filter "Python3*" `
+                              -ErrorAction SilentlyContinue
+        foreach ($dir in $dirs) {
+            $candidates += (Join-Path $dir.FullName "python.exe")
+        }
+    }
+
+    foreach ($exe in $candidates) {
+        if (-not (Test-Path $exe)) { continue }
+        # The Microsoft Store ships a stub `python.exe` that exists, runs, and
+        # does nothing but open the Store. It reports no version, so asking
+        # for one is also the test for it.
+        $version = Get-PythonVersion $exe
+        if (-not $version -or $version -lt $MinPython) { continue }
+        if (-not $bestVersion -or $version -gt $bestVersion) {
+            $best = $exe
+            $bestVersion = $version
+        }
+    }
+
+    if (-not $best) { return $null }
+    return [pscustomobject]@{ Path = $best; Version = $bestVersion }
 }
+
+function Update-PathFromRegistry {
+    # Pick up a PATH that changed after this process started.
+    #
+    # An installer edits the stored PATH and broadcasts that it changed.
+    # Running processes do not listen, so the only way to see a Python
+    # installed thirty seconds ago is to go and read the setting.
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user    = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = (@($machine, $user) | Where-Object { $_ }) -join ";"
+}
+
+function Install-Python {
+    # Put Python on this machine. Did it work?
+    #
+    # winget first, because it is already on any current Windows and it knows
+    # how to upgrade what it installs later. python.org's own installer is the
+    # fallback, run unattended for the current user only so that nothing here
+    # needs an administrator.
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Note "using winget"
+        # Out-Host, not a bare call: a native command's output is pipeline
+        # output, and pipeline output inside a PowerShell function is part of
+        # what the function returns. Left alone, winget's chatter would come
+        # back from Install-Python as a truthy array.
+        & winget install --id $PyWinget -e --source winget --scope user `
+            --accept-package-agreements --accept-source-agreements | Out-Host
+        Update-PathFromRegistry
+        if (Find-Python) { return $true }
+
+        # Asking for user scope can fail outright when the package only
+        # publishes a machine-scope installer. Worth one more try without the
+        # preference, which may raise an administrator prompt -- a visible
+        # thing a person can answer, rather than a silent dead end.
+        Note "retrying without a scope preference"
+        & winget install --id $PyWinget -e --source winget `
+            --accept-package-agreements --accept-source-agreements | Out-Host
+        Update-PathFromRegistry
+        if (Find-Python) { return $true }
+        Warn "winget did not leave a usable Python behind. Trying python.org."
+    } else {
+        Note "no winget on this machine, going to python.org"
+    }
+
+    $arch = switch ($env:PROCESSOR_ARCHITECTURE) {
+        "AMD64" { "amd64" }
+        "ARM64" { "arm64" }
+        default { "" }
+    }
+    $suffix = if ($arch) { "-$arch" } else { "" }
+    $url = "https://www.python.org/ftp/python/$PyVersion/python-$PyVersion$suffix.exe"
+    $exe = Join-Path $env:TEMP "python-$PyVersion$suffix.exe"
+
+    Note $url
+    # A progress bar redrawn over a 25 MB download costs more time than the
+    # download does. This is not a cosmetic preference.
+    $previous = $ProgressPreference
+    try {
+        $ProgressPreference = "SilentlyContinue"
+        Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+    } catch {
+        Warn "The download failed: $($_.Exception.Message)"
+        return $false
+    } finally {
+        $ProgressPreference = $previous
+    }
+
+    Note "running the installer, this takes a minute"
+    # /passive shows a progress window and asks nothing. InstallAllUsers=0
+    # keeps it in this account, which is what lets it run without an
+    # administrator prompt. PrependPath is for every window after this one.
+    $proc = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList @(
+        "/passive", "InstallAllUsers=0", "PrependPath=1", "Include_launcher=1",
+        "Include_test=0", "Include_doc=0", "AssociateFiles=0", "Shortcuts=0")
+    Remove-Item $exe -Force -ErrorAction SilentlyContinue
+
+    # 3010 is "installed, wants a reboot". Python does not need one to run.
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Warn "The Python installer exited with $($proc.ExitCode)."
+        return $false
+    }
+    Update-PathFromRegistry
+    return [bool](Find-Python)
+}
+
+Step "Looking for Python $MinPython or newer"
+
+$python = Find-Python
+if ($python) {
+    Ok "Python $($python.Version)"
+    Note $python.Path
+} else {
+    Note "none found"
+
+    if ($NoPythonInstall) {
+        Fail "No Python $MinPython or newer on this machine." $InstallHelp
+    }
+
+    Write-Host ""
+    Write-Host "    JobDesk runs on Python and this machine does not have it." `
+        -ForegroundColor Yellow
+    Write-Host "    It installs for your account only, needs no administrator," `
+        -ForegroundColor DarkGray
+    Write-Host "    and leaves anything else on the machine alone." `
+        -ForegroundColor DarkGray
+
+    $go = $Force
+    if (-not $go) {
+        Write-Host ""
+        Write-Host "    Install Python $PyVersion now? [Y/n] " -NoNewline `
+            -ForegroundColor Cyan
+        try { $answer = Read-Host } catch { $answer = "" }
+        # Anything but a clear no. Somebody who double-clicked an installer
+        # and pressed Enter meant yes.
+        $go = -not ($answer -and $answer.Trim() -match "^n")
+    }
+    if (-not $go) {
+        Fail "Stopped: JobDesk cannot run without Python." $InstallHelp
+    }
+
+    Step "Installing Python $PyVersion"
+    if (-not (Install-Python)) {
+        Fail "Python could not be installed automatically." $InstallHelp
+    }
+
+    $python = Find-Python
+    if (-not $python) {
+        Fail "Python installed but cannot be found." $InstallHelp
+    }
+    Ok "Python $($python.Version)"
+    Note $python.Path
+}
+
+$SystemPy = $python.Path
 
 # --- 2. the environment ------------------------------------------------------
 
