@@ -126,6 +126,27 @@ class SeenStore:
             rec["score"] = job.score
             job.first_seen = _parse(rec.get("first_seen")) or now
 
+    def settle_posted(self, job: Job) -> None:
+        """Refuse a post date later than the run that first saw the posting.
+
+        `posted_at` is whatever the source said it was, and some sources say
+        `<lastmod>`: the day the page last changed, not the day the job went
+        up. A statewide board that regenerates a posting bumps it to today,
+        and a req the radar has been carrying for a week arrives looking
+        brand new -- scored as fresh, sent to Discord as fresh, and listed as
+        posted today beside the ones that really were.
+
+        The store knows one thing the source does not: we already had this on
+        a day it now claims to predate. That day is the latest it can
+        honestly be. A ceiling, not a guess at the real date.
+        """
+        rec = self._data.get(job.uid)
+        if not rec:
+            return                      # first sighting, nothing to contradict
+        first = _parse(rec.get("first_seen"))
+        if first and job.posted_at and job.posted_at > first:
+            job.posted_at = first
+
     def times_seen(self, job: Job) -> int:
         return (self._data.get(job.uid) or {}).get("times_seen", 0)
 
