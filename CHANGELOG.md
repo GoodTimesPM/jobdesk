@@ -2,6 +2,49 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.2.7 — 2026-09-16
+
+### Added
+
+- **The installer installs Python.** It used to find Python or stop, which
+  put the one genuinely hard step of a first run on the person least equipped
+  to do it: read this paragraph, pick the right download of the three on the
+  page, remember to tick a checkbox nobody explains, then come back and start
+  again in a new window. It now offers to do it, and Enter is yes. winget
+  where there is winget, python.org's installer where there is not, for the
+  current account only so it never needs an administrator. 3.12 rather than
+  the newest, because PyMuPDF and pywebview publish prebuilt wheels for it.
+  `-NoPythonInstall` keeps the old behaviour for anyone who wants to manage
+  their own.
+- **Python is looked for where it is, not only where the PATH says.** A
+  Python installed sixty seconds ago is not on this process's PATH and cannot
+  be: a process is handed its environment at birth. So the search also reads
+  the stored PATH back out of the registry and sweeps the directories the
+  official installer actually writes to. Without that, the installer would
+  have installed Python and then failed to find it.
+
+### Fixed
+
+- **"today" in the Posted column means today.** It was counting elapsed hours
+  and dividing by 24, so a posting that went up at nine last night still read
+  as "today" at eight this morning, and "1d" covered part of today as well as
+  part of the day before. The column was describing two different days at once
+  at exactly the hour you check what the overnight run brought in: of the 446
+  postings on the board, twelve claimed to be from today and only three were.
+  It now compares calendar dates, so today is the date on the calendar and
+  "1d" is yesterday. A posting whose feed gave a bare date with no time of day
+  is read as that date rather than being shifted between timezones, which
+  would have pushed half the board back a day.
+- **A posting cannot have gone up after the run that found it.** The sitemap
+  lane reads `<lastmod>`, which is the day the employer's page last changed,
+  not the day the job went up. A statewide board that regenerates a posting
+  stamps it with today, so five reqs first seen on the afternoon of the 15th
+  came back on the 16th reading "today", sorted to the top, and scored as
+  fresh. The seen-store knows better: it already had them the day before. A
+  post date later than the first sighting is now capped at the first sighting,
+  in the radar before scoring and in the Jobs table before it draws. It is a
+  ceiling, not a guess at the real date.
+
 ## 0.2.6 — 2026-09-16
 
 ### Fixed
