@@ -298,11 +298,140 @@ search_queries = [
 
 # Workday is queried one `searchText` at a time rather than pulled wholesale,
 # because the list response has no body and the years parse needs a second
-# call per posting. Single words only: Workday treats a phrase as an AND and
-# quietly returns nothing. Omit the key and one word per function family is
-# derived instead.
-workday_search_terms = ["accountant", "accounting", "payroll", "billing",
-                        "audit", "finance"]
+# call per posting. Each query costs one HTTP call and returns one page of
+# twenty, ranked by relevance, so a phrase is worth writing down: against a
+# live tenant "analyst" returns 298 postings and "data analyst" 209, and the
+# top twenty of each are different postings. (This used to say single words
+# only, on the belief that Workday ANDs a phrase and returns nothing. It
+# does not.) The synonym table widens whatever is here. Omit the key and one
+# word per function family is derived instead.
+workday_search_terms = ["accountant", "staff accountant", "payroll",
+                        "billing", "audit", "accounts payable",
+                        "accounts receivable", "bookkeeper"]
+
+# --------------------------------------------------------------------------
+# EXPERIMENTAL: synonyms.
+#
+# The tier lists above are your vocabulary. The posting was written by
+# somebody who never saw them. "Accounting Associate" and "Finance Operations
+# Associate" are the same job, and a req asking for NetSuite experience is
+# asking for an ERP you already know. This section says so once, and the
+# radar reads it in three places: the title score, the skill score, and the
+# search queries it sends to the boards.
+#
+# `for` must be a string that appears in one of the tier lists (a title
+# synonym) or a key in [core_skills] / [supporting_skills] (a skill synonym).
+# Anything else is ignored, so a typo is quiet rather than fatal.
+#
+# Two rules:
+#
+#   * A TITLE synonym is worth `synonym_discount` less than the term it
+#     stands in for. It is a guess about wording, so it should lose to an
+#     exact hit rather than tie with one.
+#   * A SKILL synonym is worth full weight. A tool is a tool.
+#
+# Matching is plain substring, same as the skill table, so nothing shorter
+# than about five characters belongs here.
+#
+# Set `synonyms_enabled = false` to switch the whole layer off in one line.
+# --------------------------------------------------------------------------
+synonyms_enabled = true
+
+# Points shaved off a tier hit reached by synonym. 6 puts a tier-1 synonym
+# above a tier-2 exact hit and below a tier-1 exact hit, which is the order
+# you want: a strong guess beats a weak certainty.
+synonym_discount = 6
+
+# How many extra board queries the synonym layer may add on top of
+# `search_queries`. Each one is an HTTP round trip per board, so it is a
+# budget, not a preference.
+search_synonym_limit = 8
+
+# ---- title synonyms ----
+
+[[synonym]]
+for = "staff accountant"
+also = ["general accountant", "corporate accountant", "accountant ii"]
+
+[[synonym]]
+for = "accounting associate"
+also = ["finance operations associate", "accounting support associate",
+        "accounting assistant"]
+
+[[synonym]]
+for = "accounts payable"
+also = ["ap processor", "vendor payments", "disbursements"]
+
+[[synonym]]
+for = "accounts receivable"
+also = ["ar processor", "cash applications", "collections analyst"]
+
+[[synonym]]
+for = "bookkeeper"
+also = ["full charge bookkeeper", "books and records", "bookkeeping specialist"]
+
+[[synonym]]
+for = "payroll specialist"
+also = ["payroll analyst", "payroll coordinator", "payroll operations"]
+
+[[synonym]]
+for = "billing specialist"
+also = ["billing coordinator", "invoicing specialist", "revenue operations analyst"]
+
+[[synonym]]
+for = "financial analyst"
+also = ["fp&a analyst", "finance analyst", "planning and analysis"]
+
+[[synonym]]
+for = "reconciliation analyst"
+also = ["account reconciliation specialist", "balance sheet analyst"]
+
+[[synonym]]
+for = "internal auditor"
+also = ["audit associate", "assurance associate", "controls analyst"]
+
+# ---- skill synonyms ----
+
+[[synonym]]
+for = "excel"
+also = ["spreadsheet", "microsoft office suite", "pivot table", "vlookup"]
+
+[[synonym]]
+for = "quickbooks"
+also = ["qbo"]
+
+[[synonym]]
+for = "netsuite"
+also = ["suiteanalytics"]
+
+[[synonym]]
+for = "general ledger"
+also = ["gl coding", "chart of accounts", "subledger"]
+
+[[synonym]]
+for = "reconciliation"
+also = ["reconcile", "account recs", "bank rec"]
+
+[[synonym]]
+for = "erp"
+also = ["workday financials", "microsoft dynamics"]
+
+[[synonym]]
+for = "sql"
+also = ["relational database", "query language"]
+
+[[synonym]]
+for = "power bi"
+also = ["dax", "power query"]
+
+[[synonym]]
+for = "month end close"
+also = ["monthly close", "period close", "close process"]
+
+[[synonym]]
+for = "journal entries"
+also = ["accruals", "adjusting entries", "je preparation"]
+
 
 [[function_families]]
 label = "accounting function"
