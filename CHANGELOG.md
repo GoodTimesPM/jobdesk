@@ -2,6 +2,98 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.3.0 — 2026-09-17
+
+A scoring release. The complaint that started it: postings with "Director" in
+the title were scoring 100, reqs asking for five years were reading as if they
+asked for two, and 100 turned up often enough that it had stopped meaning
+anything. All three were true.
+
+### Changed
+
+- **100 means perfect again.** The raw total a posting can reach now sits
+  above 100, and the last stretch of it is compressed, so the final ten points
+  cost several times what the first ten did. Nothing below the linear point
+  moves at all. On the live board this took the top score from 100 to 96 and
+  the count of perfect scores from common to none, without reordering
+  anything: the scale is monotonic, so it changes what a number means and not
+  which posting won.
+- **Seniority is read as a rank, not as a word.** "Associate Director" is a
+  director, "Senior Associate" is not early-career, and "FSP Associate
+  Manager" is neither. A junior word sitting on a senior noun used to count as
+  an early-career signal and hand the posting points for being exactly the
+  thing it was not. A slash list still disarms the block, because "Associate
+  Data Engineer / Data Engineer II / Senior Data Engineer" is one req with
+  three rungs and the bottom one is real.
+- **A requisition number is not a level.** "Lead Budget Analyst 00151" was
+  reading as level 1. "Accounting Analyst 1" still is.
+- **The highest floor in a posting wins, and a range is a band.** A req asking
+  for "2 years of SQL and 5 years of financial reporting" is a five-year req,
+  and it was being scored as a two. "3-5 years" no longer passes as a three
+  either: a band that tops out past the stretch is scored on where it tops
+  out. Tools stayed flexible, which is the trade the user asked for -- be
+  generous about which software, strict about the years.
+
+### Added
+
+- **Synonyms, marked experimental.** `targeting.toml` grew a `[[synonym]]`
+  section saying which other words mean the same job or the same tool. One
+  table, read three times: the title score, the skill score, and the queries
+  the boards are sent, so widening what you find and widening what scores well
+  is one edit in one file rather than two lists that drift apart. A title
+  synonym lands a notch below the term it stands in for, because it is a guess
+  about wording; a tool synonym earns full weight, since a posting asking for
+  DAX is asking for Power BI and there is no judgment call in that. Measured
+  over the live board: 90 postings gained points, none lost any, and nothing
+  returned to 100.
+- **Alternates match on word boundaries.** The tier lists and the skill table
+  match bare substrings, which is fine for terms you chose and can fix. A
+  synonym list is long enough that a short entry eventually collides, and
+  "elt" inside "skeleton" is not a data pipeline. The boundary is what makes
+  three-letter tool names writable at all, so this made the layer tighter
+  rather than looser.
+- **`scripts/radar/check_profile.py`.** TOML tells you the file parses. It
+  does not tell you `for = "data analsyt"` is a typo, and neither does the
+  scorer: an anchor matching no tier list and no skill key is silently worth
+  nothing, which looks exactly like a synonym that never fires. It found ten
+  real problems on the first run against the profile it was written for.
+- **The boards get asked for the other words too.** No amount of scoring fixes
+  a posting the board never sent. The synonym table is read back out as extra
+  queries, spread round-robin across the seeds rather than draining the first
+  one's alternates and leaving the rest nothing. Workday gets half the budget
+  of the keyword boards, because that query list goes to every tenant on the
+  employer list and one more query there is 27 more calls.
+- **Workday phrase queries.** `workday_queries` insisted on single words on
+  the grounds that Workday ANDs a phrase and returns nothing. Measured against
+  a live tenant, `searchText` "analyst" returns 298 postings, "business
+  intelligence" 223 and "data analyst" 209. The search is OR-ish and ranked by
+  relevance, and since each query takes one page of twenty, a phrase returns a
+  different top twenty than the bare word. The belief was costing coverage for
+  no reason.
+- **Employers discover themselves.** The watch list was 91 companies because
+  someone typed them in, while a single run surfaced 442 postings from 203
+  companies and discarded 155 of those companies the moment the digest went
+  out, several scoring in the nineties. Now any company whose best posting of
+  the run clears 75 gets its ATS probed, and confirmed boards are watched
+  directly from then on. 104 companies on the current board qualify, which at
+  five a run is three weeks of new employers out of data already on disk.
+- **A discovered board has to prove it is the right company.** A slug is just
+  a string and these APIs hand back somebody else's board for it -- Ashby's
+  `solstice` is a New York AI startup, not Solstice Advanced Materials of
+  Chesterfield. So a board counts only if it is currently advertising a title
+  that company was already seen posting; a collision board would have to be
+  running the same req. Anything short of that is a miss, remembered for 30
+  days so the same names do not burn the probe budget every morning. Learned
+  employers are written to `data/radar/employers.learned.toml` and never into
+  the hand-curated profile.
+
+### Fixed
+
+- **The age test no longer fails for one hour every night.** `test_age` built
+  each case as "N hours before now" off the real clock, so between midnight
+  and 1am "an hour ago" landed on yesterday and the check went red. It is
+  anchored at midday now.
+
 ## 0.2.7 — 2026-09-16
 
 ### Added
