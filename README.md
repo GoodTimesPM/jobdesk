@@ -113,6 +113,49 @@ colour and flagged as an estimate everywhere it travels. It is the local
 snapshot corpus doing the work, not a third-party salary service, so no
 posting you are looking at leaves your machine.
 
+## What a score has to earn
+
+A fit score is 0-100 and 100 is meant to be rare. The raw total a posting can
+reach is above 100, and the top stretch of it is compressed, so the last ten
+points cost several times what the first ten did. A posting that gets the
+title, the tools, the location and the experience right lands in the nineties.
+Being perfect is a separate achievement.
+
+Experience is the thing the score is strictest about, because it is the thing
+that actually closes a door. A req asking for "2 years of SQL and 5 years of
+financial reporting" is a five-year req, and it is read that way: the highest
+floor in the posting wins, and a range is a band rather than its lower end, so
+"3-5 years" does not pass as a three. Tools are the opposite. Ask for DAX and
+you are asking for Power BI, and that is not a judgment call.
+
+Seniority is read as a rank, not as a word. "Associate Director" is a
+director. "Senior Associate" is not early-career. A requisition number ending
+in 1 is not level 1.
+
+**Synonyms (experimental).** `targeting.toml` has a `[[synonym]]` section
+saying which other words mean the same job or the same tool. One table, read
+three times: the title score, the skill score, and the queries the boards are
+sent. Widening what you find and widening what scores well is one edit in one
+file instead of two lists that drift apart. A title synonym scores a notch
+below the word it stands in for, since it is a guess about wording; a tool
+synonym earns full weight. `py scripts/radar/check_profile.py` catches the
+typos TOML cannot: an anchor matching no tier list and no skill key is silently
+worth nothing, which looks exactly like a synonym that never fires.
+
+**Employers learn themselves.** The watch list starts as companies you typed
+in, and every run finds good postings from companies that are not on it. Any
+company whose best posting of the run clears 75 gets its ATS probed, and the
+boards that check out are watched directly from then on, which is how you see
+their next req before an aggregator does.
+
+The check is strict on purpose. A board slug is just a string, and these APIs
+will hand back a different company's board for it, so a discovered board counts
+only if it is currently advertising a job title that company was already seen
+posting. Anything short of that is recorded as a miss and left alone for a
+month. Learned employers go to `data/radar/employers.learned.toml`, never into
+your profile; move a block into `employers.toml` by hand to keep it for good.
+`LEARN_ENABLED = False` in `jobdesk/radar/config.py` turns the whole thing off.
+
 ## Your profile
 
 `profile/` is the only place your own details live, and it is git-ignored.
@@ -238,7 +281,7 @@ checklist.
 
 ## Version
 
-0.2.3. `CHANGELOG.md` has what changed and why.
+0.3.0. `CHANGELOG.md` has what changed and why.
 
 ## License
 
