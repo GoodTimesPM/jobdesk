@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -1001,13 +1002,45 @@ def test_market_route() -> None:
                       for v in body["jobs"].values()))
 
 
+# -- the version in three places --------------------------------------------
+
+def test_version() -> None:
+    """One version number, however many files repeat it."""
+    section("the version")
+
+    root = Path(__file__).resolve().parent.parent
+    version = jobdesk.__version__
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    found = re.search(r"^## Version\s+^([0-9][^.\s]*\.[^.\s]*\.[^.\s]*)\.",
+                      readme, re.M)
+    check("the README says a version", found is not None)
+    if found:
+        # It said 0.2.3 for four releases. Nobody reads their own README, and
+        # the one number in it people do act on is the one that goes stale.
+        check("and it is this one", found.group(1) == version,
+              f"README says {found.group(1)}, package says {version}")
+
+    log = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    top = re.search(r"^## (\S+)", log, re.M)
+    check("the changelog has an entry on top", top is not None)
+    if top:
+        check("and it is for this version", top.group(1) == version,
+              f"changelog starts at {top.group(1)}, package says {version}")
+
+
 # -- how old a posting is ---------------------------------------------------
 
 def test_age() -> None:
     """"today" means today's date, not "some time in the last 24 hours"."""
     section("the age of a posting")
 
-    now = datetime.now().astimezone()
+    # Anchored at midday rather than read off the clock. Every case below is
+    # "N hours before now", so run between midnight and 1am, "an hour ago"
+    # falls on yesterday and the check fails -- for one hour a night, on a
+    # suite that has nothing to do with what time it is.
+    now = datetime.now().astimezone().replace(hour=12, minute=0, second=0,
+                                              microsecond=0)
 
     def ago(**kw):
         return api._age_days((now - timedelta(**kw)).isoformat())
@@ -1180,6 +1213,7 @@ def main() -> int:
     test_market()
     test_market_route()
     test_age()
+    test_version()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
