@@ -81,9 +81,15 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     jobs, collapsed = dedupe.collapse(jobs)
     log(f"{len(jobs)} after collapsing {collapsed} duplicate(s)")
 
+    # Before scoring, not after: freshness is worth points, and a posting
+    # whose date came from a sitemap `<lastmod>` can claim to be newer than
+    # the run that first saw it. The store is the only thing that can say so.
+    store = dedupe.SeenStore()
+    for job in jobs:
+        store.settle_posted(job)
+
     jobs = score.score_all(jobs)          # rescore now that bodies are in
 
-    store = dedupe.SeenStore()
     new_jobs: list[Job] = []        # new AND worth reporting
     first_seen: list[Job] = []      # new at any score -- the dataset delta
     for job in jobs:
