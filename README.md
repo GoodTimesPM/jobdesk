@@ -16,15 +16,22 @@ not a default you can turn off.
 
 ## Install
 
-Windows, Python 3.11 or newer.
+Windows. Nothing else: if the machine has no Python, the installer offers to
+put one there.
 
 Download the ZIP, **extract it** somewhere you want to keep it, and
 double-click **`Install.cmd`** inside the extracted folder. That is the whole
 install. It clears the downloaded-file mark Windows puts on everything out of
-a ZIP, checks for Python and tells you where to get it if it is missing,
-builds a private environment inside the folder, installs the dependencies, and
-puts a JobDesk icon on your Desktop. It is safe to run again if something
-breaks, so it doubles as the repair.
+a ZIP, finds Python 3.11 or newer or installs 3.12 for you, builds a private
+environment inside the folder, installs the dependencies, and puts a JobDesk
+icon on your Desktop. It is safe to run again if something breaks, so it
+doubles as the repair.
+
+The Python step asks before it does anything, and press Enter is yes. It goes
+through winget if the machine has it and python.org's own installer if not,
+and either way it installs for your account only, so nothing here needs an
+administrator. If you would rather handle Python yourself, run the installer
+with `-NoPythonInstall` and it will print the instructions instead.
 
 Extracting first matters. Double-clicking a `.cmd` from inside a ZIP looks
 like it works: Windows copies that one file to a scratch folder and runs it
