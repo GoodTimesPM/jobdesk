@@ -245,7 +245,8 @@ def jobs(query, body) -> dict:
     listed = [{k: v for k, v in row.items() if k not in _LIST_DROP}
               for row in rows]
     for row in listed:
-        row["age_days"] = _age_days(row.get("posted_at"))
+        row["age_days"] = _age_days(row.get("posted_at"),
+                                    row.get("first_seen"))
     _mark_rows(listed)
     return {
         "jobs": listed,
@@ -295,7 +296,8 @@ def job(query, body) -> dict:
             body_text = full.pop("description", "") or ""
             full["blocks"] = jdstruct.structure(body_text)
             full["jd_chars"] = len(body_text)
-            full["age_days"] = _age_days(full.get("posted_at"))
+            full["age_days"] = _age_days(full.get("posted_at"),
+                                         full.get("first_seen"))
             _mark_rows([full])
             full["guards"] = actions.check_guards(actions.candidate(uid))
             market.start()
@@ -342,13 +344,45 @@ def market_context(query, body) -> dict:
     return {"ready": True, "jobs": out, "index": market.summary()}
 
 
-def _age_days(posted: str | None) -> int | None:
-    """How many days ago a posting went up, or None if it never said."""
+def _age_days(posted: str | None, first_seen: str | None = None) -> int | None:
+    """How many calendar days ago a posting went up, or None if it never said.
+
+    Calendar days, not elapsed hours. This used to divide a duration by 24,
+    which made "today" mean "some time in the last day" -- a posting that went
+    up at nine last night still read as today at eight this morning, and the
+    only column telling you what came in on this morning's run was telling you
+    about two different days at once. Now today is today: the same date on the
+    calendar you are looking at.
+
+    Local dates, because the person reading the column is in a local timezone
+    and not in UTC. The exception is a posting whose timestamp is exactly
+    midnight UTC, which is what a date-only feed like "2026-09-16" parses to.
+    There is no time of day in that, so shifting it into local time would just
+    invent one and push half the board back a day. Those are read as the plain
+    date they were written as.
+
+    A post date is also only as good as the source that gave it, and some
+    sources give `<lastmod>`: the day the page last changed, not the day the
+    job went up. A statewide board that regenerates a posting stamps it with
+    today, so a req that has been on the board a week comes back reading
+    "today". A date later than the run that first saw the posting is not
+    believed. We cannot know when it really went up, but we know we already
+    had it on a day it now claims to predate, and that day is the latest it
+    can honestly be.
+    """
     from ..radar.models import parse_date
     when = parse_date(posted)
     if when is None:
         return None
-    return max(0, (datetime.now(timezone.utc) - when).days)
+    seen = parse_date(first_seen)
+    if seen is not None and when > seen:
+        when = seen
+    if (when.tzinfo == timezone.utc and not (when.hour or when.minute
+                                             or when.second)):
+        posted_on = when.date()          # a date with no time of day in it
+    else:
+        posted_on = when.astimezone().date()
+    return max(0, (datetime.now().date() - posted_on).days)
 
 
 def _log_state() -> dict[str, dict]:
@@ -515,7 +549,8 @@ def rescore(query, body) -> dict:
         out.update(score=job_obj.score, tier=job_obj.tier,
                    reasons=job_obj.reasons, flags=job_obj.flags,
                    job_family=job_obj.job_family)
-        out["age_days"] = _age_days(row.get("posted_at"))
+        out["age_days"] = _age_days(row.get("posted_at"),
+                                    row.get("first_seen"))
         out["was"] = before.get(row.get("uid"), 0)
         scored.append(out)
     _mark_rows(scored)
