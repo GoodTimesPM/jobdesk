@@ -25,7 +25,9 @@ from __future__ import annotations
 import io
 import os
 import sys
+import tempfile
 import types
+from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +40,8 @@ if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 from jobdesk.radar import config, dedupe, render, score, sources   # noqa: E402
+from jobdesk.radar import models, profile, terms              # noqa: E402
+from jobdesk.radar import companies, discover, learn                # noqa: E402
 from jobdesk.radar.sources import ats                               # noqa: E402
 from jobdesk.radar.models import Job                                # noqa: E402
 
@@ -219,6 +223,219 @@ def scoring_check() -> int:
             print("  " + line)
         return 1
     print(f"all {len(SYNTHETIC)} scoring expectations hold")
+    return 0
+
+
+def rules_check() -> int:
+    """The scoring rules that a synthetic posting cannot pin down.
+
+    SYNTHETIC holds whole jobs and checks the number that falls out the end.
+    That is the right shape for "does this posting land in the right band" and
+    the wrong shape for "does the word `associate` in `Associate Director`
+    count as an early-career signal", which is one boolean three layers down.
+    Every rule below was a live scoring bug, and each one is one line here.
+    """
+    print("Rule self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    # -- a junior word on a senior noun is a rank, not a rung ----------------
+    want("'Associate Director' is not an entry-level title",
+         score.entry_level_marker("Associate Director, Clinical Research"), None)
+    want("neither is 'Senior Associate'",
+         score.entry_level_marker("Senior Associate, Card Risk"), None)
+    want("nor 'Associate Manager'",
+         score.entry_level_marker("FSP Associate Manager"), None)
+    want("but a plain 'Associate Analyst' still is",
+         score.entry_level_marker("Associate Data Analyst"), "associate")
+    want("and a rank plus a rung keeps the rung",
+         score.entry_level_marker("Associate Director / Associate Analyst"),
+         "associate")
+
+    # -- a requisition number is not a level --------------------------------
+    want("a req number ending in 1 is not 'level 1'",
+         score.entry_level_marker("Lead Budget Analyst 00151"), None)
+    want("a lone trailing 1 still is",
+         score.entry_level_marker("Accounting Analyst 1"), "level 1")
+
+    # -- the combined-level disarm needs an actual junior rung ---------------
+    want("a slash list with a junior rung disarms the block",
+         score.seniority_block(
+             "Associate Data Engineer / Data Engineer II / Senior Data Engineer"),
+         None)
+    want("'associate' meaning 'employee' does not",
+         score.seniority_block("Manager, Associate Relations Investigator"),
+         "manager")
+
+    # -- a years range is a band ---------------------------------------------
+    def band(text: str):
+        return score.required_band(
+            score.Job(title="Test", company="Test Co", url="x",
+                      source="test", description=text))
+
+    want("'3-5 years' is a band, not a 3", band("3-5 years required"), (3, 5))
+    want("'5+ years' has no invented ceiling", band("5+ years required"), (5, 5))
+    # Through clean_text on purpose: the bug was that "5&#43; years" reached
+    # the parser with the plus still spelled out as five characters, and the
+    # years regex read it as no years at all.
+    want("a plus sign written as an entity still parses",
+         band(models.clean_text("<p>5&#43; years of experience required</p>")),
+         (5, 5))
+    want("the highest floor wins",
+         band("1+ years of Excel. Minimum of 4 years in accounting."), (4, 4))
+    want("no years stated is None", band("We value curiosity."), None)
+
+    # -- and the band, not the floor, decides how much credit it earns -------
+    def flags_for(text: str):
+        pts, _why, fl = score._experience_points(
+            score.Job(title="Test", company="Test Co", url="x",
+                      source="test", description=text))
+        return pts, tuple(fl)
+
+    want("a band topping out past the stretch is not 'in range'",
+         flags_for("3-5 years of experience required")[1],
+         ("band-tops-out-high",))
+    want("a band inside the stretch is demoted, not blocked",
+         flags_for("2-3 years of experience required")[1],
+         ("stretch-experience",))
+    want("a band wholly in range gets the full bonus",
+         flags_for("1-2 years of experience required"), (15, ()))
+
+    # -- 100 costs what it says it costs -------------------------------------
+    want("nothing below the linear point moves", score.scale(40), 40)
+    want("the linear point itself is fixed",
+         score.scale(score.SCORE_LINEAR_TO), score.SCORE_LINEAR_TO)
+    want("a perfect raw total is 100", score.scale(score.SCORE_CEILING), 100)
+    want("and nothing can exceed it", score.scale(score.SCORE_CEILING + 50), 100)
+    want("halfway up the stretch is halfway to 100",
+         score.scale((score.SCORE_LINEAR_TO + score.SCORE_CEILING) // 2), 95)
+    want("the scale never goes backwards",
+         all(score.scale(n) <= score.scale(n + 1) for n in range(0, 200)), True)
+
+    # -- synonyms ------------------------------------------------------------
+    syn = profile.synonyms()
+    want("the example profile declares synonyms", bool(syn), True)
+    want("a title synonym lands one notch below an exact hit",
+         score._synonym_title("fp&a analyst")[0],
+         24 - profile.SYNONYM_DISCOUNT)
+    want("an unrecognised title gets nothing",
+         score._synonym_title("licensed massage therapist")[0], 0)
+    want("alternates match on word boundaries",
+         score._said("worked on skeleton crews", "elt"), False)
+    want("and do match the whole word",
+         score._said("built elt pipelines", "elt"), True)
+    want("a skill synonym is worth the skill's full weight",
+         score._says("we use qbo daily", "quickbooks", syn["quickbooks"]), "qbo")
+
+    # -- the same table widens what the boards are asked for -----------------
+    want("an empty budget widens nothing",
+         terms.widen(["staff accountant"], 0), [])
+    want("the budget is a hard cap",
+         len(terms.widen(["staff accountant", "bookkeeper"], 3)), 3)
+    want("widening spreads across seeds instead of draining one",
+         terms.widen(["staff accountant", "bookkeeper"], 2),
+         ["general accountant", "full charge bookkeeper"])
+    want("a seed is never handed back as its own alternate",
+         "staff accountant" in terms.widen(["staff accountant"], 8), False)
+    want("an unknown seed falls through to tier 1",
+         bool(terms.widen(["licensed massage therapist"], 2)), True)
+
+    # -- learning an employer from a posting ---------------------------------
+    #
+    # Every probe is stubbed and the learned file goes to a temp directory, so
+    # this touches no network and cannot write into data/. What is under test
+    # is the decision layer: who qualifies, who is confirmed, and who is left
+    # alone afterwards.
+    def made(company: str, title: str, points: int) -> Job:
+        job = Job(title=title, company=company, url="x", source="test")
+        job.score = points
+        return job
+
+    jobs = [
+        made("Hitbox Analytics", "Senior Data Analyst", 92),
+        made("Hitbox Analytics", "Mailroom Clerk", 20),
+        made("Missing Co", "Reporting Analyst", 88),
+        made("Robert Half", "Data Analyst", 99),
+        made("Lowball LLC", "Data Analyst", config.LEARN_MIN_SCORE - 1),
+    ]
+
+    def stub(name, seen_titles, budget):
+        if name == "Hitbox Analytics":
+            return (discover.Board("greenhouse", "hitboxanalytics",
+                                   list(seen_titles), 7), "greenhouse/x")
+        return None, "no public board found"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        real_find, real_path = discover.find, config.LEARNED_EMPLOYERS
+        discover.find = stub
+        config.LEARNED_EMPLOYERS = Path(tmp) / "employers.learned.toml"
+        try:
+            names = [n for n, _s, _t in learn.candidates(jobs, {}, date(2026, 9, 17))]
+            want("a company qualifies on its best posting, not its worst",
+                 "Hitbox Analytics" in names, True)
+            want("a staffing agency never qualifies", "Robert Half" in names, False)
+            want("neither does a company under the bar",
+                 "Lowball LLC" in names, False)
+
+            first = learn.run(jobs, today=date(2026, 9, 17))
+            want("a confirmed board is kept", [r["name"] for r in first],
+                 ["Hitbox Analytics"])
+            want("and it is written with the title that confirmed it",
+                 first[0]["confirmed_by"], "Senior Data Analyst")
+            want("an unconfirmed company is not kept",
+                 any(r["name"] == "Missing Co" for r in first), False)
+            want("a learned employer joins the watch list",
+                 any(e["name"] == "Hitbox Analytics" for e in companies.active()),
+                 True)
+            want("a company already learned is not probed again",
+                 learn.run(jobs, today=date(2026, 9, 18)), [])
+
+            data = learn._read(config.LEARNED_EMPLOYERS)
+            miss = learn._misses(data).get("missing co")
+            want("a miss is remembered", bool(miss), True)
+            want("and left alone until the retry window is up",
+                 [n for n, _s, _t in learn.candidates(
+                     jobs, data, date(2026, 9, 18))], [])
+            want("then probed once more",
+                 [n for n, _s, _t in learn.candidates(
+                     jobs, data,
+                     date(2026, 9, 17) + timedelta(days=config.LEARN_RETRY_DAYS + 1))],
+                 ["Missing Co"])
+        finally:
+            discover.find, config.LEARNED_EMPLOYERS = real_find, real_path
+
+    # A wrong board is the one failure mode that poisons every future run, so
+    # the rule that stops it gets its own line: the board has to be running a
+    # req this company was already seen posting, spelled the same way.
+    board = discover.Board("ashby", "solstice", ["Research Scientist, LLMs"], 4)
+    want("a collision board is not confirmed by a near miss",
+         discover.confirms(board, ["Process Engineer"]), None)
+    want("punctuation and case do not break a confirmation",
+         discover.confirms(discover.Board("lever", "x", ["Analyst II, Analytics"], 1),
+                           ["analyst ii - analytics"]),
+         "analyst ii - analytics")
+    want("nothing confirms a board when no title was seen",
+         discover.confirms(board, []), None)
+    want("a legal suffix never reaches a slug",
+         discover.slugs("Solstice Advanced Materials, Inc."),
+         ["solsticeadvancedmaterials", "solstice-advanced-materials"])
+    purse = discover.Budget(2)
+    want("the probe budget is a hard stop",
+         [purse.spend() for _ in range(3)], [True, True, False])
+
+    print("\n" + "=" * 72)
+    if fails:
+        print(f"{len(fails)} rule(s) broke:")
+        for line in fails:
+            print("  " + line)
+        return 1
+    print("all rules hold")
     return 0
 
 
@@ -515,7 +732,8 @@ if __name__ == "__main__":
     if "--plugins" in args:
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
-        raise SystemExit(scoring_check() or salary_check() or dates_check())
+        raise SystemExit(scoring_check() or rules_check()
+                         or salary_check() or dates_check())
     elif "--salary" in args:
         raise SystemExit(salary_check())
     elif "--discord" in args:
