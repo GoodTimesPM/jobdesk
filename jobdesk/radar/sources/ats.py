@@ -20,7 +20,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from .. import http, profile as targeting
+from .. import http, profile as targeting, terms
 from ..models import Job, clean_text, parse_date
 
 TIMEOUT = 30
@@ -211,31 +211,50 @@ def recruitee(entry: dict) -> list[Job]:
 # fetched only for what survives.
 # --------------------------------------------------------------------------
 
-def workday_queries(limit: int = 6) -> list[str]:
-    """`searchText` values for the Workday feeds, one per function family.
+def workday_queries(limit: int = 8, widen: bool = True) -> list[str]:
+    """`searchText` values for the Workday feeds.
 
     A Workday board is queried per target title rather than pulled wholesale,
-    so the query list has to be short. The first term of each function family
-    is the right size of word: broad enough that "accountant" catches the
+    so the query list has to stay short. The first term of each function
+    family is a good size of word: broad enough that "accountant" catches the
     staff, senior and assistant flavours, narrow enough that the board does
-    not return its entire catalogue. Single-word terms only -- Workday's
-    search treats a phrase as an AND and quietly returns nothing.
+    not return its whole catalogue.
+
+    This used to say single words only, on the grounds that Workday treats a
+    phrase as an AND and quietly returns nothing. That is not true, and the
+    belief was costing real coverage. Against a live tenant, `searchText`
+    "analyst" returns 298 postings, "business intelligence" 223 and "data
+    analyst" 209 -- the search is OR-ish and ranks by relevance. Since each
+    query takes one page of twenty, a phrase query returns a DIFFERENT top
+    twenty than the bare word does, which is exactly the coverage that was
+    being left on the table.
+
+    Then the synonym table widens it further, same as the keyword boards.
+    One extra query is one extra HTTP call and at most twenty more postings,
+    all of which are scored on the title before anything fetches a body.
 
     `workday_search_terms` in targeting.toml overrides the derivation.
     """
     declared = [q for q in targeting.WORKDAY_SEARCH_TERMS if q]
-    if declared:
-        return declared[:limit]
-    seen: set[str] = set()
-    out: list[str] = []
-    for _points, _label, terms in targeting.FUNCTION_FAMILIES:
-        for term in terms:
-            word = term.split()[0].strip().lower()
-            if len(word) > 3 and word not in seen:
-                seen.add(word)
-                out.append(word)
-                break
-    return out[:limit] or ["analyst"]
+    if not declared:
+        seen: set[str] = set()
+        declared = []
+        for _points, _label, family in targeting.FUNCTION_FAMILIES:
+            for term in family:
+                word = term.split()[0].strip().lower()
+                if len(word) > 3 and word not in seen:
+                    seen.add(word)
+                    declared.append(word)
+                    break
+        declared = declared or ["analyst"]
+    base = declared[:limit]
+    if not widen:
+        return base
+    # Half the budget the keyword boards get. This list is sent to EVERY
+    # Workday tenant on the employer list -- 27 of them on the live profile --
+    # so one extra query here is 27 more calls, not one.
+    budget = min(limit // 2, targeting.SEARCH_SYNONYM_LIMIT)
+    return base + terms.widen(base, budget)
 
 # The list endpoint dates postings as human text: "Posted Today",
 # "Posted 5 Days Ago", "Posted 30+ Days Ago".

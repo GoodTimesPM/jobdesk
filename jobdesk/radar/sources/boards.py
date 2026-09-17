@@ -17,14 +17,14 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
-from .. import http, profile as targeting
+from .. import http, profile as targeting, terms
 from ..models import Job, parse_date
 
 TIMEOUT = 30
 
 # What to ask the keyword-driven boards for. Kept narrow on purpose -- these
 # boards are national, so a broad query buries the Richmond signal.
-def queries(limit: int = 8) -> list[str]:
+def queries(limit: int = 8, widen: bool = True) -> list[str]:
     """The search phrases sent to the keyword boards.
 
     Adzuna and USAJOBS want a phrase, not a taxonomy, and the full target list
@@ -33,12 +33,24 @@ def queries(limit: int = 8) -> list[str]:
     the tier-1 list stands in, which covers the work they said they want.
     Everything else is caught by the company feeds, which are not
     keyword-limited.
+
+    Then the synonym table widens it. A short query list means the board only
+    ever hears the handful of words the user wrote down, and the postings that
+    call the same job something else are never returned at all -- no amount of
+    scoring fixes a posting the board never sent. The extras scale with the
+    caller's limit, so a lane already asking for one phrase does not suddenly
+    make nine calls, and `search_synonym_limit` caps the whole thing.
+
+    `widen=False` for a caller that needs exactly the declared phrases.
     """
     declared = [q for q in targeting.SEARCH_QUERIES if q]
-    if declared:
-        return declared[:limit]
-    titles = [t for t in targeting.TIER_1_TITLES if t]
-    return titles[:limit] or ["analyst"]
+    if not declared:
+        declared = [t for t in targeting.TIER_1_TITLES if t] or ["analyst"]
+    base = declared[:limit]
+    if not widen:
+        return base
+    budget = min(limit, targeting.SEARCH_SYNONYM_LIMIT)
+    return base + terms.widen(base, budget)
 
 
 def where() -> str:

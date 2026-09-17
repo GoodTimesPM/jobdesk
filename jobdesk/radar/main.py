@@ -21,8 +21,8 @@ import sys
 import traceback
 from datetime import datetime
 
-from . import (candidates, config, dedupe, mysql_store, plugins, render,
-               score, sources)
+from . import (candidates, config, dedupe, learn, mysql_store, plugins,
+               render, score, sources)
 from .models import Job
 
 _LOG_PATH = config.LOGS / "run.log"
@@ -103,6 +103,22 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     new_jobs.sort(key=lambda j: -j.score)
     log(f"{len(new_jobs)} new posting(s) at or above score "
         f"{config.MIN_SCORE_TO_REPORT} (store holds {len(store)})")
+
+    # Today's good postings become tomorrow's watched companies. Runs after
+    # scoring because the score is the whole qualification, and off the full
+    # list rather than `new_jobs` -- a company is worth watching whether or
+    # not this particular req was seen yesterday. Wrapped because this is the
+    # one step whose failure should cost nothing: the digest is already
+    # decided by here, and a network fault while probing must not lose it.
+    if dry_run:
+        log("dry run - skipping employer discovery")
+    else:
+        try:
+            for row in learn.run(jobs):
+                log(f"learned employer: {row['name']} via {row['ats']} "
+                    f"(confirmed by \"{row['confirmed_by']}\")")
+        except Exception:
+            log("employer discovery failed\n" + traceback.format_exc())
 
     digest_path = config.DIGESTS / f"digest_{stamp}.md"
     digest_path.write_text(render.markdown(jobs, stats, new_jobs), encoding="utf-8")

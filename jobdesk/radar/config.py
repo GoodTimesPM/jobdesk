@@ -69,3 +69,34 @@ MAX_DETAIL_FETCHES = 120
 
 # How many days a posting stays in seen.json before being forgotten.
 SEEN_RETENTION_DAYS = 120
+
+# -- Learning new employers ------------------------------------------------
+#
+# The watch list is hand-typed, and a run that surfaces 400 postings from 200
+# companies throws most of them away. These knobs decide how much of that gets
+# turned back into employers to check directly tomorrow. See radar/learn.py.
+
+LEARN_ENABLED = True
+
+# A company earns a probe on its BEST posting of the run. 75 is comfortably
+# above the reporting floor of 45: a B+ posting, not merely one worth reading.
+LEARN_MIN_SCORE = 75
+
+# Per run, so the list grows by a handful a day rather than in one flood that
+# nobody looks at. Probing is also the slowest thing the radar does.
+LEARN_MAX_NEW_PER_RUN = 5
+
+# Hard cap on HTTP calls spent discovering, across the whole run. A single
+# Workday probe alone can want 37 (7 datacenters + 30 site guesses).
+LEARN_PROBE_BUDGET = 120
+
+# A company with no public board found is left alone this long. Companies do
+# migrate ATS, so it is a wait, not a blacklist.
+LEARN_RETRY_DAYS = 30
+
+# Learned employers are checked, but after the curated ones. Tier 2 is the
+# same rung the hand-added second-string companies sit on.
+LEARN_TIER = 2
+
+# Machine-owned, rewritten every run, git-ignored with the rest of data/.
+LEARNED_EMPLOYERS = DATA / "employers.learned.toml"

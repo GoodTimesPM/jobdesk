@@ -29,8 +29,15 @@ from .models import Job
 # the optional second number swallows "14" with nothing in between. Demanding
 # a real "-" / "to" between the two halves means a bare four-digit run cannot
 # masquerade as a range.
+# The second group in the first pattern is the top of a range, and it used to
+# be thrown away. That was the single largest source of over-scoring on a live
+# board: "3-5 years of experience in data analytics" was read as a 3, landed
+# inside the comfortable band, and collected the full +15 for being in range.
+# 35 of 442 reportable postings said five or more years somewhere in the body
+# and were scored as asking for two or three. A range is a band the employer
+# wants, and both ends of it say something.
 _YEARS_PATTERNS = [
-    re.compile(r"(?<!\d)(\d{1,2})\s*\+?\s*(?:(?:-|to|–|—)\s*\d{1,2}\s*)?\+?\s*years?\b", re.I),
+    re.compile(r"(?<!\d)(\d{1,2})\s*\+?\s*(?:(?:-|to|–|—)\s*(\d{1,2})\s*)?\+?\s*years?\b", re.I),
     re.compile(r"minimum(?:\s+of)?\s+(?<!\d)(\d{1,2})\s*years?\b", re.I),
     re.compile(r"at least\s+(?<!\d)(\d{1,2})\s*years?\b", re.I),
 ]
@@ -104,6 +111,26 @@ _PREFERRED_MARKER = re.compile(
     r"bonus points|desired qualification|plus(?:es)?:)", re.I)
 
 
+# Requirement words strong enough to count in the half of the JD that the
+# preferred-qualifications marker is supposed to have ended.
+#
+# Cutting at the first "nice to have" is right for the wish list that usually
+# follows it and wrong for the structured footer that sometimes does. A live
+# Comcast req puts "Relevant Work Experience 5-7 Years" below a Certifications
+# block, well past the marker, and it is the only years line in the posting:
+# truncation read a 5-to-7-year job as stating no requirement at all.
+#
+# Deliberately tighter than _REQUIREMENT_CUE. The preferred half is ABOUT
+# experience, so the bare word cannot be the test down here or the truncation
+# would mean nothing.
+_TAIL_REQUIREMENT = re.compile(
+    r"(?i)(required|requirement|minimum|must have|at least|"
+    r"relevant work experience|years of experience)")
+
+# How far either side of a years figure the tail cue may sit.
+_TAIL_WINDOW = 60
+
+
 def _binding_text(job: Job) -> str:
     """The part of the JD that states real requirements."""
     text = job.description or job.title
@@ -111,6 +138,60 @@ def _binding_text(job: Job) -> str:
         return ""
     m = _PREFERRED_MARKER.search(text)
     return text[:m.start()] if m and m.start() > 200 else text
+
+
+def _preferred_tail(job: Job) -> str:
+    """Whatever `_binding_text` cut off, or an empty string."""
+    text = job.description or job.title
+    if not text:
+        return ""
+    m = _PREFERRED_MARKER.search(text)
+    return text[m.start():] if m and m.start() > 200 else ""
+
+
+def _bands_in(text: str) -> list[tuple[int, int]]:
+    """Every years requirement in a stretch of text, as (floor, ceiling).
+
+    "3-5 years" is (3, 5). A bare "5+ years" is (5, 5): the plus is open-ended
+    and inventing a ceiling for it would be worse than having none.
+    """
+    bands: list[tuple[int, int]] = []
+    for pat in _YEARS_PATTERNS:
+        for m in pat.finditer(text):
+            try:
+                low = int(m.group(1))
+            except (TypeError, ValueError):
+                continue
+            if not 0 < low <= 20:
+                continue
+            high = low
+            if m.lastindex and m.lastindex >= 2 and m.group(2):
+                try:
+                    top = int(m.group(2))
+                except (TypeError, ValueError):
+                    top = low
+                if low <= top <= 20:
+                    high = top
+            bands.append((low, high))
+    for m in _WORD_YEARS.finditer(text):
+        n = _WORD_NUMBERS[m.group(1).lower()]
+        bands.append((n, n))
+    return bands
+
+
+def _tail_bands(job: Job) -> list[tuple[int, int]]:
+    """Years requirements below the preferred marker that still bind."""
+    tail = _preferred_tail(job)
+    if not tail:
+        return []
+    kept: list[tuple[int, int]] = []
+    for pat in _YEARS_PATTERNS:
+        for m in pat.finditer(tail):
+            window = tail[max(0, m.start() - _TAIL_WINDOW): m.end() + _TAIL_WINDOW]
+            if not _TAIL_REQUIREMENT.search(window):
+                continue
+            kept.extend(_bands_in(m.group(0)) or [])
+    return kept
 
 
 def required_years(job: Job) -> int | None:
@@ -127,24 +208,28 @@ def required_years(job: Job) -> int | None:
         anywhere in its requirements, 5 years is the gate -- an earlier
         "1+ years of SQL" line doesn't lower it.
 
-    Ranges ("3-5 years") are read at their lower bound by the pattern itself,
-    which is the one place being generous is correct.
+    Ranges ("3-5 years") are read at their lower bound here, which is the one
+    place being generous is correct: 3 is what the employer says you need to
+    be considered. The ceiling is not thrown away, though -- `required_band`
+    keeps it, and the scoring below uses it to withhold the full in-range
+    bonus from a posting aimed at somebody more senior than its floor.
     """
-    text = _binding_text(job)
-    if not text:
+    band = required_band(job)
+    return band[0] if band else None
+
+
+def required_band(job: Job) -> tuple[int, int] | None:
+    """The years gate as (floor, ceiling), or None if the posting never said.
+
+    The floor is the highest floor stated anywhere binding -- if a posting
+    demands 5 years in one line, an earlier "1+ years of SQL" does not lower
+    it. The ceiling is the top of whichever band goes highest, which is not
+    always the same band.
+    """
+    bands = _bands_in(_binding_text(job)) + _tail_bands(job)
+    if not bands:
         return None
-    found: list[int] = []
-    for pat in _YEARS_PATTERNS:
-        for m in pat.finditer(text):
-            try:
-                n = int(m.group(1))
-            except (TypeError, ValueError):
-                continue
-            if 0 < n <= 20:
-                found.append(n)
-    for m in _WORD_YEARS.finditer(text):
-        found.append(_WORD_NUMBERS[m.group(1).lower()])
-    return max(found) if found else None
+    return max(b[0] for b in bands), max(b[1] for b in bands)
 
 
 # Words that turn a years figure into an actual gate. "5+ years of experience
@@ -201,15 +286,14 @@ def blocking_years(job: Job) -> int | None:
     gated: list[int] = []
     for pat in _YEARS_PATTERNS:
         for m in pat.finditer(text):
-            try:
-                n = int(m.group(1))
-            except (TypeError, ValueError):
-                continue
-            if not 0 < n <= 20:
-                continue
             window = text[max(0, m.start() - _GATE_WINDOW): m.end() + _GATE_WINDOW]
-            if _REQUIREMENT_CUE.search(window):
-                gated.append(n)
+            if not _REQUIREMENT_CUE.search(window):
+                continue
+            # The FLOOR of the band, not its top. "5-8 years" blocks at five,
+            # because five is what the posting says gets you considered.
+            gated.extend(b[0] for b in _bands_in(m.group(0)))
+    for low, _high in _tail_bands(job):
+        gated.append(low)
     if not gated:
         return None
 
@@ -309,7 +393,30 @@ def parse_salary(job: Job) -> tuple[float | None, float | None]:
 
 # Numeric early-career levels: "Analyst 1", "Data Analyst I". Roman I and
 # arabic 1 only -- II/2 and up are not entry.
-_ENTRY_LEVEL_NUM = re.compile(r"(?<![a-z])(?:i|1)(?![a-z0-9])", re.I)
+#
+# The digit guard runs both ways for a reason. With only the trailing one,
+# every requisition number ending in 1 was an early-career signal: live
+# postings "Lead Budget Analyst 00151" and "Program Support Tech Sr Doc
+# Headquarters 00901" each came back as "level 1", which then disarmed the
+# seniority block on "lead" and "sr" and floated both into the seventies.
+# A level marker is a lone I or 1, never a digit inside a longer run.
+_ENTRY_LEVEL_NUM = re.compile(r"(?<![a-z0-9])(?:i|1)(?![a-z0-9])", re.I)
+
+# Seniority ranks that wear a junior word. "Associate Director" is two rungs
+# above entry and "Senior Associate" is one; in both the level word is an
+# adjective on somebody else's noun. Reading either as an early-career signal
+# is what let "Associate Director, Strategy & Insights- Clinical Research
+# Group" score 100 out of 100, along with "Senior Associate, Card Risk",
+# "FSP Associate Manager" and four more on a single 442-row board.
+_JUNIOR_WORD = r"associate|assistant|asst\.?|deputy|junior|jr\.?"
+_SENIOR_NOUN = (r"director|manager|vice\s+president|vp|president|principal|"
+                r"partner|chief|head|dean|counsel|controller|supervisor|"
+                r"architect|officer|administrator")
+_SENIOR_WORD = (r"senior|sr\.?|lead|principal|staff|executive|managing|"
+                r"global|head")
+_COMPOUND_RANK = re.compile(
+    r"(?<![a-z])(?:(?:" + _JUNIOR_WORD + r")\s+(?:" + _SENIOR_NOUN + r")"
+    r"|(?:" + _SENIOR_WORD + r")\s+(?:" + _JUNIOR_WORD + r"))(?![a-z])", re.I)
 
 
 def entry_level_marker(title: str) -> str | None:
@@ -318,14 +425,30 @@ def entry_level_marker(title: str) -> str | None:
     Associate / Junior / Entry-Level / Graduate / a trailing level-1. This is
     the strongest positive signal in your applied set, and it also disarms
     the seniority block on combined-level postings (see below).
+
+    A level word glued to a senior noun is not one of these. "Associate
+    Director" and "Senior Associate" are ranks in their own right, and the
+    junior half is doing the work of an adjective. Both used to come back as
+    "associate", which spent the early-career bonus on a director and, worse,
+    disarmed the block that should have erased the posting outright.
     """
     t = f" {flatten_title(title)} "
     for mark in profile.ENTRY_LEVEL_MARKERS:
-        if re.search(r"(?<![a-z])" + re.escape(mark) + r"(?![a-z])", t):
-            return mark
+        for m in re.finditer(r"(?<![a-z])" + re.escape(mark) + r"(?![a-z])", t):
+            # Only this occurrence has to be clean. A title can name a rank
+            # and a rung ("Associate Director / Associate Analyst") and the
+            # second one still counts.
+            if not _compound_at(t, m.start(), m.end()):
+                return mark
     if _ENTRY_LEVEL_NUM.search(title):
         return "level 1"
     return None
+
+
+def _compound_at(text: str, start: int, end: int) -> bool:
+    """Is the level word at [start:end] half of a seniority rank?"""
+    return any(m.start() <= start and m.end() >= end
+               for m in _COMPOUND_RANK.finditer(text))
 
 
 def seniority_block(title: str) -> str | None:
@@ -340,19 +463,50 @@ def seniority_block(title: str) -> str | None:
     intact. You are not a candidate for a lead role, and a triage engine
     that surfaces one has failed at its only job.
 
-    Exception: a title that *also* carries an entry-level marker is a
-    combined-level posting -- "Associate Data Engineer / Data Engineer II /
-    Senior Data Engineer" lists one req spanning Associate through Senior, and
-    its floor (Associate) is squarely in range. Blocking it on the word
-    "senior" threw away a role you actually applied to, so co-occurrence of
-    an entry marker disarms the block.
+    Exception: a combined-level posting -- "Associate Data Engineer / Data
+    Engineer II / Senior Data Engineer" lists one req spanning Associate
+    through Senior, and its floor (Associate) is squarely in range. Blocking
+    it on the word "senior" threw away a role you actually applied to.
+
+    That exception used to be "the title contains an entry word anywhere",
+    which is far wider than the shape it was written for and rescued seven
+    senior reqs on one board -- an Associate Director at 100, a Senior
+    Associate at 100, an Associate Manager at 100. The word "anywhere" was
+    doing it: "Manager, Associate Relations Investigator" is an HR manager,
+    and "associate" there means "employee".
+
+    What a genuine combined-level posting looks like is a SLASH LIST with a
+    junior rung in it. So the disarm now needs a slash-separated segment that
+    carries an early-career marker and no seniority word of its own -- an
+    actual rung you could be hired onto, written down as its own title.
     """
     t = f" {title.lower()} "
     for bad in profile.TITLE_DISQUALIFIERS:
         if re.search(r"(?<![a-z])" + re.escape(bad.strip()) + r"(?![a-z])", t):
-            if entry_level_marker(title):
+            if _junior_rung(title):
                 return None
             return bad.strip()
+    return None
+
+
+def _junior_rung(title: str) -> str | None:
+    """A slash-separated segment of the title that is an entry-level role.
+
+    The test for a combined-level posting. One segment has to stand on its
+    own as something you could be hired as: an early-career marker, and no
+    disqualifying rank anywhere in the same segment.
+    """
+    if "/" not in title:
+        return None
+    for segment in title.split("/"):
+        segment = segment.strip()
+        if not segment or not entry_level_marker(segment):
+            continue
+        seg = f" {segment.lower()} "
+        if any(re.search(r"(?<![a-z])" + re.escape(bad.strip()) + r"(?![a-z])", seg)
+               for bad in profile.TITLE_DISQUALIFIERS):
+            continue
+        return segment
     return None
 
 
@@ -408,6 +562,83 @@ def _function_match(title: str) -> tuple[int, str]:
     return 0, ""
 
 
+# --------------------------------------------------------------------------
+# Synonyms -- the same work under a different word.
+#
+# The tier lists and the function families are both vocabularies of terms the
+# user wrote down, and a posting is written by somebody who never saw them.
+# "Data Analyst" and "Insights Analyst" are the same job; "Help Desk" and
+# "Service Desk" and "Solution Center" are the same desk. Every one of those
+# misses was costing a real posting, and padding the tier lists by hand is how
+# you get a list nobody can maintain and a second copy of every term in the
+# search queries.
+#
+# So synonyms are declared once, in the profile, and read here and by the
+# search-query builders both. Two rules keep them from dissolving the target:
+#
+#   * A title synonym lands one notch BELOW the term it stands in for. It is
+#     a guess about wording, and it should lose to an exact hit rather than
+#     tie with one.
+#   * A skill synonym earns full weight. A tool is a tool -- "Power BI" and
+#     "DAX" and "PowerBI" are one skill spelled three ways, and there is
+#     nothing to be uncertain about. This is also the user's stated priority:
+#     be flexible about tools, strict about years.
+# --------------------------------------------------------------------------
+
+def _tier_points(term: str) -> int:
+    """What an exact hit on this term would have been worth."""
+    if term in profile.TIER_1_TITLES:
+        return 35
+    if term in profile.TIER_2_TITLES:
+        return 24
+    if term in profile.TIER_3_TITLES:
+        return 14
+    if term in profile.ADJACENT_TITLES:
+        return 12
+    return 0
+
+
+def _said(text: str, phrase: str) -> bool:
+    """Does `text` use `phrase` as a whole word?
+
+    Word-bounded, unlike the tier lists and the skill table around it. Those
+    are terms the user chose and can fix; a synonym list is long enough that
+    one short entry will eventually collide with something, and a bare
+    substring "elt" matches "delta" and "skeleton". The boundary is what makes
+    three-letter tool names ("DAX", "GCP", "ELT") safe to write down at all.
+    """
+    return re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])",
+                     text) is not None
+
+
+def _synonym_title(flat: str) -> tuple[int, str]:
+    """(points, label) for a title that names a target role by another word."""
+    best, why = 0, ""
+    for term, alternates in profile.synonyms().items():
+        worth = _tier_points(term)
+        if worth <= 0:
+            continue                    # a skill synonym, not a title one
+        points = max(0, worth - profile.SYNONYM_DISCOUNT)
+        if points <= best:
+            continue
+        for alt in alternates:
+            if _said(flat, alt):
+                best = points
+                why = f"reads as {term} ({alt})"
+                break
+    return best, why
+
+
+def _says(hay: str, skill: str, alternates: list[str]) -> str | None:
+    """The wording this posting used for `skill`, if it used one at all."""
+    if skill in hay:
+        return skill
+    for alt in alternates:
+        if _said(hay, alt):
+            return alt
+    return None
+
+
 def _title_tier(title: str) -> tuple[int, str]:
     """(points, label) for the posting title.
 
@@ -453,6 +684,9 @@ def _title_tier(title: str) -> tuple[int, str]:
                         if good in t:
                             listed, listed_why = 12, f"analyst-adjacent ({good.strip()})"
                             break
+
+    if not listed:
+        listed, listed_why = _synonym_title(t)
 
     fn_pts, fn_why = _function_match(title)
 
@@ -554,15 +788,16 @@ def _stack_points(job: Job) -> tuple[int, list[str], list[str]]:
     hay = job.haystack
     hits: list[str] = []
     raw = 0
+    alt = profile.synonyms()
 
-    for skill, weight in profile.CORE_SKILLS.items():
-        if skill in hay:
-            raw += weight
-            hits.append(skill)
-    for skill, weight in profile.SUPPORTING_SKILLS.items():
-        if skill in hay:
-            raw += weight
-            hits.append(skill)
+    # Full weight on a synonym hit, unlike the title side. A posting asking
+    # for DAX is asking for Power BI, and there is no judgment call in that.
+    for table in (profile.CORE_SKILLS, profile.SUPPORTING_SKILLS):
+        for skill, weight in table.items():
+            said = _says(hay, skill, alt.get(skill, []))
+            if said:
+                raw += weight
+                hits.append(skill if said == skill else f"{skill} ({said})")
 
     foreign = [s for s in profile.FOREIGN_SKILLS if s in hay]
     raw -= 2 * len(foreign)
@@ -579,17 +814,41 @@ def _stack_points(job: Job) -> tuple[int, list[str], list[str]]:
 
 
 def _experience_points(job: Job) -> tuple[int, list[str], list[str]]:
-    # Roles past MAX_YEARS_STRETCH are already hard-blocked in score_job before
-    # this runs, so in practice `years` is None or <= MAX_YEARS_STRETCH here.
-    # The final branch stays as a defensive fallback.
-    years = required_years(job)
-    if years is None:
+    """Score the years gate, reading the whole band and not just its floor.
+
+    Roles whose FLOOR is past MAX_YEARS_STRETCH are already hard-blocked in
+    score_job before this runs, so in practice the floor here is None or
+    within the stretch. What is new is the ceiling.
+
+    A posting asking "2-5 years" has a floor you clear and a target you do
+    not. Scored on the floor alone it collected the full in-range bonus and
+    sat among the perfect scores; on a live 442-row board, 35 postings that
+    named five or more years somewhere were being read as asking for two or
+    three. The floor still decides whether the posting is reachable. The
+    ceiling decides how much of the bonus it earns, because a band topping
+    out well above you is a band you are at the bottom of.
+    """
+    band = required_band(job)
+    if band is None:
         return 6, ["no explicit years requirement"], []
-    if years <= profile.YEARS_COMFORTABLE:
-        return 15, [f"{years}+ years required - in range"], []
-    if years <= profile.MAX_YEARS_STRETCH:
-        return 4, [f"{years}+ years required - a stretch"], ["stretch-experience"]
-    return -25, [f"{years}+ years required - out of range"], ["over-experienced-req"]
+    low, high = band
+
+    if low > profile.MAX_YEARS_STRETCH:
+        return -25, [f"{low}+ years required - out of range"], ["over-experienced-req"]
+
+    span = f"{low}-{high}" if high > low else f"{low}+"
+    if high > profile.MAX_YEARS_STRETCH:
+        # The floor is reachable, the band is not aimed at you. Worth less
+        # than a posting with no stated requirement at all: this one has
+        # said out loud who it is looking for.
+        return 3, [f"{span} years required - you are at the floor of the band"], \
+            ["band-tops-out-high"]
+    if low <= profile.YEARS_COMFORTABLE:
+        if high <= profile.YEARS_COMFORTABLE:
+            return 15, [f"{span} years required - in range"], []
+        return 11, [f"{span} years required - top of the band is a stretch"], \
+            ["stretch-experience"]
+    return 4, [f"{span} years required - a stretch"], ["stretch-experience"]
 
 
 def _education_points(job: Job) -> tuple[int, list[str], list[str]]:
@@ -758,6 +1017,57 @@ def _disqualifiers(job: Job) -> list[str]:
             + profile.VOLUNTEER_MARKERS if d in hay]
 
 
+# --------------------------------------------------------------------------
+# What 100 means.
+#
+# The axes below add up to 159 when every one of them lands at its best, and
+# the total was being clamped at 100. So the top 59 points were invisible:
+# every posting from a good one to a flawless one came out as the same number.
+# On a live 442-row board that was 60 postings tied at exactly 100 -- one row
+# in seven -- and the score stopped being able to say which of them to read
+# first, which is the entire job.
+#
+# The fix is a scale, not a ceiling. Below SCORE_LINEAR_TO nothing moves at
+# all: the tier lines, the reporting threshold and every hand-tuned weight
+# keep the meaning they were calibrated to. Above it the remaining ten points
+# are stretched over the whole rest of the range, so 100 now costs what it
+# says it costs -- a tier-1 title in the home metro, fresh, paid at target,
+# stated in range, on the company's own ATS and nowhere else.
+#
+# Each term is one scoring function's best case, in the order score_job calls
+# them. Re-weight a rule and this needs the same edit; `tests/test_radar.py`
+# holds it to the arithmetic.
+# --------------------------------------------------------------------------
+SCORE_CEILING = (
+    35 + 4       # title: a tier-1 hit with a domain word beside it
+    + 25         # geo: in the home metro
+    + 15         # experience: a stated requirement inside your range
+    + 6          # education: a bachelor's in one of your fields
+    + 8          # no prior experience needed
+    + 10         # freshness: posted inside FRESH_DAYS
+    + 11         # salary: at or above target, and posted up front
+    + 8          # syndication: the company's own ATS, not yet copied anywhere
+    + 25         # stack: the cap in _stack_points
+    + 6          # an early-career marker in the title
+    + 6          # applying direct to the company ATS
+)
+
+SCORE_LINEAR_TO = 90
+
+
+def scale(total: int) -> int:
+    """One raw total as a 0-100 score.
+
+    Identity below SCORE_LINEAR_TO. Above it, the raw range that used to be
+    flattened against the clamp is spread across the last ten points.
+    """
+    if total <= SCORE_LINEAR_TO:
+        return max(0, total)
+    room = SCORE_CEILING - SCORE_LINEAR_TO
+    over = min(total, SCORE_CEILING) - SCORE_LINEAR_TO
+    return SCORE_LINEAR_TO + round(over * (100 - SCORE_LINEAR_TO) / room)
+
+
 def tier_for(score: int) -> str:
     if score >= 75:
         return "A"
@@ -867,7 +1177,7 @@ def score_job(job: Job) -> Job:
         total = min(total, 40)
         reasons.append("capped: title is off-target")
 
-    job.score = max(0, min(100, total))
+    job.score = scale(total)
     job.tier = tier_for(job.score)
     job.reasons = reasons
     job.flags = flags
