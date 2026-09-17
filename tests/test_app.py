@@ -30,6 +30,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from base64 import b64encode
+from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -1000,6 +1001,58 @@ def test_market_route() -> None:
                       for v in body["jobs"].values()))
 
 
+# -- how old a posting is ---------------------------------------------------
+
+def test_age() -> None:
+    """"today" means today's date, not "some time in the last 24 hours"."""
+    section("the age of a posting")
+
+    now = datetime.now().astimezone()
+
+    def ago(**kw):
+        return api._age_days((now - timedelta(**kw)).isoformat())
+
+    check("an hour ago is today", ago(hours=1) == 0)
+    check("this morning is today", ago(hours=min(now.hour, 6)) == 0)
+
+    # The one this is really about. Elapsed-hours arithmetic called nine last
+    # night "today" for the whole of the following morning, which is exactly
+    # when someone checks what the overnight run brought in.
+    last_night = (now - timedelta(days=1)).replace(hour=21, minute=0, second=0,
+                                                   microsecond=0)
+    check("last night is not today", api._age_days(last_night.isoformat()) == 1,
+          str(api._age_days(last_night.isoformat())))
+
+    check("yesterday is one day", ago(days=1) == 1)
+    check("last week is seven", ago(days=7) == 7)
+
+    # A date-only feed carries no time of day. Reading it in local time would
+    # invent one and push every such posting back a day.
+    today = now.date()
+    check("a date-only posting for today is today",
+          api._age_days(today.isoformat()) == 0)
+    check("a date-only posting for yesterday is one day",
+          api._age_days((today - timedelta(days=1)).isoformat()) == 1)
+
+    # A sitemap `<lastmod>` is the day the page changed, not the day the job
+    # went up, so a posting the radar has been carrying for days can claim to
+    # be newer than the run that first saw it. It cannot be.
+    today_str = now.date().isoformat()
+    seen_yesterday = (now - timedelta(days=1)).replace(hour=17, minute=7)
+    check("a date later than the first sighting is not believed",
+          api._age_days(today_str, seen_yesterday.isoformat()) == 1,
+          str(api._age_days(today_str, seen_yesterday.isoformat())))
+    check("a date earlier than the first sighting is left alone",
+          api._age_days((now - timedelta(days=9)).isoformat(),
+                        seen_yesterday.isoformat()) == 9)
+    check("no first sighting means nothing to contradict",
+          api._age_days(today_str) == 0)
+
+    check("a posting with no date has no age", api._age_days(None) is None)
+    check("and neither does an unparseable one", api._age_days("soon") is None)
+    check("a date in the future is not negative", ago(days=-3) == 0)
+
+
 # -- one window, one server -------------------------------------------------
 
 def test_one_server() -> None:
@@ -1126,6 +1179,7 @@ def main() -> int:
     test_no_writes()
     test_market()
     test_market_route()
+    test_age()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

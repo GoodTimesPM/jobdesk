@@ -222,6 +222,70 @@ def scoring_check() -> int:
     return 0
 
 
+def dates_check() -> int:
+    """A posting cannot have gone up after the run that first saw it.
+
+    The sitemap lane reads `<lastmod>`, which is the day the page last
+    changed. A statewide board that regenerates a posting stamps it with
+    today, and on 2026-09-16 that put five reqs first seen the previous
+    afternoon back at the top of the board reading "today".
+    """
+    import tempfile
+    from datetime import datetime, timedelta, timezone
+
+    print("Post-date self-check")
+    print("=" * 72)
+    failures = []
+    now = datetime.now(timezone.utc)
+    yesterday = now - timedelta(days=1)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = dedupe.SeenStore(Path(tmp) / "seen.json")
+
+        def job(posted):
+            return Job(title="Contract Administrator", company="Commonwealth",
+                       url="https://example.gov/job/contract-administrator",
+                       source="sitemap", posted_at=posted)
+
+        # Nothing on file yet: a first sighting has nothing to contradict.
+        fresh = job(now)
+        store.settle_posted(fresh)
+        if fresh.posted_at != now:
+            failures.append("a first sighting was second-guessed")
+        store.record(fresh)
+
+        # Now the store has seen it. Back-date that sighting to yesterday and
+        # have the source claim the posting went up today.
+        rec = store._data[fresh.uid]
+        rec["first_seen"] = yesterday.isoformat()
+
+        bumped = job(now)
+        store.settle_posted(bumped)
+        if bumped.posted_at != yesterday:
+            failures.append(
+                f"a bumped lastmod survived: {bumped.posted_at} != {yesterday}")
+
+        old = now - timedelta(days=9)
+        honest = job(old)
+        store.settle_posted(honest)
+        if honest.posted_at != old:
+            failures.append("a date older than the first sighting was moved")
+
+        undated = job(None)
+        store.settle_posted(undated)
+        if undated.posted_at is not None:
+            failures.append("a posting with no date was given one")
+
+    print("\n" + "=" * 72)
+    if failures:
+        print(f"{len(failures)} post-date expectation(s) broke:")
+        for line in failures:
+            print("  " + line)
+        return 1
+    print("post dates hold: nothing is newer than the run that found it")
+    return 0
+
+
 def salary_check() -> int:
     """Hold the salary reader to the shapes that actually appear in postings.
 
@@ -451,7 +515,7 @@ if __name__ == "__main__":
     if "--plugins" in args:
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
-        raise SystemExit(scoring_check() or salary_check())
+        raise SystemExit(scoring_check() or salary_check() or dates_check())
     elif "--salary" in args:
         raise SystemExit(salary_check())
     elif "--discord" in args:
