@@ -8,4 +8,4 @@ allowed to know about all three.
 Nothing in this package calls a model or an API you need an account for.
 """
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
