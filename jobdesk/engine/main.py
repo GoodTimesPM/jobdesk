@@ -88,8 +88,9 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     pdf_path = out_dir / f"{stem}.pdf"
 
-    pages, slack, dropped = render_pdf.render_fitted(plan, pdf_path)
-    render_docx.render(plan, out_dir / f"{stem}.docx")
+    fit = render_pdf.render_fitted(plan, pdf_path)
+    pages, slack, dropped = fit.pages, fit.slack, fit.dropped
+    render_docx.render(plan, out_dir / f"{stem}.docx", fit.layout)
     render_txt.render(plan, out_dir / f"{stem}.txt")
 
     # -- the truthfulness gate -------------------------------------------
@@ -105,7 +106,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     cover = tailor.coverage(plan, vocab)
     (out_dir / "ats_report.md").write_text(ats.to_markdown(report), encoding="utf-8")
     (out_dir / "TAILORING.md").write_text(
-        _tailoring_report(plan, cover, report, dropped, slack, stored),
+        _tailoring_report(plan, cover, report, fit, stored),
         encoding="utf-8",
     )
 
@@ -120,7 +121,10 @@ def cmd_tailor(args: argparse.Namespace) -> int:
         print(f"  Years required   : {posting.years_required}")
     print(f"  Bullets selected : {plan.bullet_count()}"
           + (f"  (dropped for page fit: {', '.join(dropped)})" if dropped else ""))
-    print(f"  Page fit         : {pages} page(s), {slack:.0f}mm slack")
+    print(f"  Page fit         : {pages} page(s), {slack:.0f}mm slack"
+          + (f", set at {fit.layout.type:.0%} type" if fit.layout.type < 1 else ""))
+    for line in _squeeze_advice(plan, fit):
+        print(f"  ROOM TO GAIN     : {line}")
     print(f"  Required terms   : {cover.required_rate:.0%} covered "
           f"({len(cover.required_hit)}/{len(cover.required_hit) + len(cover.required_missed)})")
     print(f"  ATS parse score  : {report.parse_score}/100 ({report.verdict})")
@@ -183,10 +187,35 @@ def _deliver(out_dir: Path, stem: str) -> Path | None:
         return None
 
 
+def _squeeze_advice(plan: tailor.Plan, fit: render_pdf.Fit) -> list[str]:
+    """What the user could give back, when the page had to take something.
+
+    Only says anything when the fit actually cost something visible: smaller
+    type, a dropped bullet, or a crossed floor. The point is that the page is
+    a budget and the user is the one who decides what it is spent on -- but
+    they can only decide that if they are told what it cost and what they are
+    still holding.
+    """
+    if fit.layout.type >= 1.0 and not fit.dropped and not fit.broke_floors:
+        return []
+    out: list[str] = []
+    if plan.summary:
+        out.append("The summary is about four lines of this page. "
+                   'Set `summary = "none"` under `[render]` in master.toml to '
+                   "spend them on bullets instead.")
+    ceiling = int(plan.master.render.get("total_bullet_ceiling", 12))
+    if plan.bullet_count() >= ceiling:
+        out.append(f"The bullet ceiling is {ceiling} and the plan is at it. "
+                   f"Lowering `total_bullet_ceiling` puts the cut back where "
+                   f"it is made on coverage and reported, instead of here.")
+    return out
+
+
 def _tailoring_report(plan: tailor.Plan, cover: tailor.Coverage,
-                      report: ats.AtsReport, dropped: list[str], slack: float,
+                      report: ats.AtsReport, fit: render_pdf.Fit,
                       stored: Path) -> str:
     posting = plan.jd
+    dropped, slack = fit.dropped, fit.slack
     lines = [
         f"# Tailoring report -- {posting.company}, {posting.title}",
         "",
@@ -205,9 +234,21 @@ def _tailoring_report(plan: tailor.Plan, cover: tailor.Coverage,
     ]
     if posting.years_required:
         lines.append(f"- Binding experience requirement: **{posting.years_required} years**")
+    # Tightened leading is a rendering detail and it happens on nearly every
+    # posting, so only a change the reader can see is worth a line here.
+    if fit.layout.type < 1.0:
+        lines.append(f"- Set smaller to hold one page: {fit.layout.describe()}")
+    for line in _squeeze_advice(plan, fit):
+        lines.append(f"- {line}")
     if dropped:
         lines.append(f"- Dropped to fit the page: {', '.join(dropped)}")
-    lines += ["", "## Summary line used", "", f"> {plan.summary}", ""]
+    if fit.broke_floors:
+        lines.append("- A section's `min_bullets` floor was crossed. One page "
+                     "outranks it.")
+    if plan.summary:
+        lines += ["", "## Summary line used", "", f"> {plan.summary}", ""]
+    else:
+        lines.append("")
 
     lines += ["## Bullets selected", ""]
     for section in (*plan.experience, *plan.projects):
@@ -263,12 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--role", required=True)
     p.add_argument("--include-draft", action="store_true",
                    help="allow unconfirmed draft bullets (review the output)")
-    p.add_argument("--summary", choices=("full", "short", "none"),
-                   default="full",
-                   help="how much of the summary to keep. 'short' drops the "
-                        "closing boilerplate (~2 lines back); 'none' omits the "
-                        "section entirely (~4 lines, at the cost of one ATS "
-                        "parse point for a missing SUMMARY heading)")
+    p.add_argument("--summary", choices=("full", "short", "none"), default="",
+                   help="how much of the summary to keep, overriding the "
+                        "profile's `render.summary`. 'short' drops the closing "
+                        "boilerplate (~2 lines back); 'none' omits the section "
+                        "entirely, which is about 4 lines and buys two bullets")
     p.add_argument("--no-deliver", action="store_true",
                    help="skip the copy to the WORK folder")
     p.set_defaults(func=cmd_tailor)
