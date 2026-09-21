@@ -604,6 +604,10 @@ text = "Prepared and filed roughly 60 individual returns per season as an IRS-ce
 
 # ---------------------------------------------------------------------------
 [render]
+# "full", "short" or "none". Set it to "none" once the page is tight: the
+# summary is the one section a reader skips and the only one whose removal
+# costs no claim.
+summary = "full"
 # One page, always. The renderer measures and reports the gap; the tailorer
 # drops the lowest-coverage optional bullets until it fits.
 max_pages = 1
