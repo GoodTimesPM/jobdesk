@@ -40,7 +40,28 @@ from .vocab import Vocabulary
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _PHONE = re.compile(r"(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}")
 _LINKEDIN = re.compile(r"linkedin\.com/in/[A-Za-z0-9\-_%]+", re.IGNORECASE)
-_LOCATION = re.compile(r"\b[A-Z][a-zA-Z.'\- ]{2,20},\s*(?:[A-Z]{2}\b|Virginia\b)")
+# A resume writes its location as "Richmond, VA" or spelled out as "Austin,
+# Texas". This matched the code for any state and the name of exactly one,
+# which quietly meant a resume from anywhere else had to abbreviate to be read
+# at all. `engine/` does not import `radar/`, so the names are listed here
+# rather than borrowed; they are a closed set that does not change.
+_STATE_NAMES = (
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+    "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+    "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine",
+    "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
+    "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+    "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+    "Oklahoma", "Oregon", "Pennsylvania", "Puerto Rico", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont",
+    "Virginia", "Washington", "West Virginia", "Wisconsin", "Wyoming",
+    "District of Columbia",
+)
+# Longest first, so "West Virginia" is not matched as "Virginia".
+_STATE_ALT = "|".join(re.escape(n) for n in
+                      sorted(_STATE_NAMES, key=len, reverse=True))
+_LOCATION = re.compile(
+    r"\b[A-Z][a-zA-Z.'\- ]{2,20},\s*(?:[A-Z]{2}\b|(?:" + _STATE_ALT + r")\b)")
 
 EXPECTED_SECTIONS = ("SUMMARY", "EDUCATION", "SKILLS", "EXPERIENCE")
 OPTIONAL_SECTIONS = ("PROJECTS", "CERTIFICATIONS")
