@@ -20,7 +20,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from .. import http, profile as targeting, terms
+from .. import discover, http, profile as targeting, terms
 from ..models import Job, clean_text, parse_date
 
 TIMEOUT = 30
@@ -105,8 +105,61 @@ def ashby(entry: dict) -> list[Job]:
             department=j.get("department", "") or j.get("team", ""),
             external_id=str(j.get("id", "")),
             remote=bool(j.get("isRemote")),
+            **_ashby_salary(j.get("compensation")),
         ))
     return out
+
+
+def _ashby_salary(comp) -> dict:
+    """Ashby's published band, as salary_min/salary_max kwargs.
+
+    The fetcher has asked for `includeCompensation=true` since the day it was
+    written and then dropped the answer on the floor. A Ramp posting showed
+    $128K - $180K on its own page while the radar listed an estimate of
+    $91k-$125k beside it, because nothing had ever read this field.
+
+    Three things in here are traps. A tier lists several components and only
+    the Salary one is pay -- the others are equity, bonus, commission, and
+    summing them invents a number the employer never published. `interval`
+    carries the period as "1 YEAR" or "1 HOUR", the same factor-of-2080
+    mistake `_schema_salary` guards against. And a band in euros is not a band
+    in dollars, so anything that names another currency is left blank rather
+    than relabelled.
+
+    `summaryComponents` is the flattened view across tiers and is what to read.
+    A posting with per-location tiers gives the widest honest band that way,
+    which is the right answer for a listing that has not picked a location yet.
+    """
+    if not isinstance(comp, dict):
+        return {}
+    lows, highs = [], []
+    for part in comp.get("summaryComponents") or []:
+        if not isinstance(part, dict):
+            continue
+        if str(part.get("compensationType") or "") != "Salary":
+            continue
+        currency = str(part.get("currencyCode") or "USD").upper()
+        if currency != "USD":
+            continue
+        # "1 YEAR" -> YEAR. The count is always one in practice, and a band
+        # per two years is not a thing, so only the unit is read.
+        period = str(part.get("interval") or "YEAR").upper().split()[-1]
+        factor = _PERIOD_HOURS.get(period.rstrip("S"))
+        if not factor:
+            continue
+        for raw, into in ((part.get("minValue"), lows),
+                          (part.get("maxValue"), highs)):
+            try:
+                annual = float(raw) * factor
+            except (TypeError, ValueError):
+                continue
+            if 15_000 <= annual <= 900_000:
+                into.append(annual)
+    low = min(lows) if lows else None
+    high = max(highs) if highs else None
+    if low and high and high < low:
+        low, high = high, low
+    return {"salary_min": low, "salary_max": high}
 
 
 # --------------------------------------------------------------------------
@@ -381,17 +434,47 @@ _JSONLD = re.compile(
 # state suffixes leaves the city as the tail -- imperfect for two-word cities
 # ("newport news" survives as "news"), which is why the detail fetch replaces
 # this with the JSON-LD address as soon as a posting scores.
-_SLUG_TAIL = ("-united-states", "-virginia")
+#
+# The state suffix was the literal "-virginia" until someone asked what this
+# app does for a user in Texas. It stripped nothing there, so every Austin
+# posting came back titled "Graphic Designer Austin" and located in "Texas".
+#
+# Reading the state off the profile would fix that user and break the Richmond
+# one the moment a remote req is posted out of Austin. The slug is not about
+# whose profile is loaded; it names a state and the parser should strip the
+# state it names. So: any of the fifty, longest first, so "-west-virginia" is
+# not read as a city called West followed by Virginia.
+_STATE_TAILS = tuple(sorted(
+    ("-" + name.replace(" ", "-") for name in discover._STATES),
+    key=len, reverse=True))
+
+
+def _split_tail(slug: str) -> tuple[str, list[str]]:
+    """Peel "-<state>-<country>" off a slug, innermost last.
+
+    Order matters and is the whole reason this is a function. The country
+    suffix is outermost, so it comes off first and the state is only then at
+    the end of what is left. Checking both against the original slug finds the
+    country and never the state.
+    """
+    tail: list[str] = []
+    for suffix in ("-united-states",):
+        if slug.endswith(suffix):
+            slug = slug[: -len(suffix)]
+            tail.insert(0, suffix)
+    for suffix in _STATE_TAILS:
+        if slug.endswith(suffix):
+            slug = slug[: -len(suffix)]
+            tail.insert(0, suffix)
+            break
+    return slug, tail
 
 
 def _deslug(slug: str) -> tuple[str, str]:
     """Split a job URL slug into (title, location), both human-readable."""
     slug = _TRAILING_ID.sub("", slug).strip("/")
-    tail = []
-    for suffix in _SLUG_TAIL:
-        if slug.endswith(suffix):
-            slug = slug[: -len(suffix)]
-            tail.insert(0, suffix.strip("-").replace("-", " ").title())
+    slug, raw_tail = _split_tail(slug)
+    tail = [t.strip("-").replace("-", " ").title() for t in raw_tail]
     title, _, city = slug.rpartition("-")
     if not title:                      # single-token slug: no city to split off
         title, city = city, ""
@@ -406,6 +489,29 @@ class Challenged(RuntimeError):
     Every other posting on the same host is about to do the same thing, and
     the caller should stop asking and say so.
     """
+
+
+def challenge_reason(resp) -> str:
+    """Name the bot check, or "" if the response is a real page.
+
+    Two signals, and the first one is worth having because it is the site
+    saying so in as many words. AWS WAF Bot Control answers a challenged
+    request with `x-amzn-waf-action: challenge`, a 202 and zero bytes; passing
+    it means executing the JavaScript it would have served a browser, which is
+    not something this program does. jobs.virginia.gov sits behind it, which is
+    why the Commonwealth's 500-odd postings go quiet in bursts.
+
+    The second is the older guess: any 2xx with nothing in it. Kept because not
+    every WAF labels itself, and an empty 200 is never a posting either way.
+    """
+    if resp is None:
+        return ""
+    action = (resp.headers.get("x-amzn-waf-action") or "").strip().lower()
+    if action:
+        return f"AWS WAF answered {resp.status_code} with '{action}'"
+    if not resp.text.strip():
+        return f"answered {resp.status_code} with an empty body"
+    return ""
 
 
 def sitemap(entry: dict) -> list[Job]:
@@ -509,6 +615,54 @@ def _schema_salary(node: dict) -> tuple[float | None, float | None]:
     return low, high
 
 
+def job_postings_in(html: str) -> list[dict]:
+    """Every schema.org JobPosting node on a page, in document order.
+
+    A careers page can carry several: the posting, plus an Organization and a
+    BreadcrumbList that are not it. Only JobPosting nodes come back, and a
+    `@graph` wrapper is unwrapped, because Yoast and a dozen other plugins
+    nest everything under one.
+    """
+    found: list[dict] = []
+    for raw in _JSONLD.findall(html):
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        stack = list(data) if isinstance(data, list) else [data]
+        while stack:
+            node = stack.pop(0)
+            if not isinstance(node, dict):
+                continue
+            graph = node.get("@graph")
+            if isinstance(graph, list):
+                stack.extend(graph)
+            kind = node.get("@type")
+            kinds = kind if isinstance(kind, list) else [kind]
+            if "JobPosting" in kinds:
+                found.append(node)
+    return found
+
+
+def _apply_posting(job: Job, node: dict) -> bool:
+    """Copy a JobPosting node onto a Job. True if it carried a description."""
+    if node.get("description"):
+        job.description = clean_text(node["description"])
+    low, high = _schema_salary(node)
+    if low or high:
+        job.salary_min, job.salary_max = low, high
+    job.title = node.get("title") or job.title
+    job.posted_at = parse_date(node.get("datePosted")) or job.posted_at
+    place = node.get("jobLocation")
+    place = place[0] if isinstance(place, list) and place else place
+    address = (place or {}).get("address") or {}
+    city = address.get("addressLocality")
+    if city:
+        job.location = ", ".join(
+            x for x in (city, address.get("addressRegion")) if x)
+    return bool(node.get("description"))
+
+
 def sitemap_detail(job: Job, entry: dict) -> bool:
     """Fill in one posting's body from its schema.org JSON-LD.
 
@@ -525,32 +679,117 @@ def sitemap_detail(job: Job, entry: dict) -> bool:
     # before 2026-09-15, and because the only signal was "no JSON-LD found",
     # 52 Commonwealth postings sat in the candidate set with no description,
     # no salary and nothing anywhere saying why. Silence is the bug.
-    if not resp.text.strip():
-        raise Challenged(f"{entry.get('name', job.company)} returned "
-                         f"{resp.status_code} with an empty body")
-    for raw in _JSONLD.findall(resp.text):
-        try:
-            data = json.loads(raw)
-        except ValueError:
+    reason = challenge_reason(resp)
+    if reason:
+        raise Challenged(f"{entry.get('name', job.company)}: {reason}")
+    for node in job_postings_in(resp.text):
+        return _apply_posting(job, node)
+    return False
+
+
+# The shortest body worth trading a snippet for. Adzuna sends exactly 500
+# characters, so anything near that is another summary rather than the
+# posting, and a JSON-LD `description` of two lines is a stub some ATS
+# templates emit whether or not anyone filled the field in.
+MIN_FULL_BODY = 900
+
+
+def _title_words(title: str) -> set[str]:
+    return {w for w in re.split(r"[^a-z0-9]+", (title or "").lower())
+            if len(w) > 3}
+
+
+_ADZUNA_LAND = re.compile(r"^https?://(?:www\.)?adzuna\.com/land/ad/(\d+)", re.I)
+
+
+def _urls_to_try(url: str) -> list[str]:
+    """The posting's URL, and anywhere else the same posting is readable.
+
+    Adzuna hands out two links to one ad. `redirect_url`, which the API
+    returns and the digest links to, is `/land/ad/<id>` -- a paid outbound
+    click, and it is guarded: it answers a browser User-Agent with 403 and
+    everything else with an interstitial carrying no markup. `/details/<id>`
+    is the same ad on Adzuna's own page, is not guarded, and carries the full
+    JobPosting markup.
+
+    The outbound link is still tried first, because when it does work it lands
+    on the employer's own posting, which is the better copy. The detail page is
+    the fallback, and it is worth having: of 21 postings whose outbound link
+    gave nothing, 16 read cleanly off `/details/`.
+    """
+    urls = [url]
+    ad = _ADZUNA_LAND.match(url or "")
+    if ad:
+        urls.append(f"https://www.adzuna.com/details/{ad.group(1)}")
+    return urls
+
+
+def partial_detail(job: Job) -> bool:
+    """Replace an aggregator's snippet with the posting it was cut from.
+
+    The aggregator's URL is a redirect into the employer's own board, so one
+    GET lands on the real posting and `requests` follows the hops. Most boards
+    publish schema.org JobPosting markup there, because Google Jobs reads it,
+    which means the full body is sitting in the page as structured data and
+    does not have to be scraped out of the layout.
+
+    Two things have to be true before the body is believed, and both exist
+    because a wrong JD builds a wrong packet just as surely as a wrong board
+    builds a wrong digest:
+
+    The landing page has to be *this* job. A redirect to an expired req serves
+    the careers index instead, and that page has JobPosting markup of its own
+    for whatever is featured today. So the page's title has to share a real
+    word with the title we came in with. "Senior Business Analyst" answering
+    for "Business Analyst" is the same req described twice; "Careers at Lumen"
+    is not.
+
+    And the body has to be longer than the snippet. Otherwise a short stub
+    overwrites 500 characters of real text with nothing, and the posting
+    silently gets worse while the `partial` flag says it got better.
+
+    Only the body is taken, which is the difference between this and
+    `sitemap_detail`. There the JSON-LD is the company's own and beats a title
+    and city guessed out of a URL slug. Here the page is often the
+    aggregator's own detail page, and its idea of where the job is has already
+    been through a normalizer: every Richmond posting came back located in
+    "Capitol, VA, VA", which is not a place. Overwriting a good city with that
+    turned "Richmond, VA metro" into "onsite, elsewhere in VA" and took a
+    tier-1 posting to zero for a reason that was invented in transit. Salary
+    is taken only when we have none, for the same reason.
+    """
+    want = _title_words(job.title)
+    for url in _urls_to_try(job.url):
+        # Slower than the default 1.5s, and the same rate `sitemap_detail`
+        # reads a careers page at. This is one page a person could have opened
+        # by clicking the link in the digest, and reading a few hundred of
+        # them at browser speed is what put jobs.virginia.gov's WAF in front
+        # of us: a repair at 1.5s got four postings before it started
+        # answering 202.
+        resp = http.get(url, timeout=TIMEOUT, allow_redirects=True, spacing=5.0)
+        if resp is None or resp.status_code >= 400:
             continue
-        for node in data if isinstance(data, list) else [data]:
-            if not isinstance(node, dict) or node.get("@type") != "JobPosting":
+        # Same rule as `sitemap_detail`, and for the same reason: a bot check
+        # is not a fact about this posting. Swallowing it here meant a repair
+        # over 82 rows read four of them, met a WAF on the fifth, and reported
+        # "the links have expired" about 78 postings that were all still live.
+        reason = challenge_reason(resp)
+        if reason:
+            raise Challenged(f"{http._host(url)}: {reason}")
+        for node in job_postings_in(resp.text):
+            body = clean_text(node.get("description") or "")
+            if len(body) < MIN_FULL_BODY or len(body) <= len(job.description):
                 continue
-            if node.get("description"):
-                job.description = clean_text(node["description"])
-            low, high = _schema_salary(node)
-            if low or high:
-                job.salary_min, job.salary_max = low, high
-            job.title = node.get("title") or job.title
-            job.posted_at = parse_date(node.get("datePosted")) or job.posted_at
-            place = node.get("jobLocation")
-            place = place[0] if isinstance(place, list) and place else place
-            address = (place or {}).get("address") or {}
-            city = address.get("addressLocality")
-            if city:
-                job.location = ", ".join(
-                    x for x in (city, address.get("addressRegion")) if x)
-            return bool(node.get("description"))
+            got = _title_words(str(node.get("title") or ""))
+            if want and got and not (want & got):
+                continue
+            job.description = body
+            job.partial = False
+            if not (job.salary_min or job.salary_max):
+                low, high = _schema_salary(node)
+                if low or high:
+                    job.salary_min, job.salary_max = low, high
+            return True
     return False
 
 

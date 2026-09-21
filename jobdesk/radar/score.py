@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 
 from . import profile
-from .models import Job
+from .models import Job, division_in
 
 # "5+ years", "5-7 years", "minimum of 5 years", "at least five years"
 #
@@ -673,12 +673,21 @@ def _title_tier(title: str) -> tuple[int, str]:
                     listed, listed_why = 14, f"tier-3 title ({good})"
                     break
             else:
-                # A bare "Analyst" with no qualifier still counts. Raised
-                # 12 -> 15 after calibration: at 12, a remote generic-analyst
-                # role landed at exactly 43, one point under the C-tier line,
-                # so the whole family was buried.
-                if "analyst" in t:
-                    listed, listed_why = 15, "generic analyst title"
+                # A bare family noun with no qualifier still counts:
+                # "Accountant", "Nurse", "Designer". Raised 12 -> 15 after
+                # calibration: at 12, a remote generic-analyst role landed at
+                # exactly 43, one point under the C-tier line, so the whole
+                # family was buried.
+                #
+                # This read `if "analyst" in t` until someone asked whether
+                # the app works for a nurse. It did not, quite: fifteen points
+                # went to one profession by name, so every posting titled
+                # "Analyst" scored for a graphic designer and nothing scored
+                # here for the designer's own word. The list is the profile's
+                # now, and an empty one simply skips the bonus.
+                family = next((f for f in profile.FAMILY_TITLES if f in t), "")
+                if family:
+                    listed, listed_why = 15, f"generic {family} title"
                 else:
                     for good in profile.ADJACENT_TITLES:
                         if good in t:
@@ -777,8 +786,15 @@ def _geo_points(job: Job) -> tuple[int, list[str], list[str]]:
         # have to move for is never worth surfacing no matter how well it scores
         # otherwise. Mirrors the foreign / wrong-region blocks above; anything
         # genuinely remote already matched the branch just above.
-        in_va = any(term in hay for term in profile.STATE_TERMS)
-        detail = "elsewhere in Virginia" if in_va else "outside commute range"
+        in_state = any(term in hay for term in profile.STATE_TERMS)
+        # "elsewhere in Virginia" was written here. The reason a job was
+        # dropped is shown to the user, so it has to say the user's state.
+        # HOME_METRO is already "Richmond, VA" or "Denver, CO", and the half
+        # after the comma is the only new thing needed.
+        where = str(profile.HOME_METRO).rpartition(",")[2].strip()
+        detail = (f"elsewhere in {where}" if in_state and where
+                  else "elsewhere in your state" if in_state
+                  else "outside commute range")
         flags.append("out-of-area")
         return -100, [f"onsite, {detail}, not remote (no relocation planned)"], flags
     return points, reasons, flags
@@ -830,6 +846,15 @@ def _experience_points(job: Job) -> tuple[int, list[str], list[str]]:
     """
     band = required_band(job)
     if band is None:
+        if job.partial:
+            # "No years stated" is worth something when you have read the
+            # posting. On a 500-character snippet it is worth nothing: the
+            # requirement is probably there, below the cut. Paying +6 for it
+            # would hand the best treatment to the postings we know least
+            # about, which is how a 5-year req gets onto a board built to
+            # keep them off.
+            return 0, ["years requirement not visible in the snippet"], \
+                ["unverified-experience"]
         return 6, ["no explicit years requirement"], []
     low, high = band
 
@@ -1054,6 +1079,15 @@ SCORE_CEILING = (
 
 SCORE_LINEAR_TO = 90
 
+# The most a posting can score when its body was only ever sent in part.
+#
+# 78 is deliberate: it clears the A floor of 75, so a snippet that looks like
+# a strong local fit still reaches you and still reads as one. It just cannot
+# outrank a posting somebody actually read end to end. The top of the board
+# should be the postings whose requirements were checked, not the ones whose
+# requirements were invisible.
+PARTIAL_CEILING = 78
+
 
 def scale(total: int) -> int:
     """One raw total as a 0-100 score.
@@ -1091,6 +1125,15 @@ def score_job(job: Job) -> Job:
     # "how many senior reqs opened this quarter" is a real question about the
     # Richmond market even though none of them are jobs you can take.
     job.job_family = job_family(job.title)
+
+    # Who actually hires, when the company is a shared board. Read here rather
+    # than in each source because it needs the body, and the body arrives by
+    # four different routes -- the list endpoint, a detail fetch, a snippet
+    # repair, or a description pasted in by hand. Scoring is the one place all
+    # four have already been through. It never overwrites a division a source
+    # knew first-hand.
+    if not job.division:
+        job.division = division_in(job.description)
 
     senior = seniority_block(job.title)
     if senior:
@@ -1178,6 +1221,10 @@ def score_job(job: Job) -> Job:
         reasons.append("capped: title is off-target")
 
     job.score = scale(total)
+    if job.partial and job.score > PARTIAL_CEILING:
+        job.score = PARTIAL_CEILING
+        reasons.append("capped: only a snippet of this posting was published")
+        flags.append("partial-description")
     job.tier = tier_for(job.score)
     job.reasons = reasons
     job.flags = flags

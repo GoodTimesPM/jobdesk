@@ -65,7 +65,34 @@ DETAIL_FETCH_MIN_SCORE = 30
 # Cap on Workday detail calls per run -- a hard stop on runaway request counts.
 # 60 -> 120 on 2026-07-30: the ATS scale-up took Workday boards from 5 to 16,
 # so the old cap left ~4 detail fetches per company on average.
-MAX_DETAIL_FETCHES = 120
+#
+# 120 -> 250 on 2026-09-19. Counted rather than guessed: the 2026-09-19 pull
+# collected 2,686 postings with no body, and 321 of them cleared
+# DETAIL_FETCH_MIN_SCORE. The budget bought 120 of those, and because it was
+# being spent in collection order it bought the wrong 120 -- it ran out before
+# reaching the Commonwealth sitemap, which is 304 of the 321. 250 covers the
+# whole 40+ band several times over; what it still cuts is the bottom of the
+# 30s, which is below MIN_SCORE_TO_REPORT and only reaches the board at all if
+# reading the body rescues it. Each call is about a second, so this is roughly
+# two minutes on a run that takes thirteen.
+MAX_DETAIL_FETCHES = 250
+
+# ...and no more than this many on any one host. Sorting the budget by score
+# was the right fix and it created this problem: the Commonwealth of Virginia
+# sitemap is 304 of the 321 postings that want a body, so best-first hands it
+# essentially the whole budget. That host answers one request per five seconds
+# without complaint and starts refusing above that, which would be twenty
+# minutes on a run that takes thirteen, with every other board waiting behind
+# it. 60 is five minutes of Commonwealth, taken best-first, and the backlog
+# comes down over successive runs.
+MAX_DETAIL_FETCHES_PER_HOST = 60
+
+# Snippet postings whose body is fetched from the real posting per run, for
+# `sources.fill_partials`. Separate from the budget above so that a pull heavy
+# in aggregator results cannot starve the ATS boards, which are the channel
+# worth being early on. Each one is a single GET of a page a person could have
+# opened themselves by clicking the link in the digest.
+MAX_PARTIAL_FETCHES = 60
 
 # How many days a posting stays in seen.json before being forgotten.
 SEEN_RETENTION_DAYS = 120
@@ -100,3 +127,33 @@ LEARN_TIER = 2
 
 # Machine-owned, rewritten every run, git-ignored with the rest of data/.
 LEARNED_EMPLOYERS = DATA / "employers.learned.toml"
+
+
+# Seeding is the same discovery, run against a metro instead of against a run.
+# `learn` waits for a company to post something good; `seed` goes looking for
+# every employer the area has, before any of them posts. It is a one-off sweep
+# a user runs by hand, so its numbers are an order of magnitude larger than
+# learn's -- and it costs nothing on the days it is not run. See radar/seed.py.
+
+# Names per sweep. A metro's worth of employers, not a day's worth.
+SEED_MAX_PER_SWEEP = 300
+
+# Calls for the whole sweep. Roughly 8 per company on average across the six
+# simple ATSes; a Workday guess can want 37 on its own. No API key limits this
+# -- these are public board endpoints -- so the cap exists to bound the time.
+SEED_PROBE_BUDGET = 4000
+
+# A seeded company has posted nothing we have read, so it has earned no
+# priority. Tier 3 sits below both the curated list and learn's finds.
+SEED_TIER = 3
+
+# Calls a single company's website may cost before resolution gives up. The
+# walk is a homepage plus up to three careers links plus two hops from each,
+# and every measured hit landed within three. Ten leaves room for redirects
+# without letting one sprawling corporate site eat a sweep. See radar/resolve.py.
+RESOLVE_PROBE_CALLS = 10
+
+# How many times a company must have turned up locally before its name is
+# worth a probe. One sighting is often a typo, an aggregator's mangling of a
+# real name, or a one-off contract listing.
+SEED_MIN_SIGHTINGS = 2
