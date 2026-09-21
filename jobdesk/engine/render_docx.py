@@ -24,21 +24,23 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.shared import Pt, RGBColor
 
+from .render_pdf import BOT_MARGIN, MARGIN, Layout
 from .tailor import Plan
 
 _USABLE_WIDTH = Pt(468)     # 6.5in at Letter with 1in margins
 
 
-def _tight(paragraph, before: float = 0, after: float = 0,
-           line: float = 1.0) -> None:
+def _set_spacing(paragraph, before: float = 0, after: float = 0,
+                 line: float = 1.0) -> None:
     fmt = paragraph.paragraph_format
     fmt.space_before = Pt(before)
     fmt.space_after = Pt(after)
     fmt.line_spacing = line
 
 
-def _run(paragraph, text: str, *, bold: bool = False, italic: bool = False,
-         size: float = 10, color: tuple[int, int, int] = (40, 40, 40)):
+def _add_run(paragraph, text: str, *, bold: bool = False,
+             italic: bool = False, size: float = 10,
+             color: tuple[int, int, int] = (40, 40, 40)):
     run = paragraph.add_run(text)
     run.bold = bold
     run.italic = italic
@@ -80,16 +82,33 @@ def scrub(doc, name: str) -> None:
         pass
 
 
-def render(plan: Plan, path: Path) -> Path:
+def render(plan: Plan, path: Path, layout: Layout | None = None) -> Path:
+    """Write the .docx. `layout` is whatever the PDF fitter settled on.
+
+    The two files are the same resume and get sent to the same employer, so a
+    page squeeze that happens in one has to happen in the other. Passing the
+    PDF's chosen layout through is what keeps them from disagreeing about how
+    many pages this resume is.
+    """
+    lay = layout or Layout()
     ident = plan.master.identity
     doc = Document()
 
+    # Every size and every gap below is written at its designed value and
+    # scaled here, so the document reads as one design with a dial on it.
+    def _tight(paragraph, before: float = 0, after: float = 0,
+               line: float = 1.0) -> None:
+        _set_spacing(paragraph, lay.sp(before), lay.sp(after), line * lay.lead)
+
+    def _run(paragraph, text: str, *, size: float = 10, **kw):
+        return _add_run(paragraph, text, size=lay.pt(size), **kw)
+
     style = doc.styles["Normal"]
     style.font.name = "Calibri"
-    style.font.size = Pt(10)
+    style.font.size = Pt(lay.pt(10))
     for section in doc.sections:
-        section.top_margin = section.bottom_margin = Pt(50)
-        section.left_margin = section.right_margin = Pt(54)
+        section.top_margin = section.bottom_margin = Pt(50 * lay.pad / BOT_MARGIN)
+        section.left_margin = section.right_margin = Pt(54 * lay.side / MARGIN)
 
     # -- name + contact ---------------------------------------------------
     p = doc.add_paragraph()
@@ -128,8 +147,8 @@ def render(plan: Plan, path: Path) -> Path:
     def bullet(text: str) -> None:
         p = doc.add_paragraph()
         _tight(p, after=2)
-        p.paragraph_format.left_indent = Pt(18)
-        p.paragraph_format.first_line_indent = Pt(-9)
+        p.paragraph_format.left_indent = Pt(18 * lay.type)
+        p.paragraph_format.first_line_indent = Pt(-9 * lay.type)
         _run(p, "- " + text, size=10)
 
     # -- summary ----------------------------------------------------------
@@ -152,7 +171,7 @@ def render(plan: Plan, path: Path) -> Path:
         if i == 0 and coursework:
             p = doc.add_paragraph()
             _tight(p, after=4)
-            p.paragraph_format.left_indent = Pt(10)
+            p.paragraph_format.left_indent = Pt(10 * lay.type)
             _run(p, f"Relevant Coursework: {coursework}", size=9,
                  color=(60, 60, 60))
 
@@ -170,8 +189,11 @@ def render(plan: Plan, path: Path) -> Path:
         entry = section.entry
         p = doc.add_paragraph()
         _tight(p, before=4)
+        # The right-aligned date rides the right margin, so a narrower
+        # margin has to push it out by the same amount.
         p.paragraph_format.tab_stops.add_tab_stop(
-            _USABLE_WIDTH, WD_TAB_ALIGNMENT.RIGHT
+            Pt(_USABLE_WIDTH.pt + 2 * (54 - 54 * lay.side / MARGIN)),
+            WD_TAB_ALIGNMENT.RIGHT,
         )
         _run(p, entry.title, bold=True, size=10.5, color=(30, 30, 30))
         _run(p, "\t" + entry.dates, size=9.5, color=(100, 100, 100))

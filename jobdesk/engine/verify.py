@@ -60,7 +60,7 @@ def verify_pdf(plan: Plan, pdf_text: str) -> list[str]:
     haystack = normalize(pdf_text)
     problems: list[str] = []
 
-    if normalize(plan.summary) not in haystack:
+    if plan.summary and normalize(plan.summary) not in haystack:
         problems.append("the summary does not appear in the rendered PDF text")
 
     for chosen in plan.all_chosen():

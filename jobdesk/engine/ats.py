@@ -63,8 +63,12 @@ _STATE_ALT = "|".join(re.escape(n) for n in
 _LOCATION = re.compile(
     r"\b[A-Z][a-zA-Z.'\- ]{2,20},\s*(?:[A-Z]{2}\b|(?:" + _STATE_ALT + r")\b)")
 
-EXPECTED_SECTIONS = ("SUMMARY", "EDUCATION", "SKILLS", "EXPERIENCE")
-OPTIONAL_SECTIONS = ("PROJECTS", "CERTIFICATIONS")
+# SUMMARY is optional, not expected. A parser that finds no summary loses
+# nothing: there is no field on the other side waiting to be filled from it.
+# Penalising its absence priced four lines of page budget at ten points and
+# those four lines are worth two bullets.
+EXPECTED_SECTIONS = ("EDUCATION", "SKILLS", "EXPERIENCE")
+OPTIONAL_SECTIONS = ("SUMMARY", "PROJECTS", "CERTIFICATIONS")
 
 # A right-hand block has to carry real prose to count as a second column. The
 # date on an experience line sits right of centre and is about 26 characters;

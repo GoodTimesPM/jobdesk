@@ -79,15 +79,22 @@ class Plan:
     def bullet_count(self) -> int:
         return len(self.all_chosen())
 
-    def drop_weakest(self) -> ChosenBullet | None:
+    def drop_weakest(self, *, floor: int | None = None) -> ChosenBullet | None:
         """Remove the least valuable optional bullet, for page fitting.
 
         Returns what was dropped, or None when every remaining bullet is
         protected by its section's `min_bullets`.
+
+        `floor` overrides those per-section minimums with one number for the
+        whole plan. It is the page fitter's last resort: a floor exists so a
+        job does not appear on the resume with nothing underneath it, which is
+        worth protecting against a coverage score but not worth protecting
+        against a second page.
         """
         worst: tuple[Section, ChosenBullet] | None = None
         for section in (*self.experience, *self.projects):
-            if len(section.chosen) <= section.entry.min_bullets:
+            keep = section.entry.min_bullets if floor is None else floor
+            if len(section.chosen) <= keep:
                 continue
             local = min(section.chosen, key=lambda c: (c.gain, c.value,
                                                        c.bullet.priority))
@@ -312,7 +319,10 @@ def _build_summary(master: Master, jd: JobDescription, vocab: Vocabulary,
 # --------------------------------------------------------------------------
 
 def build(master: Master, jd: JobDescription, vocab: Vocabulary,
-          include_draft: bool = False, summary_mode: str = "full") -> Plan:
+          include_draft: bool = False, summary_mode: str = "") -> Plan:
+    # An empty mode means "whatever the profile says", so the choice lives in
+    # master.toml next to the rest of the layout rather than in a default here.
+    summary_mode = summary_mode or str(master.render.get("summary", "full"))
     experience, projects = _select_bullets(master, jd, vocab, include_draft)
     skills = _order_skills(master, jd, vocab)
     coursework = _pick_coursework(master, jd, vocab)
