@@ -47,11 +47,41 @@ def company_key(company: str) -> str:
     return _NON_ALNUM.sub("", (company or "").lower())
 
 
+# One Commonwealth agency writes itself four ways across four postings: "Dept
+# Conservation & Recreation", "Department of Conservation and Recreation",
+# "Dept. of Conservation & Rec". Spelling them apart would put the cap back
+# where it started, only quieter -- two open applications at what is really
+# one HR office, counted as one each.
+_DIVISION_WORDS = {
+    "dept": "department", "depts": "department", "div": "division",
+    "svcs": "services", "svc": "service", "admin": "administration",
+    "assistance": "assistance", "med": "medical", "rec": "recreation",
+    "univ": "university", "comm": "commission", "auth": "authority",
+    "&": "and",
+}
+_DIVISION_DROP = {"of", "the", "for", "and", "a"}
+
+
+def division_key(division: str) -> str:
+    """A division name normalized enough that its abbreviations collide."""
+    words = re.split(r"[^a-z0-9&]+", (division or "").lower())
+    out = []
+    for word in words:
+        word = _DIVISION_WORDS.get(word, word)
+        if word and word not in _DIVISION_DROP:
+            out.append(word)
+    return "".join(out)
+
+
 @dataclass
 class Application:
     id: str                          # {date}_{company}_{role}, the packet name
     company: str
     role: str
+    division: str = ""               # the employer inside a shared board --
+                                      # "Dept of Accounts" under "Commonwealth
+                                      # of Virginia". Empty when `company` is
+                                      # already the employer.
     url: str = ""
     source: str = ""                 # which radar source found it, or "manual"
     uid: str = ""                    # Job Radar's uid, when it came from there
@@ -69,6 +99,12 @@ class Application:
     packet: str = ""                 # the delivered folder's NAME, never a
                                      # path: this file is tracked in git
     auto: bool = False               # built by `auto`, unread by a human
+    overrides: list[str] = field(default_factory=list)
+                                     # rules a human waived to build this. The
+                                     # point of an override you can reach is
+                                     # that it is recorded; a rule with no
+                                     # override gets worked around outside the
+                                     # tool, where nothing is written down.
     notes: str = ""
     rejected_on: str = ""            # date the "no" arrived
     rejected_stage: str = ""         # furthest stage reached first -- the
@@ -142,6 +178,14 @@ class Log:
         return [r for r in self.rows if company_key(r.company) == key]
 
     def open_at(self, company: str) -> list[Application]:
+        """Live applications at one company, agencies and all.
+
+        Deliberately does not split by division. Whether two of these rows
+        count as the same employer depends on what is known about the incoming
+        posting as well, which is the guard's question, not the log's -- and a
+        second answer to it living here would only get out of step with the
+        first.
+        """
         return [r for r in self.for_company(company) if r.is_open]
 
     def same_req(self, *, uid: str = "", url: str = "",

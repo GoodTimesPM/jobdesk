@@ -43,6 +43,23 @@ class Candidate:
     also_on: list[str] = field(default_factory=list)
     origin: str = "cache"            # cache | digest | manual
 
+    # The employer inside a shared job board -- "Dept of Accounts" under
+    # "Commonwealth of Virginia". Written by the radar, read by the
+    # concurrency guard, empty whenever the company is already the employer.
+    division: str = ""
+
+    @property
+    def partial_description(self) -> bool:
+        """Is the cached body a snippet the aggregator cut, not the posting?
+
+        Read off the flag the radar wrote, so `apply/` learns this without
+        importing `radar/`. It matters because the cutoff for a usable JD is
+        400 characters and an aggregator snippet is 500: without this, the
+        shortest possible read of a posting clears the bar for the longest
+        piece of work in the app.
+        """
+        return "partial-description" in self.flags
+
     @property
     def salary_text(self) -> str:
         if self.salary_min and self.salary_max:

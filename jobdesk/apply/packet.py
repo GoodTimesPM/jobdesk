@@ -106,6 +106,7 @@ def open_folder(path: Path) -> None:
 def build(candidate: Candidate, jd_text: str, *, log: Log,
           note: str = "", include_draft: bool = False,
           checks: list[guard.Check] | None = None,
+          overrides: list[str] | None = None,
           auto: bool = False, echo=print) -> Result:
     """Run the whole pipeline for one posting."""
     result = Result(ok=False)
@@ -193,12 +194,14 @@ def build(candidate: Candidate, jd_text: str, *, log: Log,
     result.delivered = _deliver(folder, folder_name)
     application = log.add(Application(
         id=folder_name, company=company, role=role, url=candidate.url,
+        division=candidate.division,
         source=candidate.source or "manual", uid=candidate.uid,
         dedupe_key=candidate.dedupe_key, score=candidate.score,
         tier=candidate.tier, status="prepared", resume_variant=stem,
         # The NAME, not the path. Nothing reads this field, and the full
         # path put the author's drive layout into a tracked file 151 times.
         packet=(result.delivered or folder).name, auto=auto,
+        overrides=list(overrides or []),
     ))
     # Rebuilding an auto packet by hand promotes it: `log.add` returns the
     # existing row, and if it stayed flagged `auto` it would keep its exemption
@@ -284,6 +287,12 @@ def _apply_md(candidate: Candidate, tailored: engine.TailorResult,
         out += ["## Guard rules", "",
                 "From the application log, before this packet was built:", ""]
         out += [f"- {c}" for c in checks] + [""]
+        blocked = [c for c in checks if c.level == guard.BLOCK]
+        if blocked:
+            out += ["**These blocked the build and were overridden by hand.** "
+                    "Read them again before you submit: they are the rules "
+                    "about being remembered badly, and nothing else in this "
+                    "folder will stop you.", ""]
 
     out += ["## Numbers from the tailoring run", ""]
     for key in ("Bullets selected", "Page fit", "Required terms",
