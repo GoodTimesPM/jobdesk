@@ -12,10 +12,14 @@ Three checks, in `verify`:
 1. **Template fidelity.** Each rendered paragraph must match its own template
    with only the declared slots substituted. Nothing can be appended, edited,
    or smuggled in.
-2. **No unsupported numbers.** Every number in the letter must also appear in
-   the tailored resume shipping with it. This is the "a variant may reword a
-   claim, never renumber it" rule ported across -- and it has teeth here,
-   because it drops a paragraph whose evidence the resume didn't select.
+2. **No unsupported numbers.** Every number in the letter must be one the
+   user has already confirmed -- on the resume shipping with it, or anywhere
+   in the master content the resume was selected from. This is the "a variant
+   may reword a claim, never renumber it" rule ported across. It is checked
+   against the master content and not against the tailored resume alone
+   because whether a claim is true does not change from posting to posting:
+   the resume is one page of a much larger set of confirmed facts, and a
+   paragraph about a project that did not make this page is still true.
 3. **No unsupported tools.** Every tool named must be on the resume's SKILLS
    line and in the job description.
 
@@ -85,10 +89,11 @@ class Letter:
         if self.dropped:
             out += ["", "---", "",
                     "## Paragraphs the gate dropped", "",
-                    "These are approved paragraphs that were *not* used, "
-                    "because the tailored resume shipping with this letter "
-                    "does not make the claim they rest on. That is the check "
-                    "working, not a bug.", ""]
+                    "These are paragraphs that were *not* used, because a "
+                    "number in them appears nowhere in your confirmed "
+                    "content. That is the check working, not a bug -- but if "
+                    "the claim is true, the fix is to put it in master.toml "
+                    "rather than to type it here.", ""]
             out += [f"- `{pid}` -- {why}" for pid, why in self.dropped]
         return "\n".join(out) + "\n"
 
@@ -97,6 +102,40 @@ class Letter:
 
 def load_content(path: Path | None = None) -> dict:
     return tomllib.loads((path or config.LETTER_FILE).read_text(encoding="utf-8"))
+
+
+def approved_claims(path: Path | None = None) -> str:
+    """Every claim the user has confirmed, as one blob of text.
+
+    Read from master.toml with tomllib, the same way `letter.toml` and
+    `answers.toml` are read. That is a data read of the user's own writing,
+    not an import of the engine: this package still knows nothing about how
+    the engine works.
+
+    Draft bullets are left out. A draft is a claim the user has not confirmed
+    yet, and the whole point of this corpus is that it is confirmed.
+
+    Returns "" when there is no master.toml, which drops the check back to the
+    tailored resume alone -- the behaviour before this existed.
+    """
+    path = path or config.MASTER_FILE
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+
+    parts: list[str] = []
+    for bullet in raw.get("bullet", []):
+        if bullet.get("draft"):
+            continue
+        parts.append(str(bullet.get("text", "")))
+        parts += [str(v.get("text", "")) for v in bullet.get("variant", [])]
+    for edu in raw.get("education", []):
+        parts += [str(edu.get(k, "")) for k in ("degree", "school", "detail")]
+    parts += [str(c.get("name", "")) for c in raw.get("coursework", [])]
+    for skill in raw.get("skill", []):
+        parts += [str(skill.get("term", "")), str(skill.get("detail", ""))]
+    return "\n".join(p for p in parts if p)
 
 
 def numbers_in(text: str) -> set[str]:
@@ -209,25 +248,71 @@ def _render(entry: dict, slots: dict[str, str]) -> Paragraph:
     return Paragraph(id=entry["id"], template=template, text=text, slots=used)
 
 
-def _supported(paragraph: Paragraph, resume_numbers: set[str]) -> str:
-    """"" if the paragraph's numbers are all on the resume, else why not."""
-    missing = sorted(numbers_in(paragraph.text) - resume_numbers)
+# Words that appear in every cover letter ever written. They match every
+# posting, so counting them would rank paragraphs by length instead of by fit.
+_COMMON = {
+    "about", "above", "after", "also", "against", "been", "before", "being",
+    "between", "both", "came", "could", "does", "doing", "done", "down",
+    "each", "even", "every", "from", "have", "having", "here", "into",
+    "just", "keep", "less", "like", "made", "make", "many", "more", "most",
+    "much", "must", "only", "other", "over", "own", "part", "past", "rather",
+    "same", "since", "some", "such", "than", "that", "their", "them", "then",
+    "there", "these", "they", "thing", "things", "this", "those", "through",
+    "time", "under", "using", "very", "want", "well", "were", "what", "when",
+    "where", "which", "while", "will", "with", "work", "worked", "working",
+    "would", "your", "role", "team", "experience", "years",
+}
+_WORD = re.compile(r"[a-z][a-z+#.\-]{3,}")
+
+
+def relevance(template: str, jd_text: str, company: str = "") -> int:
+    """How much this paragraph has to do with this particular posting.
+
+    Word overlap, counted once per distinct word, with the filler dropped.
+    It is a crude measure and it does not need to be a good one -- it only
+    has to beat the thing it replaced, which was the order the paragraphs
+    happen to sit in the file.
+
+    A paragraph that names the employer outranks everything else. If you did
+    a project for this company, that is the most applicable evidence you own,
+    and no amount of vocabulary overlap says more than that.
+    """
+    # Slots are filled with the company and role, which would match the
+    # posting for every paragraph equally. Score the approved words only.
+    text = _SLOT.sub(" ", template).lower()
+    low_jd = jd_text.lower()
+    words = {m.group(0) for m in _WORD.finditer(text)} - _COMMON
+    score = sum(1 for w in words if w in low_jd)
+
+    name = re.sub(r"[^a-z0-9 ]+", " ", (company or "").lower()).split()
+    # "Inc", "LLC" and friends are in half the postings on any board.
+    name = [w for w in name if len(w) > 3 and
+            w not in {"inc", "llc", "corp", "company", "group", "holdings",
+                      "systems", "solutions", "services", "international"}]
+    if name and all(w in text for w in name):
+        score += 100
+    return score
+
+
+def _supported(paragraph: Paragraph, approved: set[str]) -> str:
+    """"" if the paragraph's numbers are all confirmed, else why not."""
+    missing = sorted(numbers_in(paragraph.text) - approved)
     # A slot value is your own text or a tool name; its numbers are not
     # claims the paragraph is making.
     for value in paragraph.slots.values():
         missing = [n for n in missing if n not in numbers_in(value)]
     if missing:
-        return (f"the resume does not state {', '.join(missing)}, so the "
-                f"letter cannot either")
+        return (f"{', '.join(missing)} appears nowhere in your confirmed "
+                f"content, so the letter cannot claim it")
     return ""
 
 
 def build(*, company: str, role: str, family: str, resume_text: str,
           jd_text: str, note: str = "", content: dict | None = None,
-          evidence_count: int = 2) -> Letter:
+          evidence_count: int = 2, approved_text: str = "") -> Letter:
     content = content or load_content()
     meta = content.get("meta", {})
-    resume_numbers = numbers_in(resume_text)
+    approved = numbers_in(resume_text) | numbers_in(approved_text)
     tools = pick_tools(resume_text, jd_text,
                        stoplist=meta.get("tool_stoplist"))
     slots = {"company": company, "role": role, "tools": join_tools(tools)}
@@ -238,8 +323,15 @@ def build(*, company: str, role: str, family: str, resume_text: str,
     def take(section: str, count: int = 1, **extra) -> None:
         entries = [e for e in content.get(section, [])
                    if _matches_family(e, family)]
-        # Family-specific entries beat the "*" catch-all.
-        entries.sort(key=lambda e: "*" in (e.get("families") or ["*"]))
+        # Family-specific entries beat the "*" catch-all, and within that the
+        # paragraph with the most to do with this posting goes first. Before
+        # this, the tie was broken by position in the file, so a paragraph
+        # about a project done for this very company lost to whatever had
+        # been typed above it.
+        entries.sort(key=lambda e: (
+            "*" in (e.get("families") or ["*"]),
+            -relevance(e.get("template", ""), jd_text, company),
+        ))
         taken = 0
         # Two paragraphs that both open "At Spargo I..." read as one story told
         # twice. Where entries declare an `employer`, spend each one once --
@@ -263,7 +355,7 @@ def build(*, company: str, role: str, family: str, resume_text: str,
                 return
             paragraph = _render(entry, slots)
             seen.add(entry["id"])
-            reason = _supported(paragraph, resume_numbers)
+            reason = _supported(paragraph, approved)
             if reason:
                 dropped.append((entry["id"], reason))
                 return
@@ -296,10 +388,11 @@ def build(*, company: str, role: str, family: str, resume_text: str,
     )
 
 
-def verify(letter: Letter, resume_text: str, jd_text: str) -> list[str]:
+def verify(letter: Letter, resume_text: str, jd_text: str,
+           approved_text: str = "") -> list[str]:
     """The gate. A non-empty return means do not deliver this letter."""
     problems: list[str] = []
-    resume_numbers = numbers_in(resume_text)
+    approved = numbers_in(resume_text) | numbers_in(approved_text)
     low_resume, low_jd = resume_text.lower(), jd_text.lower()
 
     for paragraph in letter.paragraphs:
@@ -319,10 +412,10 @@ def verify(letter: Letter, resume_text: str, jd_text: str) -> list[str]:
         slot_numbers: set[str] = set()
         for value in paragraph.slots.values():
             slot_numbers |= numbers_in(value)
-        unsupported = numbers_in(paragraph.text) - resume_numbers - slot_numbers
+        unsupported = numbers_in(paragraph.text) - approved - slot_numbers
         if unsupported:
             problems.append(f"{paragraph.id}: claims {', '.join(sorted(unsupported))}, "
-                            f"which the tailored resume does not say")
+                            f"which your confirmed content does not say")
 
     # 3. tools
     for tool in letter.tools:
