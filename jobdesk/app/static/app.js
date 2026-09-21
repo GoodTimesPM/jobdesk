@@ -67,13 +67,24 @@ const post = (path, body) => call(path, {
 const BANNER_SECONDS = 8;
 let bannerTimer = null;
 
-function banner(text, bad, sticky) {
+function banner(text, bad, sticky, action) {
   const box = $("#banner");
   clearTimeout(bannerTimer);
   bannerTimer = null;
   $("#banner-text").textContent = text || "";
   box.hidden = !text;
   box.classList.toggle("bad", !!bad);
+
+  /* A rule with no way past it gets worked around outside the tool, where
+     nothing is written down. So a block that a person can legitimately
+     disagree with offers the override here, next to the reason, and the
+     packet records which rules were waived. */
+  const act = $("#banner-action");
+  act.hidden = !action;
+  if (action) {
+    act.textContent = action.label;
+    act.onclick = action.run;
+  }
   if (text && !bad && !sticky) {
     bannerTimer = setTimeout(() => { box.hidden = true; }, BANNER_SECONDS * 1000);
   }
@@ -203,7 +214,19 @@ function finishedRun(data) {
     loadJobs();
     loadApplications();
     if (result.blocked) {
-      banner(`Packet blocked: ${(result.problems || []).join(" ")}`, true);
+      const why = (result.problems || []).join(" ");
+      const again = lastPacket;
+      banner(`Packet blocked: ${why}`, true, true, again && {
+        label: "Build it anyway",
+        run: () => {
+          if (!confirm(`This is what the guard said:\n\n${why}\n\n`
+                     + `Build the packet regardless? The rules you are `
+                     + `overriding are written into APPLY.md and into the `
+                     + `application record.`)) return;
+          startRun(Object.assign({}, again, { force: true }),
+                   "Building anyway. The override is recorded.");
+        },
+      });
     } else if (result.ok) {
       banner(`Packet built. Open APPLY.md, work through it, then mark it `
            + `applied on the Applied tab.`);
@@ -213,7 +236,11 @@ function finishedRun(data) {
   }
 }
 
+let lastPacket = null;   // the body of the most recent packet request, so
+                         // an override can repeat it with force set
+
 function startRun(body, message) {
+  if (body && body.kind === "packet") lastPacket = body;
   banner(message || "");
   return post("/api/run/start", body).then((run) => {
     show("console");
@@ -1890,12 +1917,13 @@ $("#make-shortcut").addEventListener("click", async () => {
  * localStorage for theme.js, which applies them before the first paint.
  */
 
-const LOOK_KEYS = ["theme", "text_size", "density"];
+const LOOK_KEYS = ["theme", "scheme", "font", "text_size", "density"];
 let prefs = {
   jobs_sort: "newest", score_min: 45, score_max: 100, hide_applied: true,
   hide_prepared: false, remote_only: false, starred_only: false,
   start_tab: "jobs",
-  theme: "system", text_size: 100, density: "normal",
+  theme: "system", scheme: "slate", font: "system", text_size: 100,
+  density: "normal",
 };
 let prefDefaults = Object.assign({}, prefs);   // replaced by the server's copy
 
@@ -1903,8 +1931,12 @@ function applyLook(p) {
   const root = document.documentElement;
   if (p.theme === "light" || p.theme === "dark") root.dataset.theme = p.theme;
   else delete root.dataset.theme;
-  root.dataset.size = String(p.text_size);
+  root.dataset.scheme = p.scheme || "slate";
+  root.dataset.font = p.font || "system";
   root.dataset.density = p.density;
+  /* A number, not an attribute, so the size can be any percentage the server
+     will accept rather than one of a handful the stylesheet knows by name. */
+  root.style.setProperty("--zoom", String((Number(p.text_size) || 100) / 100));
   const look = {};
   LOOK_KEYS.forEach((k) => { look[k] = p[k]; });
   try { localStorage.setItem("jobdesk.look", JSON.stringify(look)); } catch { /* private mode */ }
@@ -1927,8 +1959,23 @@ function applyFilters(p) {
 function drawPrefs() {
   $$("[data-pref]").forEach((input) => {
     const value = prefs[input.dataset.pref];
-    if (input.type === "checkbox") input.checked = !!value;
-    else input.value = String(value);
+    if (input.type === "checkbox") { input.checked = !!value; return; }
+    input.value = String(value);
+    /* A saved number the menu no longer lists -- a text size from when the
+       steps were 90/115/130 -- leaves a select showing nothing at all, which
+       reads as a broken setting rather than an old one. Show the nearest
+       step it does offer, without saving over what is on disk. */
+    if (input.tagName === "SELECT" && input.selectedIndex === -1) {
+      const n = Number(value);
+      const options = Array.from(input.options);
+      const numeric = options.filter((o) => o.value !== "" && !isNaN(Number(o.value)));
+      if (!isNaN(n) && numeric.length) {
+        input.value = numeric.reduce((best, o) =>
+          Math.abs(Number(o.value) - n) < Math.abs(Number(best.value) - n) ? o : best).value;
+      } else if (options.length) {
+        input.selectedIndex = 0;
+      }
+    }
   });
 }
 

@@ -17,6 +17,8 @@
   if (!look) return;
   var root = document.documentElement;
   if (look.theme === "light" || look.theme === "dark") root.dataset.theme = look.theme;
-  if (look.text_size) root.dataset.size = String(look.text_size);
+  if (look.scheme) root.dataset.scheme = look.scheme;
+  if (look.font) root.dataset.font = look.font;
+  if (look.text_size) root.style.setProperty("--zoom", String(look.text_size / 100));
   if (look.density) root.dataset.density = look.density;
 })();

@@ -33,8 +33,12 @@ DEFAULTS: dict[str, object] = {
     "starred_only": False,
     # Where the app opens
     "start_tab": "jobs",
-    # Appearance
+    # Appearance. `theme` is light or dark, `scheme` is which colours, and
+    # they are separate because every scheme has both. Picking "Forest" should
+    # not also decide whether the window is bright at 11pm.
     "theme": "system",          # system | light | dark
+    "scheme": "slate",          # which palette
+    "font": "system",           # which typeface
     "text_size": 100,           # percent
     "density": "normal",        # compact | normal | roomy
 }
@@ -43,10 +47,17 @@ _CHOICES = {
     "jobs_sort": ("newest", "score"),
     "start_tab": ("jobs", "applied", "archive", "criteria", "console"),
     "theme": ("system", "light", "dark"),
+    "scheme": ("slate", "ocean", "forest", "plum", "sand", "contrast"),
+    "font": ("system", "humanist", "narrow", "serif", "mono"),
     "density": ("compact", "normal", "roomy"),
-    "text_size": (90, 100, 115, 130),
 }
-_RANGES = {"score_min": (0, 100), "score_max": (0, 100)}
+
+# A range rather than a list of sizes, so that the four the page offered
+# before -- 90, 100, 115, 130 -- stay valid for anyone whose settings file
+# already says one of them, and the page can offer a different set of steps
+# tomorrow without invalidating today's.
+_RANGES = {"score_min": (0, 100), "score_max": (0, 100),
+           "text_size": (80, 160)}
 
 
 def _valid(key: str, value) -> bool:
@@ -90,8 +101,6 @@ def save(changes: dict) -> dict[str, object]:
         if key not in DEFAULTS:
             raise Invalid(f"{key} is not a setting")
         if key in _RANGES and isinstance(value, str) and value.strip().isdigit():
-            value = int(value)
-        if key == "text_size" and isinstance(value, str) and value.isdigit():
             value = int(value)
         if not _valid(key, value):
             raise Invalid(f"{value!r} is not a valid value for {key}")
