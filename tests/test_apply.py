@@ -194,6 +194,52 @@ def test_letter() -> None:
     check("the letter still builds after a drop",
           not letter_mod.verify(thin, thin_resume, JD))
 
+    # ...but the resume is one page of a much larger set of confirmed facts,
+    # and a paragraph about a project that lost a page-fit contest is still
+    # true. Given the confirmed content, the same paragraph survives.
+    approved = "Processed roughly 400 vendor invoices a month."
+    kept = letter_mod.build(company="Meadowlark Health", role="AP Specialist",
+                            family="billing", resume_text=thin_resume,
+                            jd_text=JD, approved_text=approved)
+    check("a number the resume dropped but the master confirms is allowed",
+          all(pid != "ev.ap.frpg" for pid, _ in kept.dropped),
+          str(kept.dropped))
+    check("and that letter passes the gate too",
+          not letter_mod.verify(kept, thin_resume, JD, approved))
+
+    # Evidence is ordered by what it has to do with THIS posting, not by
+    # where it sits in the file. A paragraph about a project done for the
+    # company being applied to is the strongest evidence there is, and it
+    # used to lose to whatever had been typed above it.
+    content = {
+        "meta": {},
+        "opening": [{"id": "op", "families": ["*"],
+                     "template": "Applying to {company} for {role}."}],
+        "evidence": [
+            {"id": "ev.first", "families": ["billing"],
+             "template": "I reconciled vendor statements every month."},
+            {"id": "ev.company", "families": ["billing"],
+             "template": "I built a pricing model for Meadowlark Health."},
+        ],
+        "bridge": [], "close": [],
+    }
+    ranked = letter_mod.build(company="Meadowlark Health", role="AP Specialist",
+                              family="billing", resume_text=RESUME,
+                              jd_text=JD, content=content, evidence_count=1)
+    check("the paragraph naming the employer leads the evidence",
+          any(par.id == "ev.company" for par in ranked.paragraphs),
+          str([par.id for par in ranked.paragraphs]))
+    check("relevance counts overlap with the posting, not paragraph length",
+          letter_mod.relevance("reconcile journal entries in NetSuite", JD)
+          > letter_mod.relevance(
+              "I have worked on many things over several years with a team", JD))
+
+    # The corpus is read off the active profile, and it is the user's own
+    # writing -- read as data, never imported.
+    claims = letter_mod.approved_claims()
+    check("approved_claims reads the profile's master content",
+          "400" in letter_mod.numbers_in(claims), f"{len(claims)} chars")
+
     # Every family must be able to open. The number gate folds spelled-out
     # numbers to digits, so a number word used as a pronoun -- "rather than
     # feeding one" -- reads as a claim about the number 1, no resume states 1,

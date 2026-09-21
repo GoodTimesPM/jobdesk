@@ -284,6 +284,12 @@ def test_truth() -> None:
        "...and verify still flags them when the flag isn't passed")
 
 
+def _heading(name: str, text: str) -> bool:
+    """Is `name` a section heading here, rather than a word in a sentence?"""
+    return any(line.strip().upper().rstrip(":") == name
+               for line in text.splitlines())
+
+
 def test_render() -> None:
     print("\n[render] output formats and the ATS simulator")
     d = parse(ACCOUNTING_JD, "Acme", "Staff Accountant")
@@ -292,11 +298,14 @@ def test_render() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp)
         pdf_path = out / "resume.pdf"
-        pages, slack, dropped = render_pdf.render_fitted(plan, pdf_path)
+        fit = render_pdf.render_fitted(plan, pdf_path)
+        pages, slack = fit.pages, fit.slack
         ok(pages == 1, f"PDF fits one page (got {pages})")
         ok(slack >= 0, f"content ends above the bottom margin ({slack:.0f}mm)")
+        ok(not fit.broke_floors,
+           "and it did not have to cross a min_bullets floor to get there")
 
-        docx_path = render_docx.render(plan, out / "resume.docx")
+        docx_path = render_docx.render(plan, out / "resume.docx", fit.layout)
         txt_path = render_txt.render(plan, out / "resume.txt")
         ok(docx_path.exists() and docx_path.stat().st_size > 0, "DOCX written")
         ok(txt_path.exists(), "TXT written")
@@ -330,6 +339,47 @@ def test_render() -> None:
         ok(report.images == 0, "no images embedded")
         ok(not verify.verify_pdf(plan, report.text),
            "every selected bullet is present in the PDF text layer")
+
+        # -- one page, whatever it costs -------------------------------
+        # Every renderer guards on `plan.summary`, and all three have to.
+        none_plan = tailor.build(MASTER, d, VOCAB, summary_mode="none")
+        ok(none_plan.summary == "", "summary_mode='none' builds no summary")
+        none_pdf = out / "nosummary.pdf"
+        render_pdf.render_fitted(none_plan, none_pdf)
+        none_report = ats.simulate(none_pdf, d, VOCAB)
+        ok(not _heading("SUMMARY", none_report.text),
+           "and the heading is gone from the PDF text layer")
+        ok(not none_report.sections_missing,
+           "a resume with no summary is not penalized for a missing section")
+        none_txt = render_txt.render(none_plan, out / "nosummary.txt")
+        ok(not _heading("SUMMARY", none_txt.read_text(encoding="utf-8")),
+           "and gone from the TXT")
+        none_docx = render_docx.render(none_plan, out / "nosummary.docx")
+        from docx import Document as _Doc
+        ok(not _heading("SUMMARY", "\n".join(
+            par.text for par in _Doc(str(none_docx)).paragraphs)),
+           "and gone from the DOCX")
+
+        # A plan with every bullet in the profile on it does not fit at the
+        # designed size. It still has to come back as one page: the fitter
+        # sets the type tighter, and drops bullets only once that runs out.
+        stuffed = tailor.build(MASTER, d, VOCAB)
+        for section in (*stuffed.experience, *stuffed.projects):
+            for bullet in MASTER.bullets_for(section.entry.id, False):
+                if not any(c.bullet.id == bullet.id for c in section.chosen):
+                    section.chosen.append(
+                        tailor.ChosenBullet(bullet=bullet,
+                                            variant=bullet.phrasings()[0],
+                                            value=0.0, gain=0.0, reason="test"))
+        before = stuffed.bullet_count()
+        ok(before > plan.bullet_count(), f"overstuffed plan has {before} bullets")
+        squeezed = render_pdf.render_fitted(stuffed, out / "stuffed.pdf")
+        ok(squeezed.pages == 1,
+           f"an overstuffed plan still ships one page (got {squeezed.pages})")
+        ok(squeezed.layout.squeezed,
+           f"and it was set tighter to do it ({squeezed.layout.describe()})")
+        ok(squeezed.layout.type >= 0.90,
+           f"type never shrinks past 90% ({squeezed.layout.type:.0%})")
 
         # The gap report tolerates an empty corpus.
         rows, unmapped, total = gap.analyze(MASTER, VOCAB, store=out)
