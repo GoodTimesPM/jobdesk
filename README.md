@@ -66,7 +66,7 @@ your packets stay where they are, and the script prints the paths.
 | **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. |
 | **Console** | Whatever is running, streaming. Discovery runs, engine builds, packet assembly. |
 | **Setup** | The first-run wizard, the phone pairing, the Desktop shortcut, the logon task. |
-| **Settings** | The gear at the top right. What the Jobs tab opens with, theme, text size, row spacing, and where packets get written. |
+| **Settings** | The gear at the top right. What the Jobs tab opens with, light or dark, six colour schemes, the font, the text size, row spacing, and where packets get written. |
 
 ## On your phone
 
@@ -189,6 +189,26 @@ re-reads the PDF the way a parser would, and shows you the document the
 employer's software will actually see. Those two are usually not the same, and
 nothing else on your screen tells you when they diverge.
 
+## Before it builds a packet
+
+A handful of rules run before the folder is written, and they are about being
+remembered badly rather than about quality. Two applications open at one
+employer reads as interest; six reads as a spray. The same requisition twice
+reads as not paying attention.
+
+A shared job board is not an employer, and the cap knows the difference.
+"Commonwealth of Virginia" is one sitemap and about a hundred agencies, so the
+count is taken against the agency named inside the posting. Where the posting
+does not name one, the count is the worst case that could actually be true --
+the applications whose agency is unknown, plus the largest single named
+agency -- because two open applications at two different agencies cannot both
+be at whichever agency this one turns out to belong to.
+
+Every rule can be overridden from the banner that reports it. An override
+names the rules it waived, in `APPLY.md` in the packet and on the application
+record, because a rule with no way past it gets worked around outside the
+program, where nothing is written down.
+
 ## Layout
 
 ```
@@ -221,6 +241,9 @@ JobDesk.cmd --shortcut                 # write the desktop shortcut, then exit
 
 py -m jobdesk.app                      # the same app, as a window
 py -m jobdesk.radar.main --dry-run     # one discovery cycle, writes nothing
+py -m jobdesk.radar.gather             # employers near you, for the seed list
+py -m jobdesk.radar.seed               # probe those employers for an ATS board
+py -m jobdesk.radar.candidates --repair-partials   # bodies for rows that lack one
 py -m jobdesk.engine.main check        # validate master content
 py -m jobdesk.apply.main --help        # the packet builder's subcommands
 ```
@@ -281,7 +304,7 @@ checklist.
 
 ## Version
 
-0.3.0. `CHANGELOG.md` has what changed and why.
+0.4.0. `CHANGELOG.md` has what changed and why.
 
 ## License
 

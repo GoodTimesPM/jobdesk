@@ -2,6 +2,151 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.4.0 — 2026-09-21
+
+Three things in one release, and they turn out to be the same thing: a board
+that is wrong is worse than a board that is empty. A posting whose body never
+arrived, an employer that is really a hundred employers, a description stored
+as one grey paragraph -- each of them looks like data and answers like data,
+and each one quietly produces a worse application than doing nothing would
+have.
+
+### Added
+
+- **`py -m jobdesk.radar.gather`** builds a metro's employer list instead of
+  charging you an afternoon of reading. It collects names from public
+  directories near the metro in `targeting.toml`, and it only keeps a name
+  that cost something to learn: one that turns up somewhere that had to check
+  it. The seed file then probes each for an ATS board.
+- **`py -m jobdesk.radar.candidates --repair-partials`** goes back for the
+  postings that reached the board with no body, or with 500 characters of one,
+  and fetches the real thing. It reads one host at a time at the rate that
+  host tolerates, and when a host answers with a bot check it says so by name
+  and stops rather than guessing at an empty page. A posting it cannot read
+  stays unread and says so; the app has a paste button for those.
+- **Colour schemes, fonts and seven text sizes** in Settings. `theme` is light
+  or dark and `scheme` is which colours, so every scheme has both. Slate,
+  Ocean, Forest, Plum, Sand, and a high-contrast scheme that moves the ink as
+  well, for eyes the default greys do not serve. Fonts come from what the
+  machine already has, because a font that has to be downloaded is a font that
+  is missing the first time the window opens without internet.
+- **A blocked packet has a way past, and it leaves a mark.** The guard has
+  always been able to be overridden and the page never offered it, which is
+  the worst version of a rule: the work still happens, in a browser tab, with
+  nothing written down. The banner now carries the override, names the rules
+  being waived, and records them in APPLY.md and on the application row.
+
+### Fixed
+
+- **A job board is not an employer.** "Commonwealth of Virginia" is one
+  sitemap and about a hundred agencies. The two-open-applications cap counted
+  them as one company, so an open req at the Department of Accounts blocked a
+  packet for the Department of Professional and Occupational Regulation, two
+  organizations whose only connection is a domain name. The cap now counts
+  against the agency named inside the posting. Where that is unknown the count
+  is the worst case, and the worst case is not "all of them": two applications
+  at two different agencies cannot both be at whichever agency this posting
+  belongs to, so it counts the unknowns plus the biggest single named agency.
+  A softer ceiling across the whole board warns at six, because the
+  Commonwealth runs one applicant system even though the agencies do not share
+  a hiring manager.
+- **A 500-character snippet was being tailored against.** Adzuna cuts every
+  description at 500 characters, and what it cuts is the bottom of the
+  posting, where the years requirement lives. Scoring paid for silence there.
+  A snippet is now a fact the posting carries, the packet builder refuses to
+  tailor against one, and the repair command goes and gets the rest.
+- **A posting with no line breaks gave up its agency and its pay.** The
+  sitemap fetcher flattens a posting to one unbroken line. The header parser
+  wanted its labels at the start of a line, which is how the posting looks in
+  a browser and how every test fed it, so it read nothing at all off the real
+  cache while passing everything. One Fair Housing Investigator posting was
+  showing an $86k-$131k guess over a stated range of $57,000-$72,000.
+- **Bullets that survived without their line breaks** arrived as one grey
+  paragraph with dots in it. Splitting on a dot bullet reconstructs the list;
+  the hyphen and the asterisk stay out of it, because inside a line they are
+  ranges and footnotes, not bullets.
+- **The dismiss X on the notification bar** had been pushed off the right edge
+  by the button added beside it.
+
+### Changed
+
+- **Nothing in the code decides where you live or what you do.** The last
+  hard-coded metro and the last hard-coded job family came out, and the setup
+  wizard writes the two keys it had been leaving for you to find.
+- **A company cannot confirm its own board by its own name.** A board is
+  confirmed from the company's own website now. Six wrong boards had been
+  accepted on a name match alone, and a wrong board is the failure this whole
+  program is built around.
+- **The detail budget is spent on the best postings**, not on whichever ones
+  came back first.
+
+## 0.3.1 — 2026-09-17
+
+A coverage release, and the price of it. Adzuna adds 222 Richmond postings a
+run for 16 of a 250-call daily budget. Nearly all the work was not adding the
+source. It was making the board safe to read afterwards.
+
+### Fixed
+
+- **A carried posting is re-scored.** `candidates.json` keeps a posting for 30
+  days past the last run that saw it, and until now a carried row kept
+  whatever number the code of the day gave it. The morning after 0.3.0 took
+  the top score from 100 to 96, 46 rows scored by the old code were still
+  claiming a perfect 100 and sitting above everything found that day. The file
+  is sorted by score and the Jobs tab reads it in order, so the board was
+  showing two scales at once with the obsolete one on top. The general form of
+  that bug is worse than the symptom: every scoring change ever shipped only
+  reached postings found after it shipped. Freshness never decayed either, so
+  a row kept its +10 for a month. Re-scoring costs no network, and the score
+  floor now applies to carried rows too, so a posting today's rules would
+  disqualify finally leaves.
+- **`--dry-run` was writing a snapshot** into the market history — a few
+  hundred rows a run. The last write that ignored the flag.
+
+### Changed
+
+- **A truncated posting cannot claim to be a known quantity.** Adzuna cuts
+  every description at 500 characters: measured 222 of 222, minimum 498,
+  median 500, all ending in an ellipsis. What is cut is the bottom of the
+  posting, where the years requirement lives. Scoring paid +6 for "no explicit
+  years requirement", which on a snippet rewards silence and would have put
+  five-year reqs at the top of a board built to keep them off. Truncation is
+  now a fact the posting carries: silence earns nothing and says so, and the
+  score is capped at 78. That clears the A floor of 75, so a strong local fit
+  still surfaces and still reads as one. It just cannot outrank a posting
+  somebody read end to end.
+- **One requisition farmed out across twenty staffing firms is one row.** A
+  single Virginia SCC Power BI contract came back from twenty shops and
+  reached the digest as 23 separate A-tier jobs. Dedupe could not see it: it
+  keys on company plus title, and a farm differs on the company every time.
+  Two rules were measured and thrown away first — collapsing identical titles
+  across companies would have merged five real ABA clinics and two real
+  data-analyst openings, and collapsing on the requisition number reached only
+  4 of 28 copies, because the 500-character cut takes the number with it. What
+  holds: four or more companies on one title, and at least a quarter of the
+  group already flagged as agency. The shops decorate, so a span comes off
+  only when all of it is decoration ("(Hybrid)" goes, "(Federal Grants & eRA
+  Systems)" stays), and the place names come from the targeting profile rather
+  than being hardcoded to one city. The groups are mixtures, so a company
+  already on the watch list is never dropped. Live: 36 of 222 collapsed,
+  A-tier from 50 to 30, with Markel, GovCIO and all ten behaviour-analyst
+  postings kept.
+- **A contract shop is recognised by how it writes.** `staffing_agencies` only
+  ever knew the firms somebody thought to type, and one pull produced fourteen
+  shops advertising a single state req between them, none of them a name
+  anyone would have listed in advance. The new phrases were picked by
+  measuring 44 known-bodyshop postings against 12 known-real ones and keeping
+  only those that hit every shop and no employer. `learn.py` reads the flag as
+  well as the name list; without it, one pull qualified 65 contract shops as
+  employers to probe and watch every morning.
+
+### Known
+
+Nearly every Adzuna row in the A-tier says "years requirement not visible in
+the snippet". The cap keeps those off the top of the board, but the tier is
+now largely made of postings whose requirements nobody has read. Closing that
+means fetching the employer's own page, not another scoring rule.
+
 ## 0.3.0 — 2026-09-17
 
 A scoring release. The complaint that started it: postings with "Director" in
