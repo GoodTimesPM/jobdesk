@@ -105,10 +105,29 @@ def paste(url: str = "", prefill: str = "") -> str:
 
 
 def obtain(*, cached: str = "", url: str = "", allow_fetch: bool = True,
-           allow_paste: bool = True, echo=print) -> tuple[str, str]:
-    """The whole ladder. Returns (text, how)."""
-    if cached and len(cached) >= config.MIN_JD_CHARS:
+           allow_paste: bool = True, cached_partial: bool = False,
+           echo=print) -> tuple[str, str]:
+    """The whole ladder. Returns (text, how).
+
+    `cached_partial` says the cached text is an aggregator's snippet. It gets
+    its own argument rather than being guessed at from the length, because the
+    length is exactly what makes it dangerous: Adzuna cuts every description
+    at 500 characters and `MIN_JD_CHARS` is 400, so a snippet walks through
+    step 1 looking like a job description and the packet is tailored against
+    the company's About Us paragraph. Five hundred characters of "we enable
+    secure, high-performance connectivity" sorts into no required section, no
+    preferred section and no responsibilities, and the engine then answers a
+    posting it never read.
+
+    A snippet is not thrown away -- the ladder keeps climbing and the snippet
+    is what prefills the paste box, so the missing half is the only half
+    anyone has to supply.
+    """
+    if cached and not cached_partial and len(cached) >= config.MIN_JD_CHARS:
         return cached, f"Job Radar's cached JD ({len(cached)} chars)"
+    if cached and cached_partial:
+        echo(f"  the cached text is a {len(cached)}-character snippet, not "
+             f"the posting - going to the source")
 
     if allow_fetch and url:
         echo(f"  fetching the posting...")
@@ -126,4 +145,10 @@ def obtain(*, cached: str = "", url: str = "", allow_fetch: bool = True,
         if text:
             return text, (f"pasted by hand, but only {len(text)} chars -- "
                           f"short JDs tailor badly")
+    if cached_partial:
+        # The snippet is deliberately not returned here. It would build a
+        # packet, and a packet built against the About Us paragraph is worse
+        # than no packet: it looks finished.
+        return "", ("only a snippet of this posting was ever published, and "
+                    "the full text could not be fetched")
     return "", "no JD text available"

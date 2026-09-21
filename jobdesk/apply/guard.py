@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from . import config
-from .applog import Application, Log
+from .applog import Application, Log, division_key
 
 BLOCK = "BLOCK"
 WARN = "WARN"
@@ -45,7 +45,8 @@ def _days_since(iso: str) -> int | None:
 
 
 def run(log: Log, *, company: str, role: str, url: str = "", uid: str = "",
-        dedupe_key: str = "", flags: list[str] | None = None) -> list[Check]:
+        dedupe_key: str = "", flags: list[str] | None = None,
+        division: str = "") -> list[Check]:
     """Every guard, in severity order."""
     checks: list[Check] = []
     flags = flags or []
@@ -79,22 +80,79 @@ def run(log: Log, *, company: str, role: str, url: str = "", uid: str = "",
                 f"(status: {prior.status}); the cooldown on the same role is "
                 f"{config.SAME_ROLE_COOLDOWN_DAYS} days"))
 
-    # 3. Concurrency. Two live applications at one employer reads as interest;
-    #    six reads as a spray.
-    open_now = [a for a in log.open_at(company)
-                if a not in log.same_req(uid=uid, url=url, dedupe_key=dedupe_key)]
+    # 3. Concurrency, counted against whoever actually reads the application.
+    #    Two live applications at one employer reads as interest; six reads as
+    #    a spray.
+    #
+    #    A shared job board is not an employer, and this rule spent a while
+    #    believing it was. "Commonwealth of Virginia" is one sitemap and about
+    #    a hundred agencies: an open req at the Department of Accounts blocked
+    #    a packet for the Dept of Prof & Occup Reg, two organizations whose
+    #    only connection is a domain name.
+    #
+    #    Where the agency is known on both sides this is simple. Where it is
+    #    not -- a posting whose body never arrived, a row logged before any of
+    #    this existed -- the honest count is the worst case, and the worst case
+    #    is not "all of them". Two open applications at two *different* named
+    #    agencies cannot both be at whichever agency this posting turns out to
+    #    belong to; at most one of them can. So count the largest group that
+    #    could genuinely be the same employer: the rows whose agency is unknown
+    #    (those could be anywhere) plus the biggest single named agency.
+    #
+    #    That is exact rather than cautious, and it matters, because the first
+    #    version of this rule counted the total and went on blocking the Fair
+    #    Housing Investigator packet for two applications that were provably at
+    #    two other agencies.
+    same_req = log.same_req(uid=uid, url=url, dedupe_key=dedupe_key)
+    board_open = [a for a in log.open_at(company) if a not in same_req]
+
+    named: dict[str, list[Application]] = {}
+    unknown: list[Application] = []
+    for row in board_open:
+        if row.division:
+            named.setdefault(division_key(row.division), []).append(row)
+        else:
+            unknown.append(row)
+
+    if division:
+        employer = division
+        open_now = unknown + named.get(division_key(division), [])
+    elif named or unknown:
+        biggest = max(named.values(), key=len, default=[])
+        open_now = unknown + biggest
+        employer = f"one agency of {company}" if named else company
+    else:
+        employer, open_now = company, board_open
+
     if len(open_now) >= config.MAX_OPEN_PER_COMPANY:
         listed = ", ".join(f"{a.role} ({a.status})" for a in open_now[:4])
         checks.append(Check(
             BLOCK, "concurrency",
-            f"{len(open_now)} application(s) already open at {company}: "
+            f"{len(open_now)} application(s) already open at {employer}: "
             f"{listed}. The cap is {config.MAX_OPEN_PER_COMPANY}"))
     elif open_now:
         checks.append(Check(
             NOTE, "concurrency",
-            f"{len(open_now)} application already open at {company} "
+            f"{len(open_now)} application already open at {employer} "
             f"({open_now[0].role}) -- this would be number {len(open_now) + 1} "
             f"of {config.MAX_OPEN_PER_COMPANY}"))
+
+    # 3b. And the board above it, when there is one. Splitting the cap by
+    #     agency is right and it is not the whole picture: the Commonwealth
+    #     runs one applicant system, so any agency's HR can see everything you
+    #     have open anywhere in it. This warns, because the person it looks
+    #     odd to is not the person you are applying to.
+    if division or named:
+        if len(board_open) >= config.MAX_OPEN_PER_BOARD:
+            agencies = len({(a.division or company).lower()
+                            for a in board_open})
+            checks.append(Check(
+                WARN, "board-concurrency",
+                f"{len(board_open)} application(s) open across {company} "
+                f"({agencies} different agencies). No one agency sees more "
+                f"than {config.MAX_OPEN_PER_COMPANY}, but they share one "
+                f"applicant system and this would be number "
+                f"{len(board_open) + 1}"))
 
     # 4. Agency double-submission (plan item 13). Job Radar's scoring already
     #    flags agency reposts; this is where that flag has to be acted on.

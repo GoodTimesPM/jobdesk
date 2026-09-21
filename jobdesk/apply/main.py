@@ -114,7 +114,8 @@ def prep(candidate: candidates_mod.Candidate, log: Log, *, note: str = "",
 
     checks = guard.run(log, company=candidate.company, role=candidate.title,
                        url=candidate.url, uid=candidate.uid,
-                       dedupe_key=candidate.dedupe_key, flags=candidate.flags)
+                       dedupe_key=candidate.dedupe_key, flags=candidate.flags,
+                       division=candidate.division)
     if checks:
         echo("")
         for check in checks:
@@ -141,7 +142,12 @@ def prep(candidate: candidates_mod.Candidate, log: Log, *, note: str = "",
 
     jd_text, how = jdtext.obtain(cached=cached, url=candidate.url,
                                  allow_fetch=allow_fetch,
-                                 allow_paste=interactive, echo=echo)
+                                 allow_paste=interactive, echo=echo,
+                                 # A file read off disk is whatever the user
+                                 # saved, so the radar's flag says nothing
+                                 # about it.
+                                 cached_partial=(candidate.partial_description
+                                                 and not jd_file))
     if not jd_text:
         echo("No job description text, so there is nothing to tailor against.")
         return packet.Result(ok=False, problems=["no JD text"])

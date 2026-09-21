@@ -94,8 +94,18 @@ def delivery_dir() -> Path | None:
 # around outside the tool, where nothing is logged.
 
 # "cap 2-3 concurrent applications per company". Two, because the point is to
-# not look like a spray.
+# not look like a spray. Counted against the employer that would read the
+# application: on a shared board like jobs.virginia.gov that is the agency,
+# not the Commonwealth -- see `models.division_in`.
 MAX_OPEN_PER_COMPANY = 2
+
+# ...and a softer ceiling across a whole shared board. Splitting the cap by
+# agency is right, and it would be naive on its own: the Commonwealth runs one
+# applicant system, so any agency's HR can see every application you have open
+# anywhere in it. Nine at once still reads as a spray even though no single
+# agency sees more than two. This warns rather than blocks, because the person
+# it looks odd to is not the person you are applying to.
+MAX_OPEN_PER_BOARD = 6
 
 # "never reapply to the same req, 3-6 month cooldown on the same role".
 SAME_REQ_COOLDOWN_DAYS = 365        # effectively never, for the identical req
