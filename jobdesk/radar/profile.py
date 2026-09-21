@@ -55,6 +55,11 @@ _SHAPED = {
 # be asked for is a judgment about a market, and a user who knows their market
 # should be able to say so without editing Python.
 _OPTIONAL = {
+    # Optional and defaulting to nothing on purpose. A profile written before
+    # this key existed keeps scoring exactly as it did except for the bare
+    # family noun, and no bonus at all beats a bonus aimed at somebody else's
+    # profession.
+    "FAMILY_TITLES": ("family_titles", []),
     "SEARCH_QUERIES": ("search_queries", []),
     "WORKDAY_SEARCH_TERMS": ("workday_search_terms", []),
     "SYNONYMS_ENABLED": ("synonyms_enabled", True),

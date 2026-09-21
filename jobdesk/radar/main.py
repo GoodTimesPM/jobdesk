@@ -81,6 +81,10 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     jobs, collapsed = dedupe.collapse(jobs)
     log(f"{len(jobs)} after collapsing {collapsed} duplicate(s)")
 
+    # Only the survivors, so one HTTP call is spent per requisition rather
+    # than per copy of it.
+    sources.fill_partials(jobs, log=log)
+
     # Before scoring, not after: freshness is worth points, and a posting
     # whose date came from a sitemap `<lastmod>` can claim to be newer than
     # the run that first saw it. The store is the only thing that can say so.
@@ -89,6 +93,15 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
         store.settle_posted(job)
 
     jobs = score.score_all(jobs)          # rescore now that bodies are in
+
+    # Only now, not up beside `collapse`. The repost rule reads the
+    # staffing-agency flag, and that flag comes from the body -- which is
+    # not in hand until fetch_details has run and score_all has read it.
+    # Here the numbers are final, so the copy that survives a farm is the
+    # best-scoring one rather than whichever the title pass happened to like.
+    jobs, reposts = dedupe.collapse_reposts(jobs)
+    if reposts:
+        log(f"{len(jobs)} after collapsing {reposts} agency repost(s)")
 
     new_jobs: list[Job] = []        # new AND worth reporting
     first_seen: list[Job] = []      # new at any score -- the dataset delta
@@ -146,7 +159,9 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
         record.pop("reasons", None)
         record["required_years"] = score.required_years(job)
         slim.append(record)
-    if slim:
+    if slim and dry_run:
+        log(f"snapshot: skipped {len(slim)} posting(s) (dry run)")
+    elif slim:
         snapshot.write_text(json.dumps(slim, separators=(",", ":")), encoding="utf-8")
         log(f"snapshot: {len(slim)} newly-seen posting(s) -> {snapshot.name}")
 

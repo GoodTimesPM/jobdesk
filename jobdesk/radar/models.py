@@ -73,6 +73,80 @@ def parse_date(value: Any) -> datetime | None:
     return None
 
 
+# The label a shared job board prints above the employer that is actually
+# hiring. Every Commonwealth of Virginia posting carries "Agency: Dept of Prof
+# & Occup Reg" or similar in its header block, and that is the only place the
+# real employer appears: the board's `company` is the Commonwealth and the URL
+# is jobs.virginia.gov for all hundred-odd agencies.
+# The labels that end an agency name, because the sitemap fetcher flattens a
+# posting to a single line and there is no newline to stop at:
+#
+#   Title: Fair Housing Investigator State Role Title: Compliance/Safety
+#   Officer III Hiring Range: $57,000 - $72,000 Pay Band: 4 Agency: Dept of
+#   Prof & Occup Reg Location: DPOR Main Office Agency Website: ...
+#
+# Stopping at "the next capitalised word followed by a colon" reads that as
+# "Dept of Prof & Occup" and drops the Reg, because "Reg Location:" fits the
+# pattern too. So the terminators are named. An unfamiliar board whose labels
+# are not in this list yields "" rather than half a name, which is the right
+# way round: a wrong agency is worse than no agency.
+_FIELDS = ("state role title", "role title", "hiring range", "pay band",
+           "agency website", "recruitment type", "position number",
+           "work location", "closing date", "opening date", "job type",
+           "salary", "location", "title", "agency", "department", "division")
+_SECTIONS = ("job duties", "minimum qualifications", "preferred qualifications",
+             "additional considerations", "special instructions",
+             "contact information", "about the agency")
+
+
+def _alt(words):
+    return "|".join(sorted((re.escape(w) for w in words), key=len, reverse=True))
+
+
+_DIVISION_LABEL = re.compile(
+    r"(?:^|[\s.;])(?:Hiring\s+)?(?:Agency|Department|Bureau|Division|Office)"
+    r"\s*:\s*(?P<name>.{3,80}?)"
+    r"(?=\s*(?:" + _alt(_FIELDS) + r")\s*:"      # the next labelled field
+    r"|\s*(?:" + _alt(_SECTIONS) + r")\b"        # or the first prose heading
+    r"|\s*[\r\n]|\s*$)",
+    re.I)
+
+# Labels that answer with a category rather than an employer. "Department:
+# Engineering" is a team inside one company, and splitting the application cap
+# by team would defeat the point of having one.
+_NOT_A_DIVISION = re.compile(
+    r"^(engineering|sales|marketing|finance|operations|hr|human resources|"
+    r"it|information technology|legal|product|design|support|corporate|"
+    r"various|n/?a|see below|multiple|other)$", re.I)
+
+
+# An employer's name starts with a capital and is a handful of words. Prose
+# does neither, and prose is what turns up when a body happens to contain the
+# word "agency" before a colon -- "...the agency: irrelevant here. We are
+# hiring." parses, on the flattened line, into a perfectly well-formed match.
+_LOOKS_LIKE_A_NAME = re.compile(
+    r"^[A-Z][A-Za-z0-9&.,'()/-]*(?: [A-Za-z0-9&.,'()/-]+){0,7}$")
+
+
+def division_in(text: str) -> str:
+    """The employer named inside a shared board's posting, or "".
+
+    Only the header block is read. These boards print it at the top -- Title,
+    State Role Title, Hiring Range, Pay Band, Agency, Location -- and further
+    down the same body an "Agency:" turns up inside a paragraph about some
+    other agency's programme, which would name the wrong employer.
+    """
+    head = (text or "")[:1500]
+    for match in _DIVISION_LABEL.finditer(head):
+        name = _WS.sub(" ", match.group("name")).strip(" .,;:-")
+        if len(name) < 3 or _NOT_A_DIVISION.match(name):
+            continue
+        if not _LOOKS_LIKE_A_NAME.match(name):
+            continue
+        return name
+    return ""
+
+
 @dataclass
 class Job:
     """One posting, normalized."""
@@ -89,6 +163,27 @@ class Job:
     remote: bool = False             # source explicitly says remote
     department: str = ""
     external_id: str = ""            # the board's own id, when it has one
+
+    # Who actually hires, when `company` is the board and not the employer.
+    # "Commonwealth of Virginia" is one sitemap and about a hundred agencies:
+    # the Department of Accounts and the Dept of Prof & Occup Reg share a job
+    # board, a domain, and nothing else -- not an HR office, not a hiring
+    # manager, not a building. USAJOBS and any university system are the same
+    # shape. Left empty when the company really is the employer, and every
+    # reader falls back to `company` then.
+    #
+    # This is the staffing-agency mistake wearing a different hat. There the
+    # risk was crediting eight agencies with one requisition; here it is
+    # charging one agency for another agency's application.
+    division: str = ""
+
+    # The description is a snippet the source cut short, not the posting.
+    # Adzuna returns exactly 500 characters and an ellipsis, every time. The
+    # two filters that do the most work -- the years gate and the stack match
+    # -- read the body, so a posting whose body was never fully sent cannot
+    # be scored the same way as one that was. Scoring reads this; see
+    # `score.PARTIAL_CEILING`.
+    partial: bool = False
 
     # --- filled in by dedupe.collapse() ------------------------------------
     # The OTHER sources carrying this same req. Set during collapse, read by
@@ -108,6 +203,7 @@ class Job:
     def __post_init__(self) -> None:
         self.title = _WS.sub(" ", (self.title or "").strip())
         self.company = _WS.sub(" ", (self.company or "").strip())
+        self.division = _WS.sub(" ", (self.division or "").strip())
         self.location = _WS.sub(" ", (self.location or "").strip())
         self.description = clean_text(self.description)
 

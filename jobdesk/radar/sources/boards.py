@@ -261,6 +261,13 @@ def adzuna(_cfg: dict | None = None) -> list[Job]:
                 salary_min=_num(j.get("salary_min")),
                 salary_max=_num(j.get("salary_max")),
                 external_id=str(j.get("id", "")),
+                # Adzuna cuts every description at 500 characters and appends
+                # an ellipsis -- measured across a full Richmond pull, all 222
+                # of them. What is missing is the bottom of the posting, which
+                # is exactly where the years requirement and the tool list
+                # live. Saying so here is what stops the scorer from reading
+                # silence as good news.
+                partial=True,
             ))
     return out
 

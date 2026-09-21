@@ -91,6 +91,13 @@ def candidates(jobs: list[Job], data: dict, today: date) -> list[tuple[str, int,
         low = name.lower()
         if low in known or _is_agency(name):
             continue
+        # The name list only knows the agencies somebody thought to type.
+        # The flag knows the ones that gave themselves away in the body,
+        # which is most of them: a single Richmond pull produced fourteen
+        # contract shops advertising one state req between them, and every
+        # one would otherwise have been probed and watched as an employer.
+        if "staffing-agency" in (job.flags or []):
+            continue
         miss = misses.get(low)
         if miss and _tried_on(miss) > cutoff:
             continue
@@ -193,9 +200,44 @@ def _value(v) -> str:
     return json.dumps(str(v))
 
 
+# Bookkeeping about the row, not about the board it points at.
+_ABOUT_THE_ROW = ("name", "tier", "learned_on", "learned_score", "confirmed_by")
+
+
+def _board_of(row: dict) -> tuple:
+    """What makes two entries the same board, ignoring who we filed it under."""
+    return tuple(sorted((k, str(v)) for k, v in row.items()
+                        if k not in _ABOUT_THE_ROW))
+
+
+def _one_per_board(employers: list[dict]) -> list[dict]:
+    """Drop entries that point at a board another entry already holds.
+
+    One organisation can reach this list under two names. A seed list pasted
+    from two public rosters carried both "Federal Reserve Bank Richmond" and
+    "Richmond Federal Reserve", and both resolved to workday/rb; the same
+    happened to the Virginia Retirement System. Nothing downstream noticed,
+    which is the problem: every run then fetched that board twice and paid
+    twice for one answer.
+
+    The first entry wins, so the name that got there first is the name it
+    keeps. Which of two names for one employer is the better one is not
+    something this file can know, and either is right.
+    """
+    seen: set[tuple] = set()
+    out = []
+    for row in employers:
+        board = _board_of(row)
+        if board in seen:
+            continue
+        seen.add(board)
+        out.append(row)
+    return out
+
+
 def write(employers: list[dict], misses: list[dict]) -> None:
     lines = [HEADER]
-    for row in employers:
+    for row in _one_per_board(employers):
         lines.append("[[employer]]")
         for key, value in row.items():
             lines.append(f"{key} = {_value(value)}")
