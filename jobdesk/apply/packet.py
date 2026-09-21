@@ -154,9 +154,14 @@ def build(candidate: Candidate, jd_text: str, *, log: Log,
     missing = _missing_required(tailoring_md)
 
     # -- 2. the cover letter, through the same kind of gate ----------------
+    # Numbers are checked against everything the user has confirmed, not just
+    # the one page this posting got. A project that lost a page-fit contest is
+    # still a project that happened.
+    approved_text = letter_mod.approved_claims()
     letter = letter_mod.build(company=company, role=role, family=family,
-                              resume_text=resume_text, jd_text=jd_text, note=note)
-    problems = letter_mod.verify(letter, resume_text, jd_text)
+                              resume_text=resume_text, jd_text=jd_text,
+                              note=note, approved_text=approved_text)
+    problems = letter_mod.verify(letter, resume_text, jd_text, approved_text)
     if problems:
         result.problems.append("the cover letter failed verification and was "
                                "NOT written:")
@@ -313,8 +318,8 @@ def _apply_md(candidate: Candidate, tailored: engine.TailorResult,
 
     if letter is not None and letter.dropped:
         out += ["## Cover letter paragraphs that were dropped", "",
-                "Approved paragraphs held back because the tailored resume "
-                "does not make the claim they rest on:", ""]
+                "Held back because a number in them appears nowhere in your "
+                "confirmed content:", ""]
         out += [f"- `{pid}` -- {why}" for pid, why in letter.dropped] + [""]
 
     if pending:

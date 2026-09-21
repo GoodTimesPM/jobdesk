@@ -26,6 +26,10 @@ RADAR_DIGESTS = paths.DATA / "radar" / "digests"
 # which is git-ignored -- nobody's cover letter belongs in a repo.
 LETTER_FILE = profile.path("letter.toml")
 ANSWERS_FILE = profile.path("answers.toml")
+# Read as data, never imported: the letter gate checks its numbers
+# against every claim the user has confirmed, not just the ones this
+# posting's resume happened to select.
+MASTER_FILE = profile.path("master.toml")
 
 DATA = paths.DATA / "apply"
 APPLICATIONS_FILE = DATA / "applications.json"
