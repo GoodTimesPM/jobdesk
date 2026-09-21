@@ -47,6 +47,7 @@
 
 <div class="banner" id="banner" hidden>
   <span id="banner-text"></span>
+  <button class="banner-do" id="banner-action" type="button" hidden></button>
   <button class="banner-x" id="banner-close" type="button"
           title="Dismiss" aria-label="Dismiss this message">&times;</button>
 </div>
@@ -598,12 +599,34 @@
           <option value="dark">Dark</option>
         </select>
       </label>
+      <label>Colours
+        <select data-pref="scheme">
+          <option value="slate">Slate</option>
+          <option value="ocean">Ocean</option>
+          <option value="forest">Forest</option>
+          <option value="plum">Plum</option>
+          <option value="sand">Sand</option>
+          <option value="contrast">High contrast</option>
+        </select>
+      </label>
+      <label>Font
+        <select data-pref="font">
+          <option value="system">System</option>
+          <option value="humanist">Verdana, wider letters</option>
+          <option value="narrow">Calibri, fits more</option>
+          <option value="serif">Georgia, serif</option>
+          <option value="mono">Consolas, fixed width</option>
+        </select>
+      </label>
       <label>Text size
         <select data-pref="text_size">
+          <option value="80">Smallest</option>
           <option value="90">Small</option>
           <option value="100">Normal</option>
-          <option value="115">Large</option>
-          <option value="130">Largest</option>
+          <option value="110">Slightly larger</option>
+          <option value="125">Large</option>
+          <option value="140">Larger</option>
+          <option value="160">Largest</option>
         </select>
       </label>
       <label>Table rows

@@ -5,24 +5,35 @@
    palette redefines the tokens only, so nothing below has to know which
    theme it is in. */
 
+/* The palette is two choices, not one. `data-scheme` picks the colours and
+   `data-theme` picks light or dark, so Forest has a dark mode and so does
+   every scheme added later.
+
+   A scheme sets `--x-light` and `--x-dark` and nothing else. The three blocks
+   below read those through a fallback, which means a new scheme is one block
+   that never has to know which of the three is reading it, and a scheme that
+   only wants a different accent says only that. */
+
 :root {
   color-scheme: light dark;
 
-  --ink:        #191b1f;
-  --ink-soft:   #5d6470;
-  --ink-faint:  #8b929e;
-  --ground:     #f7f6f3;
-  --card:       #ffffff;
-  --line:       #dfdcd6;
-  --line-soft:  #ebe8e3;
-  --accent:     #1d5b73;
-  --accent-ink: #ffffff;
-  --good:       #2e7d4f;
-  --warn:       #9a6414;
-  --bad:        #a33a2c;
+  --ink:        var(--ink-light,        #191b1f);
+  --ink-soft:   var(--ink-soft-light,   #5d6470);
+  --ink-faint:  var(--ink-faint-light,  #8b929e);
+  --ground:     var(--ground-light,     #f7f6f3);
+  --card:       var(--card-light,       #ffffff);
+  --line:       var(--line-light,       #dfdcd6);
+  --line-soft:  var(--line-soft-light,  #ebe8e3);
+  --accent:     var(--accent-light,     #1d5b73);
+  --accent-ink: var(--accent-ink-light, #ffffff);
+  --good:       var(--good-light,       #2e7d4f);
+  --warn:       var(--warn-light,       #9a6414);
+  --bad:        var(--bad-light,        #a33a2c);
   --shadow:     0 1px 2px rgba(20, 22, 26, .06);
   --radius:     6px;
   --cell-y:     8px;
+  --font:       "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono:       Consolas, "SF Mono", ui-monospace, monospace;
 }
 
 /* The dark palette, twice. Once for "match this computer", which follows the
@@ -30,45 +41,107 @@
    dark choice, which has to win even on a computer set to light. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ink:       #e6e6e4;
-    --ink-soft:  #a3a8b0;
-    --ink-faint: #757b85;
-    --ground:    #16181b;
-    --card:      #1d2024;
-    --line:      #32363c;
-    --line-soft: #26292e;
-    --accent:    #5fb2cf;
-    --accent-ink:#10161a;
-    --good:      #6dc08c;
-    --warn:      #d3a250;
-    --bad:       #e08573;
+    --ink:       var(--ink-dark,        #e6e6e4);
+    --ink-soft:  var(--ink-soft-dark,   #a3a8b0);
+    --ink-faint: var(--ink-faint-dark,  #757b85);
+    --ground:    var(--ground-dark,     #16181b);
+    --card:      var(--card-dark,       #1d2024);
+    --line:      var(--line-dark,       #32363c);
+    --line-soft: var(--line-soft-dark,  #26292e);
+    --accent:    var(--accent-dark,     #5fb2cf);
+    --accent-ink:var(--accent-ink-dark, #10161a);
+    --good:      var(--good-dark,       #6dc08c);
+    --warn:      var(--warn-dark,       #d3a250);
+    --bad:       var(--bad-dark,        #e08573);
     --shadow:    none;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ink:       #e6e6e4;
-  --ink-soft:  #a3a8b0;
-  --ink-faint: #757b85;
-  --ground:    #16181b;
-  --card:      #1d2024;
-  --line:      #32363c;
-  --line-soft: #26292e;
-  --accent:    #5fb2cf;
-  --accent-ink:#10161a;
-  --good:      #6dc08c;
-  --warn:      #d3a250;
-  --bad:       #e08573;
+  --ink:       var(--ink-dark,        #e6e6e4);
+  --ink-soft:  var(--ink-soft-dark,   #a3a8b0);
+  --ink-faint: var(--ink-faint-dark,  #757b85);
+  --ground:    var(--ground-dark,     #16181b);
+  --card:      var(--card-dark,       #1d2024);
+  --line:      var(--line-dark,       #32363c);
+  --line-soft: var(--line-soft-dark,  #26292e);
+  --accent:    var(--accent-dark,     #5fb2cf);
+  --accent-ink:var(--accent-ink-dark, #10161a);
+  --good:      var(--good-dark,       #6dc08c);
+  --warn:      var(--warn-dark,       #d3a250);
+  --bad:       var(--bad-dark,        #e08573);
   --shadow:    none;
 }
 :root[data-theme="light"] { color-scheme: light; }
 
+/* The schemes. Slate is the default and so it sets nothing: its values are
+   the fallbacks above. Each of the others moves the accent and warms or cools
+   the paper underneath it by a few points, which is as far as a scheme should
+   go. Anything that changed spacing or weight here would be a second theme
+   system wearing the same control. */
+:root[data-scheme="ocean"] {
+  --accent-light: #0f5f7f; --accent-dark: #58c2e2;
+  --ground-light: #f1f5f8; --ground-dark: #101720;
+  --card-light:   #ffffff; --card-dark:   #18212c;
+  --line-light:   #d6e0e7; --line-dark:   #26343f;
+  --line-soft-light: #e6edf1; --line-soft-dark: #1d2833;
+}
+:root[data-scheme="forest"] {
+  --accent-light: #2d6b45; --accent-dark: #74c791;
+  --ground-light: #f3f7f3; --ground-dark: #121a15;
+  --card-light:   #ffffff; --card-dark:   #1b241d;
+  --line-light:   #d8e2d8; --line-dark:   #2a382d;
+  --line-soft-light: #e7eee7; --line-soft-dark: #202b23;
+}
+:root[data-scheme="plum"] {
+  --accent-light: #6b3f7a; --accent-dark: #c795d8;
+  --ground-light: #f7f4f8; --ground-dark: #16131a;
+  --card-light:   #ffffff; --card-dark:   #201b25;
+  --line-light:   #e1d9e4; --line-dark:   #352d3b;
+  --line-soft-light: #eee9f0; --line-soft-dark: #27212c;
+}
+:root[data-scheme="sand"] {
+  --accent-light: #8a5522; --accent-dark: #e2ac66;
+  --ground-light: #f8f4ea; --ground-dark: #191611;
+  --card-light:   #fffdf7; --card-dark:   #231f18;
+  --line-light:   #e5dcc7; --line-dark:   #3a3429;
+  --line-soft-light: #f0e9da; --line-soft-dark: #2a251d;
+}
+
+/* High contrast is the one scheme allowed to touch the ink as well. Pure
+   black on pure white, borders dark enough to be seen rather than sensed,
+   and a blue that passes AAA against both. It exists for eyes that the
+   default's soft greys do not serve, so it is not a tinted slate. */
+:root[data-scheme="contrast"] {
+  --ink-light:  #000000; --ink-dark:  #ffffff;
+  --ink-soft-light:  #1c1c1c; --ink-soft-dark:  #ededed;
+  --ink-faint-light: #3a3a3a; --ink-faint-dark: #c9c9c9;
+  --ground-light: #ffffff; --ground-dark: #000000;
+  --card-light:   #ffffff; --card-dark:   #0c0c0c;
+  --line-light:   #6d6d6d; --line-dark:   #9b9b9b;
+  --line-soft-light: #c9c9c9; --line-soft-dark: #4a4a4a;
+  --accent-light: #00408f; --accent-dark: #8fc0ff;
+  --accent-ink-light: #ffffff; --accent-ink-dark: #000000;
+  --good-light: #1c6b3a; --good-dark: #79e3a2;
+  --warn-light: #7a4a00; --warn-dark: #ffc46b;
+  --bad-light:  #a01000; --bad-dark:  #ff9b86;
+}
+
+/* Fonts, from what Windows and macOS already have. No web font: the page is
+   served by `http.server` out of a folder, and a font that has to be
+   downloaded is a font that is missing the first time the window opens on a
+   machine with no internet. */
+:root[data-font="humanist"] { --font: Verdana, Tahoma, Geneva, sans-serif; }
+:root[data-font="narrow"]   { --font: Calibri, Candara, "Segoe UI", sans-serif; }
+:root[data-font="serif"]    { --font: Georgia, "Iowan Old Style", "Times New Roman", serif; }
+:root[data-font="mono"]     { --font: Consolas, "SF Mono", ui-monospace, monospace; }
+
 /* Text size is a zoom on the whole page rather than a font-size, because
    every size below is in px and a table that grows its text but not its
-   padding looks broken. */
-:root[data-size="90"]  { zoom: .9; }
-:root[data-size="115"] { zoom: 1.15; }
-:root[data-size="130"] { zoom: 1.3; }
+   padding looks broken. The number comes from Settings as a percentage, set
+   on the root by app.js -- and by theme.js before the first paint, so the
+   page does not visibly resize itself on the way in. */
+:root { zoom: var(--zoom, 1); }
 :root[data-density="compact"] { --cell-y: 4px; }
 :root[data-density="roomy"]   { --cell-y: 13px; }
 
@@ -78,11 +151,11 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--ink);
-  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  font: 14px/1.5 var(--font);
 }
 
 h2 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
-code { font-family: Consolas, "SF Mono", ui-monospace, monospace; font-size: .92em; }
+code { font-family: var(--mono); font-size: .92em; }
 button { font: inherit; }
 
 /* -- chrome ------------------------------------------------------------- */
@@ -119,11 +192,25 @@ button { font: inherit; }
 }
 .banner[hidden] { display: none; }
 .banner.bad { background: var(--bad); }
-.banner-x {
-  margin-left: auto; flex: none; background: none; border: 0; color: inherit;
-  font-size: 20px; line-height: 1; padding: 0 2px; cursor: pointer; opacity: .7;
+/* The text takes the slack, so the dismiss X stays pinned to the right edge
+   whether or not there is a button beside it. Giving the button the
+   `margin-left: auto` instead moved the X inboard the moment one appeared. */
+#banner-text { flex: 1 1 auto; min-width: 0; }
+
+.banner-do {
+  flex: none; background: none; border: 1px solid currentColor;
+  border-radius: 5px; color: inherit; font: inherit; font-size: 12.5px;
+  padding: 3px 10px; cursor: pointer; opacity: .85;
 }
-.banner-x:hover { opacity: 1; }
+.banner-do:hover { opacity: 1; }
+.banner-do[hidden] { display: none; }
+
+.banner-x {
+  flex: none; background: none; border: 0; color: inherit;
+  font-size: 26px; line-height: 1; padding: 0 2px; margin-left: 4px;
+  cursor: pointer; opacity: .75;
+}
+.banner-x:hover, .banner-x:focus-visible { background: none; opacity: 1; }
 
 .view { padding: 18px; max-width: 1500px; margin: 0 auto; }
 
@@ -539,7 +626,7 @@ option.dead     { color: var(--bad); }
 .out {
   margin: 0; background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px;
-  font-family: Consolas, "SF Mono", ui-monospace, monospace; font-size: 12.5px;
+  font-family: var(--mono); font-size: 12.5px;
   line-height: 1.55; height: 62vh; overflow: auto; white-space: pre-wrap;
   color: var(--ink-soft);
 }
@@ -700,7 +787,7 @@ option.dead     { color: var(--bad); }
            color: var(--ink); }
 .md pre { background: var(--line-soft); border-radius: var(--radius);
           padding: 9px 11px; overflow-x: auto; white-space: pre;
-          font-family: Consolas, "SF Mono", ui-monospace, monospace;
+          font-family: var(--mono);
           font-size: 12.5px; }
 .md pre code { background: none; padding: 0; }
 .md-list { margin: 0 0 9px; padding-left: 18px; }

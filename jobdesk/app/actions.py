@@ -97,7 +97,8 @@ def check_guards(cand: apply_candidates.Candidate) -> list[dict]:
     log = Log()
     checks = guard.run(log, company=cand.company, role=cand.title,
                        url=cand.url, uid=cand.uid,
-                       dedupe_key=cand.dedupe_key, flags=cand.flags)
+                       dedupe_key=cand.dedupe_key, flags=cand.flags,
+                       division=cand.division)
     return [{"level": c.level, "rule": c.rule, "message": c.message}
             for c in checks]
 
@@ -134,7 +135,8 @@ def build_packet(emit, *, uid: str = "", url: str = "", company: str = "",
     log = Log()
     checks = guard.run(log, company=cand.company, role=cand.title,
                        url=cand.url, uid=cand.uid,
-                       dedupe_key=cand.dedupe_key, flags=cand.flags)
+                       dedupe_key=cand.dedupe_key, flags=cand.flags,
+                       division=cand.division)
     listed = [{"level": c.level, "rule": c.rule, "message": c.message}
               for c in checks]
     for check in checks:
@@ -146,8 +148,11 @@ def build_packet(emit, *, uid: str = "", url: str = "", company: str = "",
              "badly, so they stop the build.\n")
         return {"ok": False, "blocked": True, "checks": listed,
                 "problems": [c.message for c in blocking]}
+    overrides: list[str] = []
     if blocking and force:
-        emit("\nOverridden. The packet records which rules were overridden.\n")
+        overrides = [c.rule for c in blocking]
+        emit(f"\nOverridden by hand: {', '.join(overrides)}. The packet "
+             f"records it and so does the application log.\n")
 
     emit("\nfinding the job description...\n")
     pasted = (jd or "").strip()
@@ -161,6 +166,7 @@ def build_packet(emit, *, uid: str = "", url: str = "", company: str = "",
     else:
         jd_text, how = jdtext.obtain(cached=cand.description, url=cand.url,
                                      allow_fetch=allow_fetch, allow_paste=False,
+                                     cached_partial=cand.partial_description,
                                      echo=lambda m: emit(str(m) + "\n"))
     if not jd_text:
         raise ActionError(
@@ -170,6 +176,7 @@ def build_packet(emit, *, uid: str = "", url: str = "", company: str = "",
     emit(f"JD source: {how}\n\n")
 
     result = packet.build(cand, jd_text, log=log, note=note, checks=checks,
+                          overrides=overrides,
                           echo=lambda m="": emit(str(m) + "\n"))
 
     for step in result.steps:

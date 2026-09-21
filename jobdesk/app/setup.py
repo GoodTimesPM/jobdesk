@@ -159,6 +159,14 @@ def _targeting_changes(answers: Answers) -> dict[str, object]:
         "home_metro": metro,
         "tier_1_titles": _clean_titles(answers.titles_1),
         "local_terms": _local_terms(city, state),
+        "state_terms": _state_terms(state),
+        # Emptied, never inherited. The example is an accountant's profile and
+        # its family nouns are "accountant" and "bookkeeper"; leaving those in
+        # place for a nurse would pay fifteen points for every posting titled
+        # "Accountant" and nothing for the word she actually works under. The
+        # form has no field for it, so the honest default is no bonus at all,
+        # and targeting.toml says in a comment what to put here.
+        "family_titles": [],
     }
     if answers.titles_2:
         changes["tier_2_titles"] = _clean_titles(answers.titles_2)
@@ -200,6 +208,49 @@ def _local_terms(city: str, state: str) -> list[str]:
                   f"{city.lower()} {state.lower()}"]
         terms.append(state.lower())
     return terms
+
+
+# Code -> full name. `app/` may import `radar/`, but this is the setup wizard
+# writing a file the radar will later read, and borrowing the radar's table
+# here would make the form depend on the scorer to spell "Texas".
+_STATE_NAMES = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",
+    "CA": "california", "CO": "colorado", "CT": "connecticut",
+    "DE": "delaware", "DC": "district of columbia", "FL": "florida",
+    "GA": "georgia", "HI": "hawaii", "ID": "idaho", "IL": "illinois",
+    "IN": "indiana", "IA": "iowa", "KS": "kansas", "KY": "kentucky",
+    "LA": "louisiana", "ME": "maine", "MD": "maryland",
+    "MA": "massachusetts", "MI": "michigan", "MN": "minnesota",
+    "MS": "mississippi", "MO": "missouri", "MT": "montana",
+    "NE": "nebraska", "NV": "nevada", "NH": "new hampshire",
+    "NJ": "new jersey", "NM": "new mexico", "NY": "new york",
+    "NC": "north carolina", "ND": "north dakota", "OH": "ohio",
+    "OK": "oklahoma", "OR": "oregon", "PA": "pennsylvania",
+    "PR": "puerto rico", "RI": "rhode island", "SC": "south carolina",
+    "SD": "south dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",
+    "VT": "vermont", "VA": "virginia", "WA": "washington",
+    "WV": "west virginia", "WI": "wisconsin", "WY": "wyoming",
+}
+
+
+def _state_terms(state: str) -> list[str]:
+    """The strings a posting uses to mean "your state, but not your commute".
+
+    This was not patched at all until someone asked what the app does for a
+    user in Texas, so a new profile kept the example's Colorado list. The
+    effect was quiet rather than loud: an onsite job in Houston was blocked
+    with "outside commute range" instead of "elsewhere in Texas", and a
+    Colorado one was labelled as home.
+
+    Only the derivable forms are written. The other cities in a state are the
+    user's to add, the same way the suburbs in `local_terms` are.
+    """
+    code = (state or "").strip().upper()
+    if not code:
+        return []
+    name = _STATE_NAMES.get(code, "")
+    terms = [f" {code.lower()} ", f", {code.lower()}"]
+    return ([name] + terms) if name else terms
 
 
 def _example_list(filename: str, key: str) -> list[str]:

@@ -13,6 +13,11 @@ A JD arrives in one of three shapes and the page has to render all three:
    is a single 6,000-character line, and the table rendered it as the grey wall
    of text this replaces.
 
+A posting can also arrive with its bullets intact as characters but its line
+breaks gone, which is what Adzuna passes on. That is shape 3 with the answer
+already written into it, and it is handled by splitting on the dot rather than
+by guessing at sentences.
+
 For shape 3 the headings are recovered by name, since there is a fixed
 vocabulary of them and every ATS template draws from it. Inside a section whose
 heading marks a list, each sentence is shown as its own item. That last step is
@@ -47,6 +52,23 @@ _B = "\x02"
 _BULLET_CHARS = "-*•·●▪‣⁃∙◦"
 _BULLET = re.compile(r"^\s*[" + re.escape(_BULLET_CHARS) + r"]\s+")
 _NUMBERED = re.compile(r"^\s*\(?\d{1,2}[.)]\s+")
+
+# Bullets that survived the flattening as characters in the middle of a line:
+#
+#   Include: • Design, develop, and maintain Power BI reports • Build
+#   reporting solutions on established Dataverse data models • ...
+#
+# Adzuna does this to every posting it passes on, and the list-from-sentences
+# heuristic below cannot help: the sentences are already marked as items, they
+# just have no line breaks around them. A dot bullet in running prose is not a
+# thing people write, so splitting on it reconstructs the list rather than
+# guessing at one.
+#
+# The hyphen and the asterisk are deliberately not in here. They start a bullet
+# at the beginning of a line and mean nothing of the sort inside one, where
+# they are ranges and footnotes and multiplication. Nor is the middle dot,
+# which is how a posting writes "Richmond · VA · Full-time".
+_INLINE_BULLET = re.compile(r"\s*[•●▪‣⁃∙◦]+\s*")
 
 # --- headings --------------------------------------------------------------
 
@@ -222,6 +244,28 @@ def _blocks(lines: list[str]) -> list[dict]:
             if item.strip():
                 pending.append(item.strip())
             continue
+        # A line carrying its own bullets. Two of them, because one dot in a
+        # line is as likely to be decoration as a list of exactly one item.
+        pieces = _INLINE_BULLET.split(line)
+        if len(pieces) >= 3:
+            lead, items = pieces[0].strip(), [p.strip() for p in pieces[1:] if p.strip()]
+            flush()
+            if lead:
+                # The words ahead of the first bullet title the list, unless
+                # there is already a heading over it: "RESPONSIBILITIES
+                # Include: * ..." splits into both, and the one that names the
+                # section is the one that was there first. Promoting the
+                # second would cost the first, since _tidy reads two headings
+                # in a row as the first having titled nothing.
+                titled = bool(out) and out[-1]["kind"] == "heading"
+                if _looks_like_heading(lead) and not titled:
+                    out.append({"kind": "heading", "text": lead.rstrip(":").strip()})
+                    listy = bool(_LIST_HEADING.search(lead))
+                else:
+                    out.append({"kind": "para", "text": lead})
+            pending.extend(items)
+            continue
+
         if _looks_like_heading(line):
             flush()
             out.append({"kind": "heading", "text": line.rstrip(":").strip()})
