@@ -34,6 +34,11 @@ data/radar/notion_queue.json
 data/radar/digests/
 data/radar/*.tmp
 
+# Which employers this profile has found a board for, and which it tried
+# and missed. One person's sweep of one metro, rebuilt by running the
+# seeder again, and a list of the companies someone is watching is theirs.
+data/radar/employers.learned.toml
+
 # Which Job Radar Tracker rows notion_sync.py has already processed -- a
 # dedupe cache, rebuildable from Notion (worst case it re-syncs a row).
 data/apply/notion_sync_state.json
