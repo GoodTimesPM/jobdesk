@@ -39,6 +39,17 @@ tier_3_titles = [
   "compliance analyst", "internal auditor",
 ]
 
+# The bare noun your field calls its own job, with nothing qualifying it.
+# "Accountant" for an accountant, "nurse" for a nurse, "designer" for a
+# designer. A posting titled exactly that is almost always in the field even
+# though it matches no tier above, and it used to be worth points only because
+# `analyst` was written into the scorer -- which paid an analyst's rent and
+# nobody else's. Leave it empty and no such bonus is given, which is the right
+# answer when you cannot name one word your field goes by.
+family_titles = [
+  "accountant", "accounting", "bookkeeper",
+]
+
 # Titles that are adjacent rather than on the list. These earn modest points
 # AND count as on-target, so the off-target cap does not fire on them. Widen
 # this when a title you would happily take keeps scoring zero.
@@ -128,6 +139,14 @@ agency_phrases = [
   "our client is", "our client seeks", "our client, a",
   "on behalf of our client", "client is seeking", "contract to hire",
   "contract-to-hire", "corp to corp", "w2 only", "staffing agency",
+
+  # The contract shops, which a list of names will never keep up with. One
+  # state requisition came back from fourteen of them in a single metro pull,
+  # not one a name you would have thought to type. These are words they write
+  # and employers do not.
+  "duration:", "long term contract", "long-term contract",
+  "month contract", "months contract", "pay rate", "job id:",
+  "onsite/local", "only local",
 ]
 
 # Compensation structures that are not a salaried accounting job by any

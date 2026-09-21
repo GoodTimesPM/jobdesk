@@ -1,0 +1,94 @@
+# Employers to probe for an ATS board, whether or not one has ever posted
+# something an aggregator carried. `py -m jobdesk.radar.seed` reads this.
+#
+# This is the half of the seeder you supply. The other half is free: the
+# seeder already derives names from every posting on file whose location says
+# it was local. On the metro this was built against, the free half was not
+# enough on its own -- of the region's 60 largest employers, the radar's own
+# history had ever seen 15 of them. The other 45 post to their own careers
+# page and nowhere an aggregator looks, which is the whole reason other job
+# sites keep showing openings this one does not.
+#
+# Two ways to fill it in. The short one:
+#
+#   py -m jobdesk.radar.gather                 # see what it finds, write nothing
+#   py -m jobdesk.radar.gather --write         # write it here, best guess first
+#
+# That asks a map and an encyclopaedia what is inside a radius of your metro
+# and writes the answer here, ranked, with nothing verified. Against the metro
+# this was built for it named 66 of the 246 companies a person found by hand,
+# so it is a start and it is not the list. Read down it once and delete the
+# coffee shops. Point it at a roster page you have found and it will read the
+# names and the websites straight off the table:
+#
+#   py -m jobdesk.radar.gather --from https://example.org/largest-employers
+#
+# And if you already have names but no websites, that column can be filled in
+# on its own, which is the column that pays:
+#
+#   py -m jobdesk.radar.gather --fill-sites
+#
+# The long way is an afternoon of typing, once, and every metro has the same
+# four sources:
+#
+#   - the regional economic development partnership's largest-employers
+#     list (search "<your metro> largest employers"; it is usually a PDF)
+#   - your newspaper's Top Workplaces roster, which Energage runs for most
+#     mid-size US papers
+#   - the local business journal's Fortune 1000 or "top private companies"
+#     coverage
+#   - the chamber of commerce member directory
+#
+# Paste the names in. Spelling does not have to be exact -- a trailing "Inc."
+# or "Financial" is ignored when a board is matched against a name -- but the
+# distinguishing words do: "Solstice" and "Solstice Advanced Materials" are
+# treated as different companies, on purpose.
+#
+# Add the website where you know it. The seeder finds a board by reading the
+# company's own careers page, so it has to find the website first, and
+# guessing that from the name breaks on exactly the employers these lists are
+# full of: the Federal Reserve Bank of Richmond is at richmondfed.org, VCU at
+# vcu.edu, UPS at ups.com. Measured, supplying the website took the hit rate
+# from 20 of 72 to 21 of 35 and cost a third of the calls. Your chamber
+# directory prints the website in the same row as the name, so it is copying,
+# not research. An entry is either form:
+#
+#   "Molson Coors",
+#   { name = "Denver Public Schools", site = "https://www.dpsk12.org" },
+#
+# Nothing here is trusted. Every name is a guess at a company, so each one
+# still has to be confirmed before it reaches the watch list: the board has to
+# name itself, be advertising in your metro, or be linked from the website you
+# supplied. A name that confirms nothing is recorded as a miss and left alone
+# for a month.
+#
+# Denver, for the example profile.
+
+company = [
+  # Largest employers
+  { name = "HealthONE", site = "https://healthonecares.com" },
+  { name = "UCHealth", site = "https://www.uchealth.org" },
+  { name = "Lockheed Martin Space", site = "https://www.lockheedmartin.com" },
+  "Ball Corporation",
+  "DaVita",
+  "Molson Coors",
+  { name = "Arrow Electronics", site = "https://www.arrow.com" },
+  "Western Union",
+  "DCP Midstream",
+  { name = "Denver Public Schools", site = "https://www.dpsk12.org" },
+
+  # Top Workplaces
+  { name = "Palantir Technologies", site = "https://www.palantir.com" },
+  "Guild Education",
+  "Ibotta",
+  "Gusto",
+
+  # Headquartered here
+  { name = "Chipotle Mexican Grill", site = "https://www.chipotle.com" },
+  { name = "VF Corporation", site = "https://www.vfc.com" },
+  "Liberty Global",
+  { name = "Pilgrim's Pride", site = "https://www.pilgrims.com" },
+  { name = "Qurate Retail", site = "https://www.qurateretail.com" },
+  "Air Methods",
+
+]
