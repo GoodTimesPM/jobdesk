@@ -23,6 +23,7 @@ console (cp1252 chokes on anything interesting).
 from __future__ import annotations
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -41,7 +42,8 @@ if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
 
 from jobdesk.radar import config, dedupe, render, score, sources   # noqa: E402
 from jobdesk.radar import models, profile, terms              # noqa: E402
-from jobdesk.radar import companies, discover, learn                # noqa: E402
+from jobdesk.radar import (candidates, companies, discover, gather, resolve,
+                           seed, learn)                              # noqa: E402
 from jobdesk.radar.sources import ats                               # noqa: E402
 from jobdesk.radar.models import Job                                # noqa: E402
 
@@ -407,6 +409,50 @@ def rules_check() -> int:
                      jobs, data,
                      date(2026, 9, 17) + timedelta(days=config.LEARN_RETRY_DAYS + 1))],
                  ["Missing Co"])
+
+            # The seeder shares that cooldown, and has one reason to suspend
+            # it: the miss is an answer under rules and a profile that have
+            # since changed. Tightening a confirmation rule or pasting in 228
+            # company websites makes yesterday's misses stale, and waiting
+            # thirty days to find that out is the wrong trade.
+            # Use a name the seeder actually draws on. "Missing Co" is a
+            # posting in this fixture, not an entry in the seed list, so
+            # asserting against it would pass whatever the flag did.
+            seeded = seed.from_profile()[0][0]
+            data = learn._read(config.LEARNED_EMPLOYERS)
+            learn.write(list(data.get("employer", [])),
+                        list(data.get("miss", []))
+                        + [{"name": seeded, "tried_on": "2026-09-17",
+                            "note": "no public board found"}])
+            fresh = seed.candidates(400, date(2026, 9, 18))
+            want("the seeder honours a recent miss by default",
+                 any(n == seeded for n, _s in fresh), False)
+            retried = seed.candidates(400, date(2026, 9, 18), retry_missed=True)
+            want("and --retry-missed asks it again anyway",
+                 any(n == seeded for n, _s in retried), True)
+
+            # One employer can reach the list under two names. A seed list
+            # pasted from two rosters carried both "Federal Reserve Bank
+            # Richmond" and "Richmond Federal Reserve"; both resolved to
+            # workday/rb, and every run then fetched that board twice.
+            twice = [
+                {"ats": "workday", "name": "Virginia Retirement System",
+                 "host": "varetire.wd108.myworkdayjobs.com",
+                 "tenant": "varetire", "site": "VRS_External_Career_Site",
+                 "tier": 3, "learned_on": "2026-09-19"},
+                {"ats": "workday", "name": "Virginia Retirement Investment",
+                 "host": "varetire.wd108.myworkdayjobs.com",
+                 "tenant": "varetire", "site": "VRS_External_Career_Site",
+                 "tier": 3, "learned_on": "2026-09-19"},
+                {"ats": "greenhouse", "name": "Somebody Else",
+                 "slug": "somebodyelse", "tier": 3,
+                 "learned_on": "2026-09-19"},
+            ]
+            learn.write(twice, [])
+            kept = learn._read(config.LEARNED_EMPLOYERS).get("employer", [])
+            want("two names for one board are written once",
+                 [r["name"] for r in kept],
+                 ["Virginia Retirement System", "Somebody Else"])
         finally:
             discover.find, config.LEARNED_EMPLOYERS = real_find, real_path
 
@@ -429,6 +475,290 @@ def rules_check() -> int:
     want("the probe budget is a hard stop",
          [purse.spend() for _ in range(3)], [True, True, False])
 
+    # A seed company has posted nothing we have read, so `confirms` can never
+    # fire for it and a second route has to carry the proof. These pin what
+    # that route will and will not accept, because the cost of getting it
+    # wrong is a wrong board on the watch list forever.
+    want("a trailing word that distinguishes nobody is not a difference",
+         discover.same_company("Genworth", "Genworth Financial, Inc."), True)
+    want("but a word that says what the company is, is",
+         discover.same_company("Solstice", "Solstice Advanced Materials"), False)
+    want("and a longer name is not the same as a shorter one it starts with",
+         discover.same_company("Metro", "Metropolitan Transit"), False)
+
+    here = {"denver", "glen allen", "new kent"}
+    want("a place name is matched whole, not as a substring",
+         discover.in_places("New York, NY", here), None)
+    want("a two-word place name still matches",
+         discover.in_places("Glen Allen, VA", here), "glen allen")
+
+    # Cities repeat across states, and the sweep put a Florida company on the
+    # watch list because Richmond's profile knows about Petersburg, Virginia.
+    want("a location names its state", discover.state_named("Denver, CO"), "co")
+    want("a spelled-out state counts too",
+         discover.state_named("Colonial Heights, Virginia, USA"), "va")
+    want("west virginia is not virginia",
+         discover.state_named("Richmond, West Virginia"), "wv")
+    want("a bare city names no state", discover.state_named("Richmond"), "")
+    want("an ordinary word is not a state code",
+         discover.state_named("Denver or remote"), "")
+    want("the same city in the wrong state is refused",
+         discover.in_places("Glen Allen, TX", here, "co"), None)
+    want("and in the right state is not",
+         discover.in_places("Denver, CO", here, "co"), "denver")
+    want("a location with no state at all is still allowed through",
+         discover.in_places("Denver", here, "co"), "denver")
+
+    # A guessed slug that finds a board naming that name proves the spelling,
+    # not the company. A sweep let in a London design agency as Universal
+    # Corp. and an Amsterdam shop as EY on exactly this.
+    named = discover.Board("workable", "acme", ["Staff Accountant"], 1,
+                           company="Acme Industries, Inc.")
+    want("a matching name alone no longer carries a board",
+         discover.confirms_local(named, "Acme", here, discover.Budget(0)), None)
+    both = discover.Board("workable", "acme", ["Staff Accountant"], 1,
+                          company="Acme Industries, Inc.",
+                          locations=["Denver, CO"])
+    want("a matching name that also hires here is believed",
+         bool(discover.confirms_local(both, "Acme", here, discover.Budget(0))),
+         True)
+    wrong = discover.Board("workable", "acme", ["Staff Accountant"], 1,
+                           company="Acme Coyote Supplies")
+    want("a board that names somebody else is refused, locations or not",
+         discover.confirms_local(wrong, "Acme", here, discover.Budget(0)), None)
+    silent = discover.Board("ashby", "acme", ["Staff Accountant"], 1,
+                            locations=["Denver, CO"])
+    want("a silent board hiring in the metro is corroborated",
+         bool(discover.confirms_local(silent, "Acme", here, discover.Budget(0))),
+         True)
+    elsewhere = discover.Board("ashby", "acme", ["Staff Accountant"], 1,
+                               locations=["New York, NY"])
+    want("a silent board hiring somewhere else is not",
+         discover.confirms_local(elsewhere, "Acme", here, discover.Budget(0)),
+         None)
+
+    # The seeder is the generic half of this: every user sweeps their own
+    # metro, so nothing about which metro may be baked in.
+    want("the seeder's idea of here comes from the profile, whole",
+         "denver" in seed.places(), True)
+    want("a posting three time zones away is not local",
+         seed.is_local("Brooklyn, New York", seed.places()), False)
+
+    # Reading the ATS off a company's own careers page replaces guessing a
+    # slug, which measured 3 hits per 88 names. These pin the parsing half of
+    # it; the fetching half needs the network and belongs in `live()`.
+    want("a workday tenant is read off the hostname, not guessed",
+         resolve.scan("", "https://gnw.wd1.myworkdayjobs.com/en-US/careers"),
+         ("workday", "gnw"))
+    want("an ATS named only by its CDN still counts",
+         resolve.scan('<link href="//rmkcdn.successfactors.com/a/b.css">')[0],
+         "successfactors")
+    want("a page that names no ATS says so",
+         resolve.scan("<p>We are hiring!</p>", "https://www.acme.com/jobs"),
+         ("", ""))
+    want("a legal suffix is not part of a domain",
+         resolve.domains("Markel Corporation"), ["markel.com"])
+    want("the jobs portal outranks the page about how nice it is to work here",
+         resolve.careers_links(
+             '<a href="/life">Careers Culture</a>'
+             '<a href="https://careers.acme.com/">Open Jobs Portal</a>',
+             "https://www.acme.com/")[0],
+         "https://careers.acme.com/")
+    # An ATS we can name but cannot read is a different outcome from a miss,
+    # and only one of the two is a request for a new handler.
+    want("an ATS with a handler is readable",
+         resolve.Found("hit", "workday", "gnw").readable, True)
+    want("an ATS without one is found but not readable",
+         resolve.Found("hit", "phenom", "VHSVHSUS").readable, False)
+    # A page that links straight to the board hands over the datacenter and
+    # the site id, which is what the 29-guess Workday loop exists to find.
+    want("workday coordinates come off a linked URL whole",
+         resolve.workday_coords("", "https://gnw.wd1.myworkdayjobs.com/en-US/GNW"),
+         {"host": "gnw.wd1.myworkdayjobs.com", "tenant": "gnw", "site": "GNW"})
+    want("a locale segment is not the site id",
+         (resolve.workday_coords("see https://x.wd3.myworkdayjobs.com/fr-FR/Careers")
+          or {}).get("site"), "Careers")
+    want("a workday link with no site id yields nothing to fetch",
+         resolve.workday_coords("", "https://acme.wd5.myworkdayjobs.com/"), None)
+
+    # A seed list may carry the website beside the name, because guessing the
+    # website fails on the same employers guessing a slug fails on.
+    # JOBDESK_PROFILE points at profile.example here, which ships a seed list.
+    pairs = seed.from_profile()
+    want("the example seed list parses into name/site pairs",
+         bool(pairs) and all(name for name, _ in pairs), True)
+    want("an entry that supplies a website keeps it",
+         any(site.startswith("http") for _, site in pairs), True)
+
+    # The candidate cache is sorted by score and read straight by the Jobs
+    # tab, so a row carrying a number from an older scoring release does not
+    # merely look wrong -- it outranks everything found today. These pin the
+    # re-score that stops it.
+    stale = {
+        "uid": "u1", "title": "Associate Director, Brand Analytics",
+        "company": "Old Scale Co", "url": "x", "source": "test",
+        "score": 100, "tier": "A+", "reasons": ["from a previous release"],
+        "flags": [], "last_seen": "2026-09-01T00:00:00+00:00",
+    }
+    # On target for profile.example (Wren Adeyemi, accounting), so it should
+    # survive the re-score with a real number rather than merely a lower one.
+    good = {
+        "uid": "u2", "title": "Staff Accountant", "company": "Still Fine Inc",
+        "url": "y", "source": "test", "location": "Denver, CO",
+        "description": "1-2 years with the general ledger, reconciliation, "
+                       "QuickBooks and Excel.",
+        "score": 100, "tier": "A+", "reasons": [], "flags": [],
+        "last_seen": "2026-09-01T00:00:00+00:00",
+    }
+    carried = {"u1": dict(stale), "u2": dict(good), "u3": dict(good, uid="u3")}
+    candidates._rescore_carried(carried, {"u3"}, log=lambda _m: None)
+    want("a carried row is re-scored against today's rules",
+         carried["u1"]["score"], 0)
+    want("and its reasons are replaced, not left describing the old number",
+         carried["u1"]["reasons"] != stale["reasons"], True)
+    want("a row this run touched is left exactly as the run scored it",
+         carried["u3"]["score"], 100)
+    want("a row that still holds up keeps a real score",
+         carried["u2"]["score"] > config.MIN_SCORE_TO_REPORT, True)
+
+    # A source that publishes 500 characters and an ellipsis has not told us
+    # what the posting requires. Scoring it as though silence were good news
+    # is how a five-year req reaches the top of a board built to keep them off.
+    body = ("1-2 years with the general ledger, reconciliation, QuickBooks "
+            "and Excel. Denver based, hybrid.")
+    full = score.score_job(Job(title="Staff Accountant", company="Test Co",
+                               url="x", source="greenhouse",
+                               location="Denver, CO", description=body))
+    snip = score.score_job(Job(title="Staff Accountant", company="Test Co",
+                               url="x", source="adzuna",
+                               location="Denver, CO",
+                               description=body, partial=True))
+    want("a snippet never outranks a posting that was read in full",
+         snip.score < full.score, True)
+    want("and it says why, on the posting",
+         "partial-description" in snip.flags or
+         "unverified-experience" in snip.flags, True)
+    want("a snippet is still worth surfacing, not buried",
+         snip.score >= config.MIN_SCORE_TO_REPORT, True)
+
+    silent = Job(title="Staff Accountant", company="Test Co", url="x",
+                 source="adzuna", location="Denver, CO",
+                 description="Join our team. Great benefits.", partial=True)
+    want("silence in a snippet earns nothing where silence in a full body earns +6",
+         "unverified-experience" in score.score_job(silent).flags, True)
+
+    # The name list will never keep up with the contract shops, so the body
+    # language has to carry it -- and learn.py must not adopt one as an
+    # employer to watch every morning.
+    shop = score.score_job(Job(
+        title="Power BI Developer", company="Nobody Has Typed This LLC",
+        url="x", source="adzuna", location="Richmond, VA",
+        description="Duration: 12 months. Pay rate: hourly. Job ID: VA-811014.",
+        partial=True))
+    want("a contract shop gives itself away in the body",
+         "staffing-agency" in shop.flags, True)
+    want("and is never learned as an employer",
+         [n for n, _s, _t in learn.candidates([shop], {}, date(2026, 9, 17))], [])
+
+    # One requisition, farmed out. Four shops, a quarter of them flagged,
+    # and the same title under a dozen coats of paint -- the shape that put
+    # twenty three copies of one Power BI contract in a single A-tier.
+    def repost(company, title, flagged, sc):
+        return Job(title=title, company=company, url="u" + company,
+                   source="adzuna", location="Denver, CO", score=sc,
+                   flags=["staffing-agency"] if flagged else [])
+
+    farm = [repost("Shop A", "SCC - Power BI Developer (811014)", True, 70),
+            repost("Shop B", "Power BI Developer (Hybrid)", True, 78),
+            repost("Shop C", "Power BI Developer | W2/1099 | Only Local", False, 61),
+            repost("Shop D", "Power BI Developer in Denver, CO", False, 55)]
+    kept, dropped = dedupe.collapse_reposts(farm, known=set())
+    want("a farmed-out req reaches the digest once", len(kept), 1)
+    want("and the copy kept is the best-scoring one", kept[0].company, "Shop B")
+    want("and the decorated titles were seen as one job", dropped, 3)
+    want("the survivor is marked, so learn.py leaves the shop alone",
+         "staffing-agency" in kept[0].flags, True)
+
+    # Decoration only. "(Hybrid)" is how the shop dressed the req up;
+    # "(Federal Grants & eRA Systems)" is what the job actually is, and
+    # GovCIO's business analyst has nothing to do with the crowd posting
+    # under the bare title.
+    want("a parenthetical that carries the job is not stripped",
+         dedupe._title_key("Business Analyst (Federal Grants & eRA Systems)"),
+         "business analyst federal grants era systems")
+    want("a requisition number is not part of the title",
+         dedupe._title_key("SCC - Power BI Developer (811014)"),
+         "power bi developer")
+    want("but a level still is",
+         dedupe._title_key("Business Analyst 3"), "business analyst 3")
+
+    # These groups are mixtures. Nine shops advertising one contract as
+    # "Business Analyst" sat beside two Markel reqs that were nothing to do
+    # with them, and a company on the watch list is never the farm.
+    mixed = farm + [repost("Markel", "Power BI Developer", False, 90)]
+    kept, _n = dedupe.collapse_reposts(mixed, known={"markel"})
+    want("a company already on the watch list is never dropped",
+         sorted(j.company for j in kept), ["Markel", "Shop B"])
+
+    # The false positive this rule exists to avoid. Six separate ABA clinics
+    # really do each want a behaviour analyst, and none of them writes like
+    # a contract shop.
+    clinics = [Job(title="Board Certified Behavior Analyst",
+                   company=f"Clinic {n}", url=f"c{n}", source="adzuna",
+                   location="Denver, CO", score=60) for n in range(6)]
+    want("six real clinics posting one title are all left alone",
+         len(dedupe.collapse_reposts(clinics, known=set())[0]), 6)
+
+    # Three companies is a collision, not a farm, even with a shop in it.
+    trio = [repost("Cardinal Health", "Data Analyst", False, 80),
+            repost("Guild Mortgage", "Data Analyst", False, 79),
+            repost("Some Shop", "Data Analyst", True, 70)]
+    want("three companies on one title is a coincidence, not a farm",
+         len(dedupe.collapse_reposts(trio, known=set())[0]), 3)
+
+    # A company's own board carries its own reqs; a farm cannot form there.
+    own = [Job(title="Power BI Developer", company=f"Co {n}", url=f"g{n}",
+               source="greenhouse", location="Denver, CO", score=70,
+               flags=["staffing-agency"]) for n in range(5)]
+    want("an ATS board is never collapsed on title alone",
+         len(dedupe.collapse_reposts(own, known=set())[0]), 5)
+
+    # ----------------------------------------------------------------------
+    # Nothing here may assume Richmond, or accounting. The profile says where
+    # its user lives and what they do; every one of these was a place the code
+    # had decided for itself, found by asking what this app does for a nurse
+    # in Austin.
+    # ----------------------------------------------------------------------
+    want("a state is looked up by its code, not assumed",
+         discover.state_full_name("TX"), "texas")
+    want("and an unknown code names no state",
+         discover.state_full_name("ZZ"), "")
+
+    # The Workday slug parser stripped the literal "-virginia", so an Austin
+    # posting came back titled "Graphic Designer Austin" in "Texas".
+    want("a slug gives up its city whatever state it names",
+         ats._deslug("graphic-designer-austin-texas-united-states"),
+         ("Graphic Designer", "Austin, Texas, United States"))
+    want("including the state whose name contains another",
+         ats._deslug(
+             "registered-nurse-charleston-west-virginia-united-states"),
+         ("Registered Nurse", "Charleston, West Virginia, United States"))
+    want("and the home metro still parses as it always did",
+         ats._deslug(
+             "senior-data-analyst-richmond-virginia-united-states"),
+         ("Senior Data Analyst", "Richmond, Virginia, United States"))
+
+    # 15 points for a bare "Analyst" used to be written into the scorer, which
+    # paid one profession's rent and nobody else's.
+    # This profile is an accountant's, and that is the assertion: the word
+    # the bonus keys on is hers, not the one that used to be compiled in.
+    fam = [f.lower() for f in profile.FAMILY_TITLES]
+    want("the generic-title bonus comes from the profile", bool(fam), True)
+    want("and an accountant's profile does not pay for 'analyst'",
+         "analyst" in fam, False)
+    want("a profile naming no family noun is allowed",
+         profile._OPTIONAL["FAMILY_TITLES"][1], [])
+
     print("\n" + "=" * 72)
     if fails:
         print(f"{len(fails)} rule(s) broke:")
@@ -436,6 +766,154 @@ def rules_check() -> int:
             print("  " + line)
         return 1
     print("all rules hold")
+    return 0
+
+
+def gather_check() -> int:
+    """The seed gatherer, with nothing plugged in.
+
+    Every assertion here is about a decision that cost a wrong answer once.
+    None of it touches the network: the four sources are fetch-then-parse, and
+    the parsing half is where the mistakes were. A suite that needs Overpass to
+    be up is a suite nobody runs.
+    """
+    print("Seed gatherer self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    # -- domains ------------------------------------------------------------
+    want("a bare host survives", gather.domain_of("https://www.vcu.edu/"),
+         "vcu.edu")
+    want("a university subdomain is the same employer",
+         gather.domain_of("https://maps.vcu.edu/parking"), "vcu.edu")
+    # Two state agencies, two payrolls. A general last-two-labels rule would
+    # fold these together and lose one of them.
+    want("two state agencies stay two",
+         gather.domain_of("https://vdh.virginia.gov"), "vdh.virginia.gov")
+    want("and the careers subdomain is still the company",
+         gather.domain_of("https://careers.example.com"), "example.com")
+    want("junk is not a domain", gather.domain_of("mailto:hr@x"), "")
+
+    # -- which name on a domain is the company's ----------------------------
+    # The first version took the shortest name and got the coffee shop.
+    want("the domain picks the name out of forty buildings",
+         gather.best_name({"Bowe House": 3, "The Depot": 2,
+                           "Virginia Commonwealth University": 1}, "vcu.edu"),
+         "Virginia Commonwealth University")
+    # A domain is usually the short form of the name, not all of it.
+    want("a name the domain abbreviates still wins",
+         gather.best_name({"Amuse": 4, "Bon Secours Health System": 1},
+                          "bonsecours.com"), "Bon Secours Health System")
+    want("and with no echo, the most pins win",
+         gather.best_name({"Acme Depot": 5, "Z": 1}, "unrelated.com"),
+         "Acme Depot")
+
+    # -- domain guesses -----------------------------------------------------
+    # Dropping the last word off a two-word name leaves one generic word, and
+    # a single generic word is somebody else's company. That is how london.com
+    # and chesapeake.org got written into a seed file.
+    two = gather.guesses("Main Street Homes")
+    want("a two-word name never guesses one word",
+         [g for g in two if g.startswith("main.")], [])
+    want("it guesses the whole name", "mainstreethomes.com" in two, True)
+    # "The London Company" is one distinctive word once the furniture is gone,
+    # so it does get london.com -- and `confirms` is what stops it counting.
+    want("a name that is one word after the furniture still tries it",
+         "london.com" in gather.guesses("The London Company"), True)
+    three = gather.guesses("Virginia Commonwealth University")
+    want("three words may drop one", "virginiacommonwealth.com" in three, True)
+    want("and may try initials", "vcu.com" in three, True)
+    want("a one-word name still gets its word",
+         gather.guesses("Phlow")[0], "phlow.com")
+
+    # -- does this page belong to this company ------------------------------
+    # Half the words was the first rule and it let Cavalier Telephone resolve
+    # to brandforce.com.
+    want("every distinctive word has to be in the title",
+         gather.confirms("Cavalier Telephone", "Brandforce | Telephone", "",
+                         "brandforce.com"), False)
+    want("all of them, and it passes",
+         gather.confirms("Cavalier Telephone", "Cavalier Telephone - Home",
+                         "", "cavtel.com"), True)
+    home = gather.home_terms()[0]
+    want("a one-word name must also prove it is in this metro",
+         gather.confirms("Phlow", "Phlow - Enterprise Intelligence",
+                         "we are based in london", "phlow.com"), False)
+    want("and passes when the page says where it is",
+         gather.confirms("Phlow", "Phlow - Home",
+                         f"offices in {home} since 2020", "phlow.com"), True)
+    # ", VA" is a local term and every minified script on earth contains
+    # ", var x", which is why this is a whole-word test and not `in`.
+    want("a metro term inside another word does not count",
+         gather._says_home("function f(a, variable) {}"), False)
+    # A site that refuses scripted clients can still be confirmed, but only by
+    # the hostname carrying the whole name.
+    want("a blocked page falls back to the hostname",
+         gather.confirms("CarMax", "__blocked__", "", "carmax.com"), True)
+    want("and a blocked page that does not is refused",
+         gather.confirms("CarMax", "__blocked__", "", "autotrader.com"), False)
+
+    # -- reading a roster page ----------------------------------------------
+    html = """<table>
+      <tr><td><a href="https://www.acmehealth.com/">Acme Health System</a></td></tr>
+      <tr><td><a href="/about">About this list</a></td></tr>
+      <tr><td><a href="https://bigbank.com/careers">Big Bank</a></td></tr>
+      <tr><td><a href="https://publisher.test/contact">Contact</a></td></tr>
+    </table>"""
+    rows = gather.links_to_candidates(html, "https://publisher.test/employers")
+    want("a table of links is two columns with no typing",
+         sorted((r.name, r.site) for r in rows),
+         [("Acme Health System", "acmehealth.com"),
+          ("Big Bank", "bigbank.com")])
+    want("and everything it found is marked as listed",
+         all(r.listed for r in rows), True)
+
+    # -- ranking ------------------------------------------------------------
+    listed = gather.Candidate(name="A", site="a.com", sources={"page"},
+                              listed=True)
+    mapped = gather.Candidate(name="B", site="b.com", sources={"map"}, pins=2)
+    both = gather.Candidate(name="C", site="c.com", sources={"map", "wikidata"},
+                            pins=1)
+    want("a human's list outranks a map pin",
+         listed.score() > mapped.score(), True)
+    want("two sources that do not talk outrank one",
+         both.score() > mapped.score(), True)
+    # Penalising OSM's `brand` tag deletes CarMax, Wegmans and Truist along
+    # with the fast food, so it is a note on the row and not a penalty.
+    chain = gather.Candidate(name="D", site="d.com", sources={"map"}, pins=2,
+                             branded=True)
+    want("a chain tag costs nothing", chain.score(), mapped.score())
+
+    # -- filling in the website column --------------------------------------
+    # Rewriting this file through a TOML parser would drop every comment, and
+    # the comments say where each name came from.
+    text = ('companies = [\n'
+            '  "Acme Health System",  # chamber list\n'
+            '  { name = "Big Bank", site = "https://bigbank.com" },\n'
+            ']\n')
+    filled, count = gather.fill_sites(
+        text, discover.Budget(9), log=lambda m: None,
+        find=lambda name, budget: "acmehealth.com")
+    want("the bare name gets a website", count, 1)
+    want("its comment survives", "# chamber list" in filled, True)
+    want("the new row is a table",
+         'site = "https://acmehealth.com"' in filled, True)
+    want("and the row that was already done is untouched",
+         '{ name = "Big Bank", site = "https://bigbank.com" },' in filled, True)
+
+    print("\n" + "=" * 72)
+    if fails:
+        print(f"{len(fails)} gatherer check(s) broke:")
+        for line in fails:
+            print("  " + line)
+        return 1
+    print("the gatherer holds")
     return 0
 
 
@@ -610,13 +1088,51 @@ def salary_check() -> int:
         if not ok:
             failures.append(f"{label}: got {got}, wanted {want}")
 
+    # Ashby publishes the band in its own shape. The fetcher had asked for it
+    # and thrown it away since the day it was written, so a Ramp posting
+    # reading $128K - $180K on its own page was listed with an estimate of
+    # $91k-$125k beside it.
+    ashby = [
+        ([{"compensationType": "Salary", "interval": "1 YEAR",
+           "currencyCode": "USD", "minValue": 128000, "maxValue": 180000}],
+         (128_000, 180_000), "an annual band, the Ramp case"),
+        ([{"compensationType": "EquityPercentage", "interval": "NONE",
+           "currencyCode": None, "minValue": None, "maxValue": None},
+          {"compensationType": "Salary", "interval": "1 YEAR",
+           "currencyCode": "USD", "minValue": 128000, "maxValue": 180000}],
+         (128_000, 180_000), "equity beside it is not pay"),
+        ([{"compensationType": "Salary", "interval": "1 HOUR",
+           "currencyCode": "USD", "minValue": 30, "maxValue": 45}],
+         (62_400, 93_600), "an hourly rate is annualised"),
+        ([{"compensationType": "Salary", "interval": "1 YEAR",
+           "currencyCode": "EUR", "minValue": 90000, "maxValue": 120000}],
+         (None, None), "a band in euros is not a band in dollars"),
+        ([{"compensationType": "Salary", "interval": "1 YEAR",
+           "currencyCode": "USD", "minValue": 100000, "maxValue": 140000},
+          {"compensationType": "Salary", "interval": "1 YEAR",
+           "currencyCode": "USD", "minValue": 128000, "maxValue": 180000}],
+         (100_000, 180_000), "per-location tiers give the widest honest band"),
+    ]
+    for parts, want, label in ashby:
+        got_map = ats._ashby_salary({"summaryComponents": parts})
+        got = (got_map.get("salary_min"), got_map.get("salary_max"))
+        ok = got == want
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}: {got}")
+        if not ok:
+            failures.append(f"{label}: got {got}, wanted {want}")
+    blank = ats._ashby_salary(None)
+    print(f"  {'ok  ' if blank == {} else 'FAIL'} a posting with no "
+          f"compensation block says nothing: {blank}")
+    if blank != {}:
+        failures.append("no compensation block should yield no kwargs")
+
     print("\n" + "=" * 72)
     if failures:
         print(f"{len(failures)} salary expectation(s) broke:")
         for line in failures:
             print("  " + line)
         return 1
-    print(f"all {len(pays) + len(does_not_pay) + len(schema)} "
+    print(f"all {len(pays) + len(does_not_pay) + len(schema) + len(ashby) + 1} "
           f"salary expectations hold")
     return 0
 
@@ -727,13 +1243,175 @@ def live(only: str | None) -> None:
             print("  " + err.replace("\n", "\n  "))
 
 
+def partials_check() -> int:
+    """Turning an aggregator snippet back into the posting.
+
+    Nothing here touches the network. `partial_detail` takes one page of HTML
+    and decides whether to believe it, and that decision is the whole module:
+    the fetch either works or it does not, but believing the wrong page builds
+    a packet against a job nobody applied for.
+    """
+    from jobdesk.radar.sources import ats
+    from jobdesk.apply import jdtext
+    from jobdesk.apply.candidates import Candidate
+
+    print("Snippet repair self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    def page(title: str, body: str, kind="JobPosting") -> str:
+        node = json.dumps({"@type": kind, "title": title, "description": body})
+        return f'<script type="application/ld+json">{node}</script>'
+
+    # Stripped, because `Job` strips what it is handed and an assertion that
+    # compares against the unstripped fixture fails on a trailing space.
+    full = ("Responsibilities. " * 80).strip()   # over MIN_FULL_BODY
+    snippet = ("About us. " * 50).strip()        # the 500-character About Us
+
+    # -- reading the markup -------------------------------------------------
+    want("a JobPosting is found", len(ats.job_postings_in(page("BA", full))), 1)
+    want("an Organization is not a posting",
+         ats.job_postings_in(page("BA", full, kind="Organization")), [])
+    want("a @graph wrapper is unwrapped",
+         len(ats.job_postings_in(
+             '<script type="application/ld+json">'
+             + json.dumps({"@graph": [{"@type": "WebPage"},
+                                      {"@type": "JobPosting", "title": "BA"}]})
+             + "</script>")), 1)
+    # Schema.org allows a list of types and several generators emit one.
+    want("a list of types still counts",
+         len(ats.job_postings_in(
+             '<script type="application/ld+json">'
+             + json.dumps({"@type": ["JobPosting", "Thing"], "title": "BA"})
+             + "</script>")), 1)
+    want("broken JSON is skipped, not raised",
+         ats.job_postings_in('<script type="application/ld+json">{oops</script>'),
+         [])
+
+    # -- where else the same ad is readable ---------------------------------
+    # Adzuna's outbound link is guarded and its own detail page is not, and
+    # both carry the same ad id.
+    want("an aggregator's guarded link has a fallback",
+         ats._urls_to_try("https://www.adzuna.com/land/ad/123?se=x"),
+         ["https://www.adzuna.com/land/ad/123?se=x",
+          "https://www.adzuna.com/details/123"])
+    want("and a company's own posting has nowhere else to be",
+         ats._urls_to_try("https://boards.greenhouse.io/acme/jobs/1"),
+         ["https://boards.greenhouse.io/acme/jobs/1"])
+
+    # -- what gets believed -------------------------------------------------
+    def try_page(html: str, title="Business Analyst", body=snippet,
+                 status=200, headers=None):
+        job = Job(title=title, company="Lumen", url="https://x.test/1",
+                  source="adzuna", description=body, partial=True)
+        saved = ats.http.get
+        ats.http.get = lambda *a, **k: type(
+            "R", (), {"status_code": status, "text": html,
+                      "url": "https://x.test/1",
+                      "headers": headers or {}})()
+        try:
+            return ats.partial_detail(job), job
+        finally:
+            ats.http.get = saved
+
+    ok, job = try_page(page("Senior Business Analyst", full))
+    want("the posting replaces the snippet", ok, True)
+    want("and the snippet is gone", job.description.startswith("Responsibilities"),
+         True)
+    want("and it is no longer partial", job.partial, False)
+    # The title the digest went out with is the one the user recognizes.
+    want("the title the user read is kept", job.title, "Business Analyst")
+
+    ok, job = try_page(page("Careers at Lumen", full))
+    want("a careers index is not this job", ok, False)
+    want("and the snippet survives the refusal", job.description, snippet)
+
+    # -- a bot check is not a fact about this posting -----------------------
+    # jobs.virginia.gov sits behind AWS WAF and answers a challenged request
+    # with 202, no body and a header saying so. Returning False here would be
+    # a lie the caller cannot see through: it reads identically to a dead
+    # link, and one repair run reported 78 live Commonwealth postings as
+    # expired on the strength of it.
+    def challenged(html, headers):
+        try:
+            try_page(html, headers=headers, status=202)
+        except ats.Challenged as why:
+            return str(why)
+        return ""
+
+    waf = challenged("", {"x-amzn-waf-action": "challenge"})
+    want("a WAF challenge is raised, not returned", bool(waf), True)
+    want("and it names the WAF", "AWS WAF" in waf, True)
+    want("an unlabelled empty page is a challenge too",
+         bool(challenged("   ", {})), True)
+    want("but a real page with no markup is only a miss",
+         challenged("<html>no markup here</html>", {}), "")
+    want("and it is still flagged partial", job.partial, True)
+
+    ok, _ = try_page(page("Business Analyst", "Apply today."))
+    want("a two-line stub does not beat 500 characters", ok, False)
+    ok, _ = try_page("<html>no markup here</html>")
+    want("a page with no markup fills nothing", ok, False)
+    # An untitled node cannot be checked, so it is judged on the body alone
+    # rather than refused -- the length gate is still standing.
+    ok, _ = try_page('<script type="application/ld+json">'
+                     + json.dumps({"@type": "JobPosting", "description": full})
+                     + "</script>")
+    want("an untitled posting is judged on its body", ok, True)
+
+    # -- the flag travels with the text ------------------------------------
+    def merged(winner_desc, winner_partial, loser_desc, loser_partial):
+        win = Job(title="Analyst", company="Acme", url="https://acme.test/1",
+                  source="greenhouse", description=winner_desc,
+                  partial=winner_partial)
+        lose = Job(title="Analyst", company="Acme", url="https://acme.test/1",
+                   source="adzuna", description=loser_desc, partial=loser_partial)
+        kept, _ = dedupe.collapse([lose, win])
+        return kept[0]
+
+    got = merged("", False, snippet, True)
+    want("an empty winner takes the snippet", got.description, snippet)
+    want("and is told it is a snippet", got.partial, True)
+    got = merged(full, False, snippet, True)
+    want("a full body is not traded for a snippet", got.description, full)
+    want("and stays complete", got.partial, False)
+
+    # -- the packet builder -------------------------------------------------
+    cand = Candidate(title="BA", company="Lumen", url="https://x.test/1",
+                     description=snippet, flags=["partial-description"])
+    want("the candidate knows its body is a snippet",
+         cand.partial_description, True)
+    text, how = jdtext.obtain(cached=snippet, url="", allow_fetch=False,
+                              allow_paste=False, cached_partial=True,
+                              echo=lambda m: None)
+    # 500 characters clears MIN_JD_CHARS of 400, which is exactly the trap.
+    want("a snippet is not tailored against", text, "")
+    want("and the reason says so", "snippet" in how, True)
+    text, _ = jdtext.obtain(cached=full, url="", allow_fetch=False,
+                            allow_paste=False, echo=lambda m: None)
+    want("a real body still short-circuits the ladder", text, full)
+
+    print()
+    for line in fails:
+        print("  FAILED: " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     if "--plugins" in args:
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
         raise SystemExit(scoring_check() or rules_check()
-                         or salary_check() or dates_check())
+                         or salary_check() or dates_check()
+                         or gather_check() or partials_check())
     elif "--salary" in args:
         raise SystemExit(salary_check())
     elif "--discord" in args:

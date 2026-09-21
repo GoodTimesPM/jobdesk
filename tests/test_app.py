@@ -242,6 +242,18 @@ def test_write() -> None:
               "night shift" in targeting["hard_disqualifiers"]
               and len(targeting["hard_disqualifiers"]) > 1)
 
+        # Two keys the wizard used to leave at the example's values, so a new
+        # profile in another state or another line of work inherited a Denver
+        # accountant's. This form says Colorado, so it is the one case where
+        # inheriting looks right; assert the value was derived from the answer
+        # rather than copied, by checking the shape only the writer produces.
+        check("state terms are derived from the answer, not inherited",
+              targeting["state_terms"] == ["colorado", " co ", ", co"],
+              str(targeting["state_terms"]))
+        check("and the family noun is left for the user to name",
+              targeting["family_titles"] == [],
+              str(targeting["family_titles"]))
+
         example = (ROOT / "profile.example" / "targeting.toml").read_text(encoding="utf-8")
         check("the generated file keeps the documentation",
               comments((written / "targeting.toml").read_text(encoding="utf-8"))
@@ -463,6 +475,33 @@ def test_jdstruct() -> None:
     check("a mid-sentence keyword is not a heading",
           all(b["kind"] != "heading" for b in only),
           str([b for b in only if b["kind"] == "heading"]))
+
+    # Adzuna keeps the bullet characters and throws the line breaks away, so
+    # the items are marked but the markers are mid-line.
+    adzuna = ("RESPONSIBILITIES Include: \u2022 Design, develop, and maintain "
+              "Power BI reports, dashboards, and semantic models. \u2022 Build "
+              "reporting solutions on established Dataverse data models. "
+              "\u2022 Develop data connections using Power Query against "
+              "SQL Server, Azure Blob Storage, and Cosmos DB.")
+    blocks = jdstruct.structure(adzuna)
+    lists = [b for b in blocks if b["kind"] == "list"]
+    check("bullets in the middle of a line still make a list",
+          len(lists) == 1 and len(lists[0]["items"]) == 3, str(blocks))
+    check("and the bullet character is not left on the item",
+          all(not i.startswith("\u2022") for i in lists[0]["items"]), str(lists))
+    check("the words before the first bullet are kept",
+          any("Include" in b.get("text", "") for b in blocks), str(blocks))
+    check("and the heading above the list is not lost to them",
+          blocks[0] == {"kind": "heading", "text": "RESPONSIBILITIES"}, str(blocks[:1]))
+
+    # A hyphen mid-line is a range, and a middle dot is how a posting writes
+    # its own location line. Neither is a list.
+    for not_a_list in ("Requires 2-3 years of SQL and 1-2 years of Power BI "
+                       "in a role of similar scope and seniority to this one.",
+                       "Richmond \u00b7 VA \u00b7 Full-time \u00b7 Contract"):
+        check(f"{not_a_list[:24]}... is not split into bullets",
+              all(b["kind"] != "list" for b in jdstruct.structure(not_a_list)),
+              str(jdstruct.structure(not_a_list)))
 
     html_jd = "<p><strong>What You Will Do</strong></p><ul><li>Ship it</li>"               "<li>Keep it up</li></ul><p>2&#43; years required.</p>"
     blocks = jdstruct.structure(html_jd)
@@ -702,6 +741,39 @@ def test_no_writes() -> None:
                   for word in ("apply", "submit", "send")), str(routes))
 
 
+def test_override() -> None:
+    section("a blocked packet can be overridden, and it is recorded")
+    static = ROOT / "jobdesk" / "app" / "static"
+    js = (static / "app.js").read_text(encoding="utf-8")
+    html = (static / "index.html").read_text(encoding="utf-8")
+
+    # The whole point of an override you can reach: a rule with no way past it
+    # gets worked around outside the tool, where nothing is written down. The
+    # API has accepted `force` since the beginning and the page never sent it,
+    # so a blocked build was simply the end of the road.
+    check("the banner has a button to render an action into",
+          'id="banner-action"' in html)
+    check("and the page reaches it", "#banner-action" in js)
+    check("a blocked packet offers the override", "force: true" in js)
+    check("and asks before taking it", "confirm(" in js)
+
+    from jobdesk.apply import packet
+    from jobdesk.apply.applog import Application
+    css = (static / "app.css").read_text(encoding="utf-8")
+    check("the banner text takes the slack, so the X stays at the edge",
+          "#banner-text { flex: 1 1 auto" in css
+          and "margin-left: auto" not in css.split(".banner-do {")[1].split("}")[0])
+    check("the dismiss X has no fill of its own",
+          "background: none" in css.split(".banner-x {")[1].split("}")[0])
+
+    check("the packet builder takes the waived rules",
+          "overrides" in packet.build.__code__.co_varnames)
+    check("and the application record keeps them",
+          "overrides" in Application.__dataclass_fields__)
+    check("an application with no override has an empty list",
+          Application(id="x", company="c", role="r").overrides == [])
+
+
 def test_patch_table() -> None:
     section("skill tables are rewritten in place")
     source = (ROOT / "profile.example" / "targeting.toml").read_text(encoding="utf-8")
@@ -820,6 +892,29 @@ def test_settings() -> None:
                 check(f"{bad} is refused", False)
             except prefs.Invalid:
                 check(f"{bad} is refused", True)
+        check("an old text size still loads",
+              prefs.load()["text_size"] == 115)
+
+        # Three vocabularies have to agree: the server decides what is valid,
+        # the stylesheet paints it, and the menu offers it. Any one of them
+        # gaining a scheme on its own is a setting that saves and does
+        # nothing, or a menu entry that answers 400.
+        static = ROOT / "jobdesk" / "app" / "static"
+        css = (static / "app.css").read_text(encoding="utf-8")
+        html = (static / "index.html").read_text(encoding="utf-8")
+        for key, attr in (("scheme", "data-scheme"), ("font", "data-font")):
+            for value in prefs._CHOICES[key]:
+                painted = f'[{attr}="{value}"]' in css
+                default = value in ("slate", "system")
+                check(f"the stylesheet knows {key} {value}", painted or default)
+                check(f"the menu offers {key} {value}",
+                      f'<option value="{value}">' in html)
+        check("the page no longer sizes itself by attribute",
+              "data-size" not in css and "zoom: var(--zoom" in css)
+        for size in ("80", "100", "160"):
+            check(f"text size {size} is offered and valid",
+                  f'<option value="{size}">' in html and prefs._valid("text_size", int(size)))
+
         flipped = prefs.save({"score_min": 90, "score_max": 50})
         check("a backwards range is swapped, not refused",
               (flipped["score_min"], flipped["score_max"]) == (50, 90))
@@ -1210,6 +1305,7 @@ def main() -> int:
     test_home_screen()
     test_pasted_jd()
     test_no_writes()
+    test_override()
     test_market()
     test_market_route()
     test_age()

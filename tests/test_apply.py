@@ -36,7 +36,8 @@ from jobdesk.apply import answers as answers_mod
 from jobdesk.apply import candidates as candidates_mod
 from jobdesk.apply import config, discord as discord_mod, guard, jdtext, letter as letter_mod, packet
 from jobdesk.apply import main as main_mod
-from jobdesk.apply.applog import Application, Log, role_key
+from jobdesk.apply.applog import (Application, Log, division_key,
+                                  role_key)
 
 PASS, FAIL = 0, 0
 
@@ -397,6 +398,138 @@ def test_guard() -> None:
                      uid="d2", flags=["agency-posting"])
     check("an agency submission on top of a direct one is blocked",
           any(c.rule == "agency" and c.level == guard.BLOCK for c in dupe), str(dupe))
+
+
+def test_board_divisions() -> None:
+    section("The concurrency cap -- a board is not an employer")
+
+    from jobdesk.radar.models import division_in
+
+    va = ("Title: Fair Housing Investigator\n"
+          "State Role Title: Compliance Officer\n"
+          "Hiring Range: $57,000 - $72,000\n"
+          "Agency: Dept of Prof & Occup Reg\n"
+          "Location: Henrico, VA\n")
+    check("the agency inside a Commonwealth posting is read",
+          division_in(va) == "Dept of Prof & Occup Reg", division_in(va))
+    check("a generic department name is not an employer",
+          division_in("Department: Engineering\n") == "")
+
+    # The sitemap fetcher flattens a posting to one line, so there is no
+    # newline to stop the name at. The first version of this read the header
+    # only when it had line breaks, which meant it read nothing at all off the
+    # cache and quietly filled in no agency for 502 rows.
+    flat = ("Title: Fair Housing Investigator State Role Title: "
+            "Compliance/Safety Officer III Hiring Range: $57,000 - $72,000 "
+            "Pay Band: 4 Agency: Dept of Prof & Occup Reg Location: DPOR Main "
+            "Office Agency Website: www.dpor.virginia.gov Recruitment Type: "
+            "General Public - G Job Duties To conduct investigations.")
+    check("a header with no line breaks still names its agency",
+          division_in(flat) == "Dept of Prof & Occup Reg", division_in(flat))
+    check("and it stops at the next label, not mid-name",
+          "Location" not in division_in(flat))
+
+    # Prose on one line can look exactly like a header field. An employer's
+    # name starts with a capital and is a handful of words; a sentence is not.
+    prose = ("We are hiring. The agency: irrelevant prose here. We are hiring "
+             "again. Location: Richmond")
+    check("a sentence that happens to say 'agency:' names no employer",
+          division_in(prose) == "", division_in(prose))
+    check("a posting with no header block names no agency",
+          division_in("We are hiring an analyst. Agency: irrelevant." * 90) == "")
+
+    check("abbreviations collide",
+          division_key("Dept Conservation & Recreation")
+          == division_key("Department of Conservation and Recreation"))
+    check("but different agencies do not",
+          division_key("Department of Accounts")
+          != division_key("Dept of Prof & Occup Reg"))
+
+    # Two open reqs at two agencies of one board. Before this, the second one
+    # blocked the third: the Department of Accounts and the Dept of Prof &
+    # Occup Reg share a domain and nothing else.
+    log = temp_log()
+    for i, agency in enumerate(["Dept Conservation & Recreation",
+                                "Department of Accounts"]):
+        row = app(id=f"va{i}", company="Commonwealth of Virginia",
+                  role=f"Analyst {i}", uid=f"va-uid{i}",
+                  dedupe_key=f"va-key{i}", division=agency)
+        log.add(row)
+        log.mark_applied(row)
+
+    third = guard.run(log, company="Commonwealth of Virginia",
+                      role="Fair Housing Investigator", uid="va-uid9",
+                      division="Dept of Prof & Occup Reg")
+    check("a third agency on the same board is not blocked",
+          not any(c.rule == "concurrency" and c.level == guard.BLOCK
+                  for c in third), str(third))
+
+    same = guard.run(log, company="Commonwealth of Virginia",
+                     role="Accounts Analyst", uid="va-uid8",
+                     division="Dept. of Accounts")
+    check("a second req at the same agency still counts toward the cap",
+          any(c.rule == "concurrency" for c in same), str(same))
+
+    # The posting whose body never arrived, so nobody knows its agency. Two
+    # open rows at two *different* named agencies cannot both be at whichever
+    # agency it turns out to belong to -- at most one of them can. Counting the
+    # total here is what kept blocking the Fair Housing Investigator packet
+    # after the division work was supposedly done.
+    unknown = guard.run(log, company="Commonwealth of Virginia",
+                        role="Fair Housing Investigator", uid="va-uid7")
+    check("an unknown agency is not every agency",
+          not any(c.rule == "concurrency" and c.level == guard.BLOCK
+                  for c in unknown), str(unknown))
+    check("and the worst case is still said out loud",
+          any(c.rule == "concurrency" and c.level == guard.NOTE
+              for c in unknown), str(unknown))
+
+    # Two at the *same* agency, though, and the unknown posting might be that
+    # agency, so it is back to the cap.
+    both = temp_log()
+    for i in range(2):
+        row = app(id=f"acc{i}", company="Commonwealth of Virginia",
+                  role=f"Accounts {i}", uid=f"acc-uid{i}",
+                  dedupe_key=f"acc-key{i}", division="Department of Accounts")
+        both.add(row)
+        both.mark_applied(row)
+    risky = guard.run(both, company="Commonwealth of Virginia",
+                      role="Fair Housing Investigator", uid="acc-uid9")
+    check("two at one agency still block a posting of unknown agency",
+          any(c.rule == "concurrency" and c.level == guard.BLOCK
+              for c in risky), str(risky))
+
+    # A row written before divisions existed has none, so it counts everywhere.
+    legacy = temp_log()
+    for i in range(2):
+        row = app(id=f"old{i}", company="Commonwealth of Virginia",
+                  role=f"Old {i}", uid=f"old-uid{i}", dedupe_key=f"old-key{i}")
+        legacy.add(row)
+        legacy.mark_applied(row)
+    blocked = guard.run(legacy, company="Commonwealth of Virginia",
+                        role="Fair Housing Investigator", uid="new-uid",
+                        division="Dept of Prof & Occup Reg")
+    check("rows recorded before divisions count against every agency",
+          any(c.rule == "concurrency" and c.level == guard.BLOCK
+              for c in blocked), str(blocked))
+
+    # And the board above the agencies: six open reqs across six agencies is
+    # under the per-agency cap everywhere and still reads as a spray.
+    board = temp_log()
+    for i in range(config.MAX_OPEN_PER_BOARD):
+        row = app(id=f"b{i}", company="Commonwealth of Virginia",
+                  role=f"Analyst {i}", uid=f"b-uid{i}", dedupe_key=f"b-key{i}",
+                  division=f"Department of Thing {i}")
+        board.add(row)
+        board.mark_applied(row)
+    spray = guard.run(board, company="Commonwealth of Virginia",
+                      role="Fair Housing Investigator", uid="b-uid99",
+                      division="Dept of Prof & Occup Reg")
+    check("a full board warns",
+          any(c.rule == "board-concurrency" and c.level == guard.WARN
+              for c in spray), str(spray))
+    check("and warning is all it does",
+          not any(c.level == guard.BLOCK for c in spray), str(spray))
 
 
 def test_applog() -> None:
@@ -913,7 +1046,8 @@ def test_wiring() -> None:
 def main() -> int:
     which = sys.argv[1].lstrip("-") if len(sys.argv) > 1 else "all"
     tests = {
-        "letter": test_letter, "guard": test_guard, "applog": test_applog,
+        "letter": test_letter, "guard": test_guard,
+        "divisions": test_board_divisions, "applog": test_applog,
         "auto": test_auto, "weekly": test_weekly, "discord": test_discord,
         "answers": test_answers, "candidates": test_candidates_and_jd,
         "packet": test_packet_pieces, "wiring": test_wiring,
