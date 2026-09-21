@@ -189,6 +189,38 @@ re-reads the PDF the way a parser would, and shows you the document the
 employer's software will actually see. Those two are usually not the same, and
 nothing else on your screen tells you when they diverge.
 
+## One page, and what it costs to hold one
+
+A resume that runs to two pages is a resume nobody reads to the end of, so the
+engine treats one page as a hard constraint rather than a goal. What it spends
+first is whitespace. The renderer has three dials on it, line leading, the gaps
+between sections, and type size, and the fitter walks a ladder of progressively
+tighter settings before it cuts anything you wrote. Across the job descriptions
+in the store this gets every resume onto one page with nothing dropped and the
+type size untouched.
+
+Type only starts shrinking when the air runs out, and it stops at 90%, because
+a resume small enough to squint at is one that gets skipped. Past that the
+fitter drops optional bullets, and past that it crosses the `min_bullets`
+floors rather than hand back a second page. A floor exists so a job does not
+appear under your name with nothing written under it. That is worth defending
+against a coverage score. It is not worth defending against page two. Every one
+of those steps is named in `TAILORING.md` and on the console, so you never find
+out afterwards that the page quietly took something.
+
+When the fit did cost something, the report also tells you what you are still
+holding. The usual answer is the summary. Four lines at the top of the one page
+where space is the binding constraint, describing you in the words every other
+candidate also used, and they buy two bullets. Set `summary` under `[render]`
+in `master.toml` to `"none"` to drop it, `"short"` for one line, or `"full"` to
+keep it. `--summary` overrides it for a single posting. A missing summary costs
+nothing in the ATS simulator; it is an optional section there, not an expected
+one.
+
+The other lever is `total_bullet_ceiling`. Lowering it moves the cut back to
+the tailorer, where it is made on how well a bullet answers this posting and
+reported as a coverage number, instead of being made by the page at the end.
+
 ## Before it builds a packet
 
 A handful of rules run before the folder is written, and they are about being
@@ -304,7 +336,7 @@ checklist.
 
 ## Version
 
-0.4.0. `CHANGELOG.md` has what changed and why.
+0.4.1. `CHANGELOG.md` has what changed and why.
 
 ## License
 

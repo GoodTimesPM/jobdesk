@@ -2,6 +2,53 @@
 
 Dates are when the work landed, not when it was published.
 
+## 0.4.1 — 2026-09-21
+
+A resume that runs to two pages is a resume nobody reads to the end of, and
+this one had been shipping two pages for a third of the postings in the store.
+It did it quietly: the fitter threw away four bullets, gained nothing, ran out
+of bullets it was allowed to touch, and returned the overflowing document
+anyway. Then the cover letter dropped its best paragraph because the page it
+had just failed to fit no longer mentioned a number that paragraph used.
+
+### Changed
+
+- **The page budget is spent on whitespace before it is spent on content.**
+  The renderer now has a layout with three dials on it -- leading, section
+  spacing, and type size -- and the fitter walks a ladder of progressively
+  tighter settings before it drops a single bullet. Across the 188 stored job
+  descriptions this gets every resume onto one page with nothing cut and the
+  type size untouched. Type only starts moving when air runs out, and stops at
+  90%, because a resume small enough to squint at is a resume that gets
+  skipped. The .docx is rendered at whatever the PDF settled on, so the two
+  files are the same document.
+- **One page is not negotiable.** When the ladder runs out the fitter drops
+  optional bullets, and when those run out it crosses the `min_bullets` floors
+  rather than return a second page. A floor exists so a job does not appear
+  with nothing under it. That is worth defending against a coverage score and
+  it is not worth defending against page two. Crossing one is reported.
+- **The summary is gone.** Four lines that a reader skips, at the top of the
+  one page where space is the binding constraint, and they buy two bullets.
+  `render.summary` in master.toml sets it, SUMMARY moved from the expected
+  sections to the optional ones so an ATS parse is no longer docked ten points
+  for its absence, and the `--summary` flag still overrides per posting.
+- **Cover letter paragraphs are ordered by what they have to do with the
+  posting**, not by where they sit in letter.toml. A paragraph that names the
+  employer being applied to outranks everything else: if you did a project for
+  this company, that is the most applicable evidence you own. Applying to
+  CarMax as a Strategy Analyst, the paragraph about a CarMax dataset used to
+  lose to whatever had been typed above it.
+
+### Fixed
+
+- **The letter gate was checking numbers against the wrong document.** It read
+  the tailored resume, which is one page selected for one posting, so a true
+  claim became unsupported the moment its bullet lost a page-fit contest. The
+  CarMax paragraph was being held back for saying "65" about a 65-column
+  dataset. Numbers are now checked against every claim confirmed in
+  master.toml. The rule has not loosened -- a number still has to be one you
+  approved, and drafts do not count -- it is being asked of the right corpus.
+
 ## 0.4.0 — 2026-09-21
 
 Three things in one release, and they turn out to be the same thing: a board
