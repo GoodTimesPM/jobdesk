@@ -1404,6 +1404,162 @@ def partials_check() -> int:
     return 1 if fails else 0
 
 
+def bodies_check() -> int:
+    """Blank rows get their posting, and a body read once is not read again.
+
+    jobs.virginia.gov lets about 36 reads through a run before its WAF steps
+    in. Every run spent them on the same postings, so an Energy Analyst req
+    sat on the board with no body and an estimated salary over a page that
+    states $54,808 - $70,000.
+    """
+    import tempfile
+    from pathlib import Path
+    from jobdesk.radar import candidates
+    from jobdesk.radar.models import clean_text
+    from jobdesk.radar.sources import ats
+
+    print("Blank body self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    want("Windows-1252 bytes read as the characters they were",
+         clean_text("<p>Commissions 	Investigate</p>"),
+         "Commission’s • Investigate")
+
+    def read(body: str):
+        job = Job(title="Energy Analyst", company="Commonwealth of Virginia",
+                  url="https://x.test/energy", source="sitemap")
+        node = json.dumps({"@type": "JobPosting", "title": "Energy Analyst",
+                           "description": body})
+        html = f'<script type="application/ld+json">{node}</script>'
+        saved = ats.http.get
+        ats.http.get = lambda *a, **k: type(
+            "R", (), {"status_code": 200, "text": html, "headers": {},
+                      "url": "https://x.test/energy"})()
+        try:
+            return ats.partial_detail(job), job
+        finally:
+            ats.http.get = saved
+
+    ok, job = read("Starting Salary Range: $54,808 - $70,000. " * 10)
+    want("a blank row takes a posting shorter than a snippet repair wants",
+         ok, True)
+    want("and reads the pay from it", score.parse_salary(job),
+         (54808.0, 70000.0))
+    ok, _ = read("Apply now.")
+    want("but not a two-word stub", ok, False)
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        path = tmp / "candidates.json"
+        seen = Job(title="Energy Analyst", company="Commonwealth of Virginia",
+                   url="https://x.test/energy", source="sitemap")
+        path.write_text(json.dumps([
+            {"uid": seen.uid, "url": seen.url, "description": "The body."},
+        ]), encoding="utf-8")
+        again = Job(title="Energy Analyst", company="Commonwealth of Virginia",
+                    url="https://x.test/energy", source="sitemap")
+        other = Job(title="Energy Analyst", company="Commonwealth of Virginia",
+                    url="https://x.test/energy-2", source="sitemap")
+        got = candidates.reuse_bodies([again, other], path, log=lambda _: None)
+        want("a body from the last run is reused", again.description,
+             "The body.")
+        want("but not onto another agency's same-titled posting",
+             (got, other.description), (1, ""))
+    finally:
+        import shutil
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    print()
+    for line in fails:
+        print("  FAILED: " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
+def mysql_check() -> int:
+    """One bad row costs that row, not the run's whole batch.
+
+    A board started sending "department": null and every raw_postings write
+    after that failed on the NOT NULL column, about 9,800 rows a run. The
+    fake connection here refuses the batch and one row, and the other rows
+    have to land.
+    """
+    from jobdesk.radar import mysql_store
+    from jobdesk.radar.models import Job
+
+    print("MySQL write self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    job = Job(title="Analyst", company="Acme", url="u", source="s",
+              department=None, external_id=None)
+    want("a null department becomes empty text", job.department, "")
+    want("a null external id becomes empty text", job.external_id, "")
+
+    landed: list = []
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, sql, row=None):
+            if row is None or "information_schema" in sql:
+                return
+            if row[5] == "Broken":
+                raise ValueError("1048 Column cannot be null")
+            landed.append(row[5])
+        def executemany(self, sql, rows):
+            raise ValueError("1048 Column cannot be null")
+        def fetchall(self): return []
+
+    class Conn:
+        def cursor(self): return Cursor()
+        def commit(self): pass
+        def rollback(self): landed.clear()
+        def close(self): pass
+
+    fake = types.ModuleType("pymysql")
+    fake.connect = lambda **kw: Conn()
+    saved = sys.modules.get("pymysql"), os.environ.get("MYSQL_PASSWORD")
+    sys.modules["pymysql"] = fake
+    os.environ["MYSQL_PASSWORD"] = "x"
+    lines: list[str] = []
+    try:
+        jobs = [Job(title=t, company="Acme", url="u", source="s")
+                for t in ("One", "Broken", "Three")]
+        mysql_store.write_raw_postings(jobs, "run", log=lines.append)
+    finally:
+        if saved[0] is None:
+            sys.modules.pop("pymysql", None)
+        else:
+            sys.modules["pymysql"] = saved[0]
+        if saved[1] is None:
+            os.environ.pop("MYSQL_PASSWORD", None)
+        else:
+            os.environ["MYSQL_PASSWORD"] = saved[1]
+    want("the good rows land when the batch fails", landed, ["One", "Three"])
+    want("the log counts the skipped row",
+         any("skipped 1" in line for line in lines), True)
+
+    print()
+    for line in fails:
+        print("  FAILED: " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     if "--plugins" in args:
@@ -1411,7 +1567,8 @@ if __name__ == "__main__":
     elif "--scoring" in args:
         raise SystemExit(scoring_check() or rules_check()
                          or salary_check() or dates_check()
-                         or gather_check() or partials_check())
+                         or gather_check() or partials_check()
+                         or bodies_check() or mysql_check())
     elif "--salary" in args:
         raise SystemExit(salary_check())
     elif "--discord" in args:

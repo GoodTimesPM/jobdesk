@@ -3,7 +3,7 @@
     py tests/test_apply.py            everything
     py tests/test_apply.py --letter   just the cover-letter gate
 
-No test framework -- same choice as the other two sub-projects. These run in
+No test framework -- same choice as the other suites. These run in
 under a second, touch no network, and write only to a temp directory.
 
 Pinned to `profile.example/` before anything is imported, for the same reason
