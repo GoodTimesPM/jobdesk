@@ -329,6 +329,15 @@ function Install-Python {
         $ProgressPreference = $previous
     }
 
+    # Run nothing that the Python Software Foundation did not sign.
+    $sig = Get-AuthenticodeSignature -FilePath $exe
+    if ($sig.Status -ne "Valid" -or
+        $sig.SignerCertificate.Subject -notmatch "O=Python Software Foundation") {
+        Remove-Item $exe -Force -ErrorAction SilentlyContinue
+        Warn "The downloaded installer is not signed by the Python Software Foundation ($($sig.Status)). Not running it."
+        return $false
+    }
+
     Note "running the installer, this takes a minute"
     # /passive shows a progress window and asks nothing. InstallAllUsers=0
     # keeps it in this account, which is what lets it run without an
@@ -419,7 +428,7 @@ Note $VenvPy
 # --- 3. the dependencies -----------------------------------------------------
 
 Step "Installing the dependencies"
-Note "requests, fpdf2, python-docx, PyMuPDF, pymysql, truststore, pywebview"
+Note "requests, fpdf2, python-docx, PyMuPDF, truststore, pywebview"
 
 & $VenvPy -m pip install --upgrade pip --quiet --disable-pip-version-check
 & $VenvPy -m pip install -r (Join-Path $Root "requirements.txt") --quiet --disable-pip-version-check
