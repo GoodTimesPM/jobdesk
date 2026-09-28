@@ -8,7 +8,7 @@ Deliberately NOT here: LinkedIn and Indeed. Neither has a public jobs API
 ban scraping in their terms and enforce it with IP blocks, and getting an
 account restricted costs you the network itself -- far more damage than
 the listings are worth. The clean route to their inventory is their own
-email alerts, parsed over IMAP (plan item 12), which is a separate build.
+email alerts, parsed over IMAP, which is a separate build.
 """
 
 from __future__ import annotations
@@ -110,7 +110,7 @@ def remotive(_cfg: dict | None = None) -> list[Job]:
                 location=j.get("candidate_required_location", "") or "Remote",
                 description=j.get("description", ""),
                 posted_at=parse_date(j.get("publication_date")),
-                department=j.get("category", ""),
+                department=j.get("category") or "",
                 remote=True,
                 external_id=str(j.get("id", "")),
             ))
@@ -394,7 +394,7 @@ def hackernews(_cfg: dict | None = None) -> list[Job]:
 # that.
 #
 # The recommended way to use hiring.cafe: keep using it manually, and turn on
-# its email alerts so it arrives through the IMAP lane (plan item 12) like
+# its email alerts so it arrives through the IMAP lane like
 # LinkedIn and Indeed. Same inventory, zero risk, no token needed.
 # --------------------------------------------------------------------------
 

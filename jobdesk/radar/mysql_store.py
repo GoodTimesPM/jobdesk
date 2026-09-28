@@ -1,4 +1,4 @@
-"""Raw-postings ingestion for the Richmond Job Market Dashboard (plan item 11).
+"""Optional raw-postings ingestion into MySQL, for outside analysis.
 
 Writes every posting the radar pulls, before dedupe/scoring collapses or filters
 anything, into MySQL's `raw_postings` table -- one row per (posting, source,
@@ -86,6 +86,16 @@ def _fit(value: str | None, column: str,
     return value[:limit]
 
 
+_INSERT = """
+    INSERT INTO raw_postings
+        (run_stamp, collected_at, dedupe_key, uid, source, title,
+         company, url, location, description, posted_at,
+         salary_min, salary_max, remote, department, external_id)
+    VALUES
+        (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+"""
+
+
 def write_raw_postings(jobs: list[Job], run_stamp: str,
                         log: Callable[[str], None] = print) -> None:
     password = os.environ.get("MYSQL_PASSWORD")
@@ -140,20 +150,28 @@ def write_raw_postings(jobs: list[Job], run_stamp: str,
     ]
 
     try:
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(_INSERT, rows)
+            conn.commit()
+            log(f"mysql: wrote {len(rows)} raw posting(s) to raw_postings")
+            return
+        except Exception as exc:
+            conn.rollback()
+            log(f"mysql: batch write failed ({exc}), retrying row by row")
+        # One bad row used to cost the whole run's batch. Keep the rest.
+        wrote, first_error = 0, None
         with conn.cursor() as cur:
-            cur.executemany(
-                """
-                INSERT INTO raw_postings
-                    (run_stamp, collected_at, dedupe_key, uid, source, title,
-                     company, url, location, description, posted_at,
-                     salary_min, salary_max, remote, department, external_id)
-                VALUES
-                    (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                rows,
-            )
+            for row in rows:
+                try:
+                    cur.execute(_INSERT, row)
+                    wrote += 1
+                except Exception as exc:
+                    first_error = first_error or exc
         conn.commit()
-        log(f"mysql: wrote {len(rows)} raw posting(s) to raw_postings")
+        skipped = len(rows) - wrote
+        log(f"mysql: wrote {wrote} raw posting(s), skipped {skipped}"
+            + (f" (first error: {first_error})" if first_error else ""))
     except Exception as exc:
         log(f"mysql: write failed, run continues ({exc})")
     finally:

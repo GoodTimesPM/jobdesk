@@ -1,4 +1,4 @@
-"""Discord delivery (the push surface, plan item 3).
+"""Discord delivery, the push surface.
 
 A webhook, deliberately -- not a bot with a gateway connection like the news
 bot. This pipeline is run-once and stateless: it starts, works, and exits, so
