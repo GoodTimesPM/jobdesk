@@ -58,6 +58,9 @@ def html_to_text(html: str) -> str:
     return _BLANK.sub("\n\n", text).strip()
 
 
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+
+
 def fetch(url: str, timeout: int = 20) -> tuple[str, str]:
     """One polite GET. Returns (text, note) -- text is "" on any failure."""
     if not url.lower().startswith(("http://", "https://")):
@@ -72,12 +75,20 @@ def fetch(url: str, timeout: int = 20) -> tuple[str, str]:
             headers={"User-Agent": _UA,
                      "Accept": "text/html,application/xhtml+xml",
                      "Accept-Language": "en-US,en;q=0.9"},
+            stream=True,
         )
+        with response:
+            if response.status_code != 200:
+                return "", f"fetch returned HTTP {response.status_code}"
+            raw = bytearray()
+            for chunk in response.iter_content(64 * 1024):
+                raw += chunk
+                if len(raw) > MAX_PAGE_BYTES:
+                    return "", "the page is over 5 MB, which no posting is"
+            encoding = response.encoding or response.apparent_encoding or "utf-8"
     except Exception as exc:                       # requests raises its own tree
         return "", f"fetch failed ({type(exc).__name__})"
-    if response.status_code != 200:
-        return "", f"fetch returned HTTP {response.status_code}"
-    text = html_to_text(response.text)
+    text = html_to_text(bytes(raw).decode(encoding, errors="replace"))
     if len(text) < config.MIN_JD_CHARS:
         return "", (f"the page came back with only {len(text)} characters of "
                     f"text -- almost certainly rendered by JavaScript")

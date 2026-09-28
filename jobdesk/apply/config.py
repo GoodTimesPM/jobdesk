@@ -8,6 +8,7 @@ imports the other's code. With neither present this package degrades to
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .. import paths, profile
@@ -56,10 +57,18 @@ def packet_dir(packet_id: str) -> Path:
     Packets built before 2026-09-08 sat directly under `packets/`. If one is
     still there, that is where this returns, so an old id keeps resolving.
     """
+    if not _PACKET_ID.fullmatch(packet_id or ""):
+        raise ValueError(f"not a packet id: {packet_id!r}")
     flat = PACKETS / packet_id
     if flat.is_dir():
         return flat
     return PACKETS / packet_id[:10] / packet_id
+
+
+# A packet id is a build date and a filename-safe slug, never a path. Checked
+# here rather than at each caller, because every route that reads a packet
+# comes through this function.
+_PACKET_ID = re.compile(r"\d{4}-\d{2}-\d{2}_[A-Za-z0-9_-]+")
 
 # -- the unattended on/off switch ------------------------------------------
 SWITCH_FILE = ROOT / "SWITCH.apply.txt"
@@ -91,7 +100,7 @@ def delivery_dir() -> Path | None:
     raw = profile.load_optional("delivery.toml").get("packets")
     return Path(raw).expanduser() if raw else None
 
-# -- the anti-blacklist rules (plan item 6) ---------------------------------
+# -- the anti-blacklist rules ----------------------------------------------
 # These are the ones that actually get someone remembered badly, so they are
 # enforced by the tool rather than left to memory. Each is overridable with an
 # explicit acknowledgement, because a rule you can't override gets worked
@@ -115,7 +124,7 @@ MAX_OPEN_PER_BOARD = 6
 SAME_REQ_COOLDOWN_DAYS = 365        # effectively never, for the identical req
 SAME_ROLE_COOLDOWN_DAYS = 120       # ~4 months, middle of the 3-6 month range
 
-# Follow-up cadence (plan item 10). Day 7 after applying.
+# Follow up on day 7 after applying.
 FOLLOW_UP_DAYS = 7
 
 # A JD shorter than this didn't really come down -- almost always a JS shell

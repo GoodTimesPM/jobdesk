@@ -1,7 +1,7 @@
 """The rules that stop an application before it costs something.
 
-Plan item 6 is explicit that the danger in an automated job search is not the
-automation, it is the pattern it creates: fourteen applications to one company
+The danger in an automated job search is not the automation, it is the
+pattern it creates: fourteen applications to one company
 in an hour, a reapplication to a req that already said no, two agencies
 submitting the same candidate to the same employer. Those are what produce an
 actual company-level blacklist.
@@ -154,7 +154,7 @@ def run(log: Log, *, company: str, role: str, url: str = "", uid: str = "",
                 f"applicant system and this would be number "
                 f"{len(board_open) + 1}"))
 
-    # 4. Agency double-submission (plan item 13). Job Radar's scoring already
+    # 4. Agency double-submission. Job Radar's scoring already
     #    flags agency reposts; this is where that flag has to be acted on.
     if any(f.startswith("agency") or f == "staffing-agency" for f in flags):
         prior_direct = [a for a in log.for_company(company) if not a.agency]
