@@ -73,6 +73,11 @@ def cmd_check(args: argparse.Namespace) -> int:
 
 
 def cmd_tailor(args: argparse.Namespace) -> int:
+    leftover = [p for p in profile.leftovers() if p.startswith("master.toml")]
+    if leftover:
+        print("Refusing to tailor: " + " ".join(leftover)
+              + " Replace them with your own experience first.", file=sys.stderr)
+        return 2
     vocab, master = _load()
 
     raw = jd_mod.read_source(args.jd)

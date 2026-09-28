@@ -1,6 +1,6 @@
 """Paths and run tuning.
 
-No .env and no network anywhere in this sub-project -- the engine reads local
+No .env and no network anywhere in this package -- the engine reads local
 files, writes local files, and never talks to a job board. That is a deliberate
 boundary: discovery is Job Radar's job, and keeping this side offline means a
 tailoring run can't be rate-limited, blocked, or attributed to anyone.

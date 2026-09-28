@@ -1,9 +1,7 @@
 """ATS-safe PDF rendering.
 
-Ported from `WORK/JOB SEARCH 2026/CLAUDE/build_resume_pdf.py`, which produced
-the live resume, and turned into a function of a `Plan`. The visual result is
-deliberately the same document -- what changed is that the content now comes
-from master.toml instead of being hard-coded.
+The layout started as a one-off script that built a single resume. It is
+now a function of a `Plan`, with the content coming from master.toml.
 
 Every layout decision here is an ATS constraint, not a taste call:
   * one column, one text flow -- two columns are the single most common reason
