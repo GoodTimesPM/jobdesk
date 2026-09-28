@@ -1,53 +1,27 @@
 """Find a metro's employers before any of them posts anything.
 
-`learn.py` waits. A company gets its ATS probed only after one of its
-postings has turned up on an aggregator and scored 75 or better, which means
-the pipeline finds an employer at the one moment it least needs to: the job
-is already on the board, already read, already scored. What that buys is the
-NEXT req, and that is worth having. But it leaves the obvious case untouched.
-A large local employer that posts four analyst roles a year straight to its
-own Workday and never to an aggregator is invisible to this system forever,
-because the trigger never fires.
+`learn.py` probes a company's ATS only after one of its postings scores on
+an aggregator. A large local employer that posts only to its own Workday
+never trips that trigger, so it stays invisible. This closes that gap.
 
-That is the gap, and it is the one the user noticed first: other job sites
-keep showing openings this one does not.
+Two sources of names, neither Richmond-specific:
 
-Nothing here is Richmond-shaped. Two sources of names, both of which exist
-for whoever runs it:
+  1. Companies the radar has already seen hiring in this metro, at any
+     score. Most users never type anything and still get a few hundred.
+  2. `profile/seed_companies.toml`, a plain list for the employers the
+     aggregators miss (hospital, utility, university, banks). An entry may
+     carry the company's website, and it is worth the typing.
 
-  1. What the radar has already seen hiring in this metro, at any score.
-     `seen.json` is tens of thousands of postings and thousands of distinct
-     companies, and the ones with a local `location` are, by definition, the
-     employers in this user's area. Most people will never have to type
-     anything for this to find a few hundred names.
-  2. `profile/seed_companies.toml`, a plain list. For the employers a metro
-     knows about and the aggregators do not: the hospital system, the
-     utility, the university, the three banks. A chamber of commerce roster
-     or a business journal's top-employers list, pasted in once. Each entry
-     may carry the company's website, and it is worth the typing -- see
-     `from_profile`.
-
-Neither source is trusted. A name here is a guess at a company, so every hit
-still goes through `discover.find` and its confirmation rule. What changes
-for a seed company is which confirmation can apply: it has posted nothing we
-have read, so there are no titles to match against, and the board has to be
-hiring in this metro or be linked from the company's own website. A board
-naming itself used to count too, and step 13 took that out: the slug was
-guessed from the name, so the match confirms the spelling rather than the
-company. See `discover.confirms_local` and `discover.from_website`.
-
-Which is why the `site =` field in the profile is worth the typing. A website
-skips the guessing and the confirming both, because the company published the
-link itself.
-
-Run it by hand:
+Every name still goes through `discover.find`. A seed company has posted
+nothing we have read, so its board must be hiring in this metro or be
+linked from the company's own website (`discover.confirms_local`,
+`discover.from_website`). A website in the profile skips both steps.
 
     py -m jobdesk.radar.seed --list      # see the names, probe nothing
     py -m jobdesk.radar.seed             # sweep
 
-Not on the daily schedule. It is a one-off sweep of a few hundred names
-against a budget of a few thousand calls, and once a metro has been swept,
-`learn.py`'s five a day is the right speed for keeping up with it.
+Not on the daily schedule. It is a one-off sweep of a few hundred names;
+after that `learn.py`'s five a day keeps up.
 """
 
 from __future__ import annotations
@@ -63,15 +37,10 @@ from . import config, discover, learn, profile as targeting
 
 
 def places() -> set[str]:
-    """What "here" means for this profile, as whole place names.
+    """What "here" means for this profile, as whole place names read from it.
 
-    Read, never hardcoded. The point of the exercise is that the next person
-    to run it lives somewhere else.
-
-    The terms stay whole. Splitting them into words was the first version and
-    it was wrong: this profile knows about New Kent and Short Pump, and the
-    loose words "new" and "short" matched half of New York and every "short
-    term contract" in the file.
+    Kept whole: split into words, "New Kent" and "Short Pump" matched half of
+    New York and every "short term contract".
     """
     out = {str(t).strip().lower() for t in targeting.LOCAL_TERMS}
     out.add(str(targeting.HOME_METRO).split(",")[0].strip().lower())
@@ -106,13 +75,9 @@ def from_profile() -> list[tuple[str, str]]:
             site = "https://www.richmondfed.org" },
         ]
 
-    The website is worth typing. Resolution works by reading the company's
-    own careers page, so it has to find the website first, and guessing that
-    from the name fails on exactly the employers a metro list is full of --
-    the Federal Reserve Bank of Richmond is at richmondfed.org, VCU at
-    vcu.edu. Supplying it took the measured hit rate from 20 of 72 to 21 of
-    35, and a chamber of commerce directory prints the website in the same
-    row as the name anyway.
+    Guessing a website from the name fails on the employers a metro list is
+    full of (richmondfed.org, vcu.edu). Supplying it took the hit rate from
+    20 of 72 to 21 of 35.
     """
     path = profile_files.directory() / "seed_companies.toml"
     if not path.exists():
@@ -137,15 +102,9 @@ def from_profile() -> list[tuple[str, str]]:
 def from_history(here: set[str]) -> list[tuple[str, int]]:
     """Companies the store has seen hiring here, most-sighted first.
 
-    Every posting on file, not just the ones that scored. Whether a company's
-    openings are a fit is the scorer's judgment and it gets to make it every
-    morning once the board is on the list; what matters here is only that the
-    company hires in this metro.
-
-    A row is local when its recorded location says so. Rows written before
-    the store kept a location have none and are skipped rather than guessed
-    at -- `seen.json` is mostly remote boards, and a name taken from one
-    would send the sweep probing companies three time zones away.
+    Every posting on file, not just the ones that scored. A row counts only
+    when its recorded location is local; older rows with no location are
+    skipped, since `seen.json` is mostly remote boards.
     """
     tally: dict[str, list] = {}
     for rec in _postings():
@@ -159,15 +118,9 @@ def from_history(here: set[str]) -> list[tuple[str, int]]:
 
 
 def _postings() -> list[dict]:
-    """Every posting the radar has on file, from both places it keeps them.
-
-    `seen.json` is the long memory, tens of thousands of rows over the
-    retention window. `candidates.json` is the current working set, a few
-    hundred rows that survived the score floor. They overlap heavily and that
-    is fine: the overlap is double-counted into the sighting tally, which
-    only means a company currently advertising outranks one last seen weeks
-    ago. That is the right order to probe in anyway.
-    """
+    """Every posting the radar has on file, from `seen.json` and
+    `candidates.json`. The overlap is double-counted on purpose, so a company
+    advertising now outranks one last seen weeks ago."""
     return _rows(config.SEEN_FILE) + _rows(config.CANDIDATES)
 
 
@@ -194,24 +147,13 @@ def candidates(limit: int, today: date,
                retry_missed: bool = False) -> list[tuple[str, str]]:
     """Seed names worth probing, best first.
 
-    Profile names come first and unconditionally, sighting count or not:
-    somebody typed them, which beats anything derivable. History follows,
-    ordered by how often the company has turned up, because a company posting
-    here every week is a better bet for a board of its own than one seen once
-    in August.
+    Profile names first, then history by how often the company turns up.
+    Dropped: companies already watched, staffing firms, and companies probed
+    recently and missed (`learn.py`'s bookkeeping, so a second sweep in a week
+    does not pay for the same misses).
 
-    Dropped: companies already on a watch list, staffing firms, and companies
-    probed recently and missed. Those last are `learn.py`'s bookkeeping and
-    the seeder shares it, so a sweep run twice in a week does not pay twice
-    for the same 200 misses.
-
-    `retry_missed` suspends that last rule, and there is one situation that
-    calls for it: the reason a name missed has changed. A miss records that
-    the probe failed under the rules and the profile as they stood that day.
-    Tighten a confirmation rule, or paste in 228 company websites, and
-    yesterday's misses are answers to a question nobody is asking any more.
-    The cooldown is right for a sweep run on a schedule and wrong the day
-    after the inputs move, so it is a flag rather than a default.
+    `retry_missed` lifts that cooldown for the day the inputs change, like a
+    tightened confirmation rule or a batch of newly pasted websites.
     """
     if min_sightings is None:
         min_sightings = config.SEED_MIN_SIGHTINGS

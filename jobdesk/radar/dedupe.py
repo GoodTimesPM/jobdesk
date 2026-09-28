@@ -7,12 +7,12 @@ Two separate jobs:
      agencies. Keeping the company-direct copy is what turns "apply through
      the agency" into "apply direct" -- which matters, because a duplicate
      agency submission is one of the few things that gets a candidate
-     genuinely blacklisted (plan item 13).
+     genuinely blacklisted.
 
   2. Remember postings ACROSS runs, so the daily digest only ever shows what
      is actually new. `first_seen` also gives real posting-age data for
      boards that don't publish a date, and doubles as the raw material for
-     the Richmond Job Market Dashboard (plan item 11).
+     the market history.
 """
 
 from __future__ import annotations
@@ -263,7 +263,9 @@ class SeenStore:
     def save(self) -> None:
         self.prune()
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, indent=1), encoding="utf-8")
+        # Compact: indented, this was 11 MB, rewritten every run.
+        tmp.write_text(json.dumps(self._data, separators=(",", ":")),
+                       encoding="utf-8")
         tmp.replace(self.path)
 
     def prune(self) -> None:

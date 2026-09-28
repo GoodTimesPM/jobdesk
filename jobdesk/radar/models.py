@@ -19,6 +19,17 @@ from typing import Any
 _WS = re.compile(r"\s+")
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _TAGS = re.compile(r"<[^>]+>")
+# C1 control characters, which no posting means. They are Windows-1252 bytes
+# read as Latin-1: jobs.virginia.gov sends  for an apostrophe and 
+# for a bullet.
+_C1 = re.compile(r"[-]")
+
+
+def _from_cp1252(match: re.Match) -> str:
+    try:
+        return bytes([ord(match.group())]).decode("cp1252")
+    except UnicodeDecodeError:
+        return " "
 
 
 def clean_text(raw: str | None) -> str:
@@ -37,7 +48,8 @@ def clean_text(raw: str | None) -> str:
     """
     if not raw:
         return ""
-    return _WS.sub(" ", html.unescape(_TAGS.sub(" ", raw))).strip()
+    text = html.unescape(_TAGS.sub(" ", raw))
+    return _WS.sub(" ", _C1.sub(_from_cp1252, text)).strip()
 
 
 def parse_date(value: Any) -> datetime | None:
@@ -206,6 +218,9 @@ class Job:
         self.division = _WS.sub(" ", (self.division or "").strip())
         self.location = _WS.sub(" ", (self.location or "").strip())
         self.description = clean_text(self.description)
+        # A board that sends "department": null gets None past .get(k, "").
+        self.department = _WS.sub(" ", str(self.department or "").strip())
+        self.external_id = str(self.external_id or "").strip()
 
     # -- identity ----------------------------------------------------------
     @property

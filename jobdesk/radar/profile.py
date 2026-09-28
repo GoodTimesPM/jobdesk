@@ -72,6 +72,18 @@ def _data() -> dict[str, Any]:
     return _profile.load(FILE)
 
 
+# Shaped values, kept until the profile hands back a different dict. Scoring
+# asks for the same lists tens of thousands of times a run.
+_memo: dict[str, Any] = {"data": None, "values": {}}
+
+
+def _values() -> dict[str, Any]:
+    data = _data()
+    if data is not _memo["data"]:
+        _memo["data"], _memo["values"] = data, {}
+    return _memo["values"]
+
+
 def synonyms() -> dict[str, list[str]]:
     """Canonical term -> the other words a posting might use for it.
 
@@ -80,8 +92,12 @@ def synonyms() -> dict[str, list[str]]:
     <term>". Returned empty when `synonyms_enabled` is false, so switching the
     experiment off needs one line in the profile and no code path of its own.
     """
-    data = _data()
+    values = _values()
+    if "synonyms" in values:
+        return values["synonyms"]
+    data = _memo["data"]
     if not data.get("synonyms_enabled", True):
+        values["synonyms"] = {}
         return {}
     out: dict[str, list[str]] = {}
     for row in data.get("synonym", []):
@@ -90,25 +106,32 @@ def synonyms() -> dict[str, list[str]]:
             continue
         also = [str(a).strip().lower() for a in row.get("also", [])]
         out.setdefault(term, []).extend(a for a in also if a and a != term)
+    values["synonyms"] = out
     return out
 
 
 def __getattr__(name: str) -> Any:          # PEP 562
+    if name not in _SHAPED and name not in _OPTIONAL and name not in _KEYS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    values = _values()
+    if name in values:
+        return values[name]
+    data = _memo["data"]
     if name in _SHAPED:
         key, fields = _SHAPED[name]
-        return [tuple(row[f] for f in fields) for row in _data().get(key, [])]
-    if name in _OPTIONAL:
+        value = [tuple(row[f] for f in fields) for row in data.get(key, [])]
+    elif name in _OPTIONAL:
         key, default = _OPTIONAL[name]
-        return _data().get(key, default)
-    if name in _KEYS:
+        value = data.get(key, default)
+    else:
         key = name.lower()
-        data = _data()
         if key not in data:
             raise AttributeError(
                 f"{_profile.path(FILE)} has no '{key}'. Copy the missing key "
                 f"out of profile.example/{FILE}.")
-        return data[key]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        value = data[key]
+    values[name] = value
+    return value
 
 
 def __dir__() -> list[str]:

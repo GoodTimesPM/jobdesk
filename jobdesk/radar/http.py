@@ -64,12 +64,16 @@ def _host(url: str) -> str:
 
 
 def _wait_turn(host: str, spacing: float) -> None:
+    """Book this host's next slot, then sleep until it outside the lock.
+
+    Sleeping inside the lock made one slow host hold up every other thread.
+    """
     with _lock:
-        last = _last_call.get(host, 0.0)
-        gap = time.time() - last
-        if gap < spacing:
-            time.sleep(spacing - gap)
-        _last_call[host] = time.time()
+        now = time.time()
+        slot = max(now, _last_call.get(host, 0.0) + spacing)
+        _last_call[host] = slot
+    if slot > now:
+        time.sleep(slot - now)
 
 
 def request(method: str, url: str, *, spacing: float = DEFAULT_SPACING,

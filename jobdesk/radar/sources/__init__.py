@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import traceback
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 from .. import companies, config, http
 from ..models import Job
 from . import ats, boards
+
+# How many company boards are read at once.
+ATS_WORKERS = 6
 
 # Aggregator/board sources, in the order they run. Disable one by setting it
 # False here -- no other file needs to change.
@@ -36,6 +40,10 @@ def collect(log: Callable[[str], None] = print,
     stats: dict = {"sources": {}, "errors": [], "rate_limited": []}
 
     # -- company ATS boards first: freshest, most direct ---------------------
+    # In parallel. Each host keeps its own spacing in `http`, so this only
+    # overlaps waits on different hosts; boards that share one (every
+    # Greenhouse company is boards-api.greenhouse.io) still queue politely.
+    todo = []
     for entry in companies.active():
         name = f"{entry['ats']}:{entry['name']}"
         if only and only.lower() not in name.lower():
@@ -44,21 +52,26 @@ def collect(log: Callable[[str], None] = print,
         if handler is None:
             stats["errors"].append(f"{name}: no handler for '{entry['ats']}'")
             continue
-        try:
-            found = handler(entry)
-        except http.RateLimited as exc:
-            stats["rate_limited"].append(str(exc))
-            log(f"  {name}: rate-limited, skipped")
-            continue
-        except Exception:
-            stats["errors"].append(f"{name}: {traceback.format_exc(limit=2)}")
-            log(f"  {name}: FAILED")
-            continue
-        for job in found:
-            job.__dict__["_company_entry"] = entry   # for the detail fetch
-        jobs.extend(found)
-        stats["sources"][name] = len(found)
-        log(f"  {name}: {len(found)}")
+        todo.append((name, entry, handler))
+
+    with ThreadPoolExecutor(max_workers=ATS_WORKERS) as pool:
+        futures = [pool.submit(handler, entry) for _, entry, handler in todo]
+        for (name, entry, _), future in zip(todo, futures):
+            try:
+                found = future.result()
+            except http.RateLimited as exc:
+                stats["rate_limited"].append(str(exc))
+                log(f"  {name}: rate-limited, skipped")
+                continue
+            except Exception:
+                stats["errors"].append(f"{name}: {traceback.format_exc(limit=2)}")
+                log(f"  {name}: FAILED")
+                continue
+            for job in found:
+                job.__dict__["_company_entry"] = entry   # for the detail fetch
+            jobs.extend(found)
+            stats["sources"][name] = len(found)
+            log(f"  {name}: {len(found)}")
 
     # -- public boards ------------------------------------------------------
     for key, enabled in BOARD_SOURCES.items():

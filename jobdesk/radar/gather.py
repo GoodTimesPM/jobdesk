@@ -1,53 +1,28 @@
-"""Fill in seed_companies.toml for a metro, instead of asking for an afternoon.
+"""Fill in seed_companies.toml for a metro, instead of typing it by hand.
 
-`seed.py` needs a list of a metro's employers and, beside each one, the
-company's website. That list is what makes the whole thing work: the last
-sweep confirmed thirteen boards and every single one of them was confirmed by
-the `linked from <site>` path, none by the hiring-in-this-metro rule. So the
-website column is not a nicety, it is where the yield is.
+`seed.py` needs a metro's employers and each one's website; the website is
+where the confirmed boards come from. Four sources, weakest first:
 
-For Richmond I typed it. 246 names and 228 websites off four public lists,
-one afternoon. That is a fine answer for one person and a terrible answer for
-everybody else, and this module is the attempt to stop charging a stranger
-the same afternoon.
+  1. OpenStreetMap. Nominatim finds the metro's centre and Overpass returns
+     everything in a radius with a name and a website (Richmond: 5,102 pins,
+     2,979 domains). Needs nothing from the user.
+  2. Wikidata. Organisations headquartered in the city, with their website.
+  3. Pages the user names with `--from`: a table of employer links reads
+     straight off the page.
+  4. `seed.from_history`, from postings already on file.
 
-Four sources, weakest first, because the ordering is the honest part:
-
-  1. The map. Nominatim turns "Austin, TX" into a coordinate, Overpass
-     returns everything inside a radius of it that carries both a name and a
-     website. For Richmond that is 5,102 pins collapsing to 2,979 domains,
-     and it is the only source that needs nothing from the user at all.
-  2. Wikidata. Organisations whose headquarters is that city, with their
-     official website. 172 for Richmond. Small, clean, and it knows about
-     head offices the map has no pin for.
-  3. Pages the user points at with `--from`. The four lists every metro has
-     are named in seed_companies.toml, and a person finds them in a minute.
-     What costs the afternoon is reading 60 rows off each one and retyping
-     them, and a table of links is the one thing a computer reads perfectly.
-  4. Whatever `seed.from_history` already derives from postings on file.
-     Untouched here; that half was always free.
-
-What this does NOT do is believe any of it. Measured against the 246 names I
-typed by hand, the map and Wikidata together name 66 of them, which is a
-start and is nowhere near the list. Ranking is therefore the product, not
-filtering: every candidate is scored and the file is written best first, so
-the seeder's budget of 300 names is spent on the plausible end and the user
-trims a list instead of building one.
-
-Tag filtering was tried and measured and thrown away. Keeping only pins
-tagged as an office, a hospital or a university cut the noise from 2,979
-domains to 663 and cut the hand-list hits from 62 to 36, because a corporate
-head office is very often just a building. Dropping anything carrying OSM's
-`brand` tag looked like a clean way to delete the fast-food chains, and it
-deletes CarMax, Wegmans and Truist with them. Both are rank penalties now.
-Nothing is thrown away for looking wrong; it is sorted down for looking wrong.
+None of it is trusted. Every candidate is ranked and the file is written
+best first, so the seeder's 300-name budget goes to the plausible end and
+the user trims a list instead of building one. Tag filters were measured
+and cut real employers (CarMax, Wegmans and Truist carry OSM's `brand` tag),
+so they only nudge the rank.
 
     py -m jobdesk.radar.gather
     py -m jobdesk.radar.gather --from https://example.com/largest-employers
     py -m jobdesk.radar.gather --write
 
-Nothing is written without `--write`, and `--write` refuses to clobber a file
-that already has entries unless `--merge` says what to do with them.
+Nothing is written without `--write`, and `--write` refuses to clobber a
+file that already has entries unless `--merge` says what to do with them.
 """
 
 from __future__ import annotations
@@ -105,38 +80,17 @@ class Candidate:
     listed: bool = False        # named on a page the user pointed at
 
     def key(self) -> str:
-        """What makes two candidates the same company.
-
-        The domain, when there is one. Two rows for bonsecours.com are one
-        employer however differently the pins spell the name, and that
-        collapse is most of what makes the map usable at all: 5,102 pins are
-        2,979 companies.
-        """
+        """What makes two candidates the same company: the domain, when there is
+        one. Collapsing on it is what turns 5,102 pins into 2,979 companies."""
         return self.site or _slug(self.name)
 
     def score(self) -> int:
         """How much this looks like somewhere a person works.
 
-        The magnitudes below are not taste. The map's two weights were fitted
-        against the 246 names I typed by hand for Richmond, asking one
-        question: of the 64 hand-typed companies the map knows about, how
-        many land in the first 300 rows, which is all the seeder will read?
-
-            first 100 rows   16 of 64
-            first 300 rows   36 of 64
-            first 600 rows   40 of 64
-
-        Chance would put 6.5 of them in the first 300, so the ordering is
-        worth about five and a half times reading the file in the order
-        Overpass happens to return it. It is not worth more than that, and
-        pretending otherwise would be the easiest lie in this module.
-
-        Two things that sound like signal measured worse than nothing. A
-        penalty for OSM's `brand` tag cost four of the 36, because Wegmans,
-        CarMax and Truist are branded and are also three of the metro's
-        larger employers. Leaning hard on the office/hospital/university tag
-        cost eleven, because it mostly repeats what the pin count already
-        says. Both survive as a small nudge and a note on the row.
+        The weights were fitted against 246 hand-typed Richmond employers: 36 of
+        the 64 the map knows land in the first 300 rows, against 6.5 by chance.
+        The `brand` and office/hospital/university tags measured worse as strong
+        signals, so each is only a small nudge and a note on the row.
         """
         points = 0
         if self.listed:
@@ -169,14 +123,10 @@ def core_words(name: str) -> list[str]:
 
 
 def _fetch(method: str, url: str, **kwargs):
-    """A call that treats being cut off as an answer rather than an accident.
+    """A call that returns None when the host rate-limits us.
 
-    `http.request` raises RateLimited so that a scheduled run stops pestering
-    a host that has said no. Here there are four independent sources and the
-    right response to one of them refusing is to carry on with the other
-    three, so the exception becomes a None like every other failure. These
-    are public endpoints run by volunteers; being told to go away is a normal
-    outcome and not an error to report.
+    With four independent sources, one refusing should not stop the others.
+    These are volunteer-run public endpoints, so a refusal is not an error.
     """
     try:
         return http.request(method, url, **kwargs)
@@ -195,11 +145,10 @@ _DEPARTMENT = ("maps.", "map.", "www2.", "jobs.", "careers.", "career.",
 
 
 def domain_of(url: str) -> str:
-    """The bare hostname of a URL, or "" if there is not one in there.
+    """The bare hostname of a URL, or "" if there is none.
 
-    A university is the one case where every subdomain really is the same
-    employer -- maps.vcu.edu, arts.vcu.edu and vcu.edu are one payroll -- so
-    a .edu is cut back to its last two labels and nothing else is.
+    A .edu is cut back to its last two labels, because maps.vcu.edu and vcu.edu
+    are one payroll. No other domain is.
     """
     raw = (url or "").strip()
     if not raw:
@@ -226,18 +175,10 @@ def _initials(name: str) -> str:
 def best_name(counts: dict[str, int], site: str) -> str:
     """Which of the names pinned on one domain is the company's.
 
-    The first attempt took the shortest, on the theory that forty pins for a
-    hospital system are named after forty buildings and the short one is the
-    company. It is not: the shortest name on vcu.edu is "Bowe House", on
-    vmfa.museum it is "Amuse", the museum cafe, and on
-    keystonetractorworks.com it is "Keystone Grill". Shortness finds the
-    coffee shop inside the employer.
-
-    What actually identifies the company is the domain, which the company
-    chose and named itself after. So: a name the domain echoes wins, whether
-    spelled out (Bon Secours -> bonsecours.com) or as initials (Virginia
-    Commonwealth University -> vcu.edu). Failing that, the name the most pins
-    agree on, and shortness is only the tie-break it should always have been.
+    Shortest was wrong: on vcu.edu it is "Bowe House", on vmfa.museum the cafe.
+    A name the domain echoes wins, spelled out (Bon Secours, bonsecours.com) or
+    as initials (Virginia Commonwealth University, vcu.edu). Then the name most
+    pins agree on, with shortness only as the tie-break.
     """
     stem = re.sub(r"[^a-z0-9]", "", site.rsplit(".", 1)[0])
     named = [n for n in counts if _slug(n) and _slug(n) in stem]
@@ -259,12 +200,8 @@ def best_name(counts: dict[str, int], site: str) -> str:
 # --------------------------------------------------------------------------
 
 def geocode(metro: str) -> tuple[float, float]:
-    """"Austin, TX" -> a coordinate, so that "within 40km" means something.
-
-    Raises rather than guessing. Everything downstream is a radius around
-    this point, so a silently wrong centre would fill a user's file with
-    another state's companies and look like it had worked.
-    """
+    """"Austin, TX" as a coordinate. Raises instead of guessing, because a
+    wrong centre fills the file with another state's companies."""
     query = urllib.parse.urlencode({"q": metro, "format": "json", "limit": 1})
     resp = _fetch("GET", f"{NOMINATIM}?{query}", headers=POLITE, spacing=1.5)
     if resp is None or resp.status_code >= 400:
@@ -301,12 +238,8 @@ def looks_like_employer(tags: dict) -> bool:
 
 
 def overpass_query(lat: float, lon: float, radius_km: int) -> str:
-    """Everything with a name and a website inside the radius.
-
-    Asking for both `website` and `contact:website` is not fussiness. The two
-    tags are used interchangeably by mappers and dropping either one loses a
-    few hundred real domains.
-    """
+    """Everything with a name and a website inside the radius. Mappers use
+    `website` and `contact:website` interchangeably, so both are asked for."""
     metres = int(radius_km * 1000)
     return (f"[out:json][timeout:{OVERPASS_TIMEOUT}];\n(\n"
             f'  nwr["name"]["website"](around:{metres},{lat},{lon});\n'
@@ -384,11 +317,7 @@ def city_entity(metro: str) -> str:
 
 def hq_query(city: str) -> str:
     """Organisations headquartered in a place, with their official website.
-
-    `wdt:P159/wdt:P131*` reads "headquarters located in, or in anything
-    administratively inside" -- so a company in a suburb of the named city
-    still counts, which is the behaviour a metro wants.
-    """
+    `wdt:P159/wdt:P131*` also takes a head office in a suburb of the city."""
     return ("SELECT ?orgLabel ?site WHERE {\n"
             f"  ?org wdt:P159/wdt:P131* wd:{city} .\n"
             "  ?org wdt:P856 ?site .\n"
@@ -397,13 +326,8 @@ def hq_query(city: str) -> str:
 
 
 def from_wikidata(metro: str, log=print) -> list[Candidate]:
-    """Head offices in this city.
-
-    Note what this is not: a lookup by company name. Searching Wikidata for a
-    name and taking its website was tried and got 2 of 60 known answers
-    right. Asking the other way round, by place, is the query the data
-    actually supports.
-    """
+    """Head offices in this city. Asked by place because looking companies up
+    by name got 2 of 60 known websites right."""
     city = city_entity(metro.split(",")[0].strip() or metro)
     if not city:
         log("gather: no encyclopaedia entry for that place; skipping it")
@@ -473,13 +397,9 @@ def is_boilerplate_host(site: str) -> bool:
 def links_to_candidates(html: str, page_url: str) -> list[Candidate]:
     """Read a roster of employers as (name, website) pairs.
 
-    The shape this exploits is the same on all four of the lists
-    seed_companies.toml names: a table where each company's name is a link to
-    the company. Anchor text is the name, the href is the website, and both
-    columns come out of one fetch with no typing at all.
-
-    Links back into the publisher's own site are dropped, which removes the
-    navigation without needing to understand the page.
+    Employer lists are tables where each name links to the company, so anchor
+    text is the name and the href the website. Links back into the publisher's
+    own site are dropped, which removes the navigation.
     """
     host = domain_of(page_url)
     merged: dict[str, Candidate] = {}
@@ -525,25 +445,11 @@ _TITLE_TAG = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 def guesses(name: str) -> list[str]:
     """Domains worth trying for a name, most distinctive first.
 
-    Wider than `resolve.domains`, and that is only allowed because every
-    guess here has to be confirmed by the page before it is written down.
-    `resolve` guesses in the middle of a run and acts on the answer; this
-    guesses once and has to show its work.
-
-    No stem here ever drops a word and leaves one behind. Dropping the last
-    word off a two-word name is the bare first word wearing a hat, and a
-    single generic word is somebody else's company by default: memorial.com is
-    a domain broker, richmond.com is the newspaper rather than the Federal
-    Reserve, owens.com redirects to a malware warning, london.com is not The
-    London Company and chesapeake.org is not the Chesapeake Corporation.
-    Measured over the 246 Richmond names, the one-word guess was right four
-    times in twenty-three.
-
-    A one-word stem still comes out of here, because "The London Company" is
-    one distinctive word once `core_words` has dropped the furniture, and a
-    company named with one word has to be allowed to own the matching domain.
-    That case is not made safe here. It is made safe in `confirms`, which
-    makes a single-word name prove it is in this metro before it counts.
+    Wider than `resolve.domains`, which is allowed only because `confirms`
+    checks every guess against the page. No stem drops words down to one
+    generic word: memorial.com is a domain broker and richmond.com a newspaper,
+    and that guess was right 4 times in 23. A name that is one distinctive word
+    still yields that word, and `confirms` makes it prove it is local.
     """
     words = core_words(name)
     if not words:
@@ -562,18 +468,9 @@ def guesses(name: str) -> list[str]:
 
 
 def home_terms() -> tuple[str, ...]:
-    """The words a local company's own website is likely to print.
-
-    Off the profile, so this asks about Austin for a user in Austin. Used
-    only by `confirms`, and only for the one risky case it guards.
-
-    Punctuation is stripped and anything under four letters is dropped, which
-    is not tidiness. The profile's local terms include ", VA", and a page's
-    HTML is full of minified JavaScript, so a plain substring test found ", va"
-    inside `, var x` on every page on the internet and cheerfully confirmed a
-    Broken Bow cabin rental as a Richmond employer. State abbreviations are two
-    letters and cannot be told apart from noise, so they do not get a vote.
-    """
+    """The words a local company's own website is likely to print, from the
+    profile. Terms under four letters are dropped: ", VA" matched ", var" in
+    minified JavaScript on every page on the internet."""
     metro = str(targeting.HOME_METRO)
     raw = {metro.split(",")[0], metro.rpartition(",")[2]}
     raw |= {str(t) for t in targeting.LOCAL_TERMS}
@@ -583,12 +480,9 @@ def home_terms() -> tuple[str, ...]:
 
 
 def _says_home(body: str) -> bool:
-    """Does this page print the name of the user's own metro anywhere?
-
-    Whole words only. `in` would match a term inside a longer word, and the
-    whole point of this test is that it is the last thing standing between a
-    one-word name and a stranger's homepage.
-    """
+    """Does this page print the name of the user's own metro anywhere? Whole
+    words only, since this is what stands between a one-word name and a
+    stranger's homepage."""
     return any(re.search(r"\b" + re.escape(term) + r"\b", body)
                for term in home_terms())
 
@@ -597,24 +491,10 @@ def confirms(name: str, title: str, body: str, host: str) -> bool:
     """Does this page belong to this company?
 
     Every distinctive word of the name has to be in the page title. Half of
-    them was the first rule and it was far too kind: it let Cavalier Telephone
-    resolve to brandforce.com and Virginia Premier to virginia.org. Requiring
-    all of them took the known-bad names from ten wrong to five.
-
-    The other five were one-word names, where the only stem available is that
-    one word and a company really does put its own word in its own title. So
-    a single-word name additionally has to prove it is in this metro, and
-    that took ten wrong down to two. The two left are Riverstone Properties
-    and Reliance Ventures, whose names also belong to an Oklahoma cabin
-    rental and a Texas oilfield hauler. Nothing reads its way past that, and
-    it is why this returns "" rather than a maybe.
-
-    Making every name prove it is in this metro, not only the one-word ones,
-    does catch both of those. It was measured over 80 of the hand-verified
-    Richmond sites and it is not worth it: right answers fell from 16 to 9 to
-    buy those two. Better than half the companies in a metro do not say where
-    they are on their own front page, and a rule that reads silence as a no
-    throws away more employers than it saves.
+    them let Cavalier Telephone resolve to brandforce.com. A one-word name must
+    also show it is in this metro. Requiring that of every name was measured
+    and cost more right answers (16 down to 9) than wrong ones it caught, since
+    most companies do not print their city on the front page.
     """
     if not title:
         return False
@@ -657,13 +537,11 @@ def _page_of(host: str) -> tuple[str, str, str]:
 
 
 def find_site(name: str, budget, log=None) -> str:
-    """A website for a bare name, or "" -- and "" is a perfectly good answer.
+    """A website for a bare name, or "".
 
-    Nothing uncertain is returned. A wrong website is worse than none here:
-    the seeder confirms a board by finding it linked from the site it was
-    given, so a stranger's domain does not fail, it confirms a stranger's
-    board and files it under this company's name. That is the one outcome
-    this project refuses, so the bar is a page that names the company.
+    Nothing uncertain comes back. The seeder confirms a board by finding it
+    linked from this site, so a stranger's domain would file a stranger's board
+    under this company.
     """
     for host in guesses(name):
         if not budget.spend():
@@ -683,21 +561,9 @@ _BARE = re.compile(r'^(\s*)"([^"]+)"(\s*,\s*)(#.*)?$')
 def fill_sites(text: str, budget, log=print, find=find_site) -> tuple[str, int]:
     """Give a website to every entry in a seed file that has only a name.
 
-    This is the other half of the afternoon. Gathering finds companies the
-    user never listed; this one takes the list they already have -- pasted
-    off a largest-employers PDF, which prints names and no links -- and goes
-    and finds each company's website, which is the column the sweep showed
-    all the yield comes from.
-
-    Line-based on purpose. Rewriting the file through a TOML parser would
-    lose every comment in it, and in a file a person is meant to read and
-    prune, the comments saying where each name came from are half the value.
-    A bare-name line is replaced; every other line is passed through byte for
-    byte.
-
-    `find` is the resolver, and it is a parameter so that the self-check can
-    test the rewriting without asking the internet whether Acme Health System
-    exists.
+    Line-based, so the comments saying where each name came from survive: a
+    bare-name line is replaced and every other line passes through unchanged.
+    `find` is a parameter so the self-check can run without the internet.
     """
     out: list[str] = []
     filled = 0
@@ -725,13 +591,8 @@ def fill_sites(text: str, budget, log=print, find=find_site) -> tuple[str, int]:
 # --------------------------------------------------------------------------
 
 def merge(groups: list[list[Candidate]]) -> list[Candidate]:
-    """One row per company, best first.
-
-    Merging is by domain, so a company the map pinned and the encyclopaedia
-    listed becomes one candidate carrying both sources -- and two independent
-    sources agreeing is the strongest signal available here, worth more than
-    anything either one of them says alone.
-    """
+    """One row per company, best first. Merged by domain, so two sources
+    agreeing on a company become one candidate that carries both."""
     merged: dict[str, Candidate] = {}
     for group in groups:
         for row in group:

@@ -58,14 +58,14 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
         log("nothing collected - every source was empty or failed")
         return 1
 
-    # Score once on the title/location alone, so the detail fetch can be
-    # spent only on postings that are already plausible.
+    # Score once before the detail fetch, so it is spent only on postings that
+    # are already plausible and have no body from an earlier run.
+    candidates.reuse_bodies(jobs, log=log)
     for job in jobs:
         score.score_job(job)
     sources.fetch_details(jobs, log=log)
 
-    # Richmond Job Market Dashboard's raw layer (plan item 11): the full,
-    # pre-dedupe pull, exactly as each source returned it. Must happen here,
+    # The optional MySQL raw layer: the full, pre-dedupe pull, exactly as each source returned it. Must happen here,
     # before dedupe.collapse below discards the duplicate copies that make
     # this data "raw" in the first place.
     #
@@ -137,8 +137,7 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     digest_path.write_text(render.markdown(jobs, stats, new_jobs), encoding="utf-8")
     log(f"digest written to {digest_path.name}")
 
-    # The market dataset for the Richmond Job Market Dashboard (plan item
-    # 11). These files are committed on purpose, so size discipline matters:
+    # The market dataset. These files are committed on purpose, so size discipline matters:
     #
     #   * only postings seen for the FIRST time are written. The union of all
     #     snapshots is the full market history; re-recording the same 797
@@ -171,7 +170,7 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
             print(render.console(jobs, stats, new_jobs))
         return 0
 
-    # The working set for Assisted Apply (plan items 5, 6): everything above
+    # The working set for Assisted Apply: everything above
     # the threshold right now, JD bodies included. Deliberately not limited to
     # `new_jobs` -- a posting found yesterday and not applied to yet is still a
     # candidate today, and this is the file that answers "what can I apply to".

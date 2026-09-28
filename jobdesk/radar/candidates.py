@@ -1,11 +1,11 @@
-"""Hand-off cache for Assisted Apply (plan items 5 and 6, sub-project 4).
+"""Hand-off cache for Assisted Apply.
 
 Job Radar already pays for the expensive part: it pulls the posting, fetches
 the JD body on anything plausible, scores it, and knows the flags. Assisted
 Apply needs exactly that -- the JD text plus the scoring context -- to build an
 application packet without re-fetching a page Job Radar already has.
 
-So this writes it down once per run instead of making the other sub-project go
+So this writes it down once per run instead of making the apply package go
 back to the network. It is a DATA hand-off, not shared code: the file is plain
 JSON with no radar types in it, and nothing here imports or is imported by
 the apply package.
@@ -19,6 +19,7 @@ bodies kept, git-ignored, rewritten every run.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -100,6 +101,17 @@ def _rescore_carried(by_uid: dict[str, dict], touched: set[str],
         log(f"candidates: re-scored {changed} carried-over posting(s)")
 
 
+def save(rows: list[dict], path=None) -> None:
+    """Write the cache through a temp file, so a reader never sees half of it.
+
+    The window reads this file while the radar and the Criteria tab write it.
+    """
+    path = path or config.CANDIDATES
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def write(jobs: list[Job], log: Callable[[str], None] = print) -> int:
     """Rewrite the candidate cache from this run's scored postings.
 
@@ -162,12 +174,45 @@ def write(jobs: list[Job], log: Callable[[str], None] = print) -> int:
         rows = rows[:MAX_ENTRIES]
 
     try:
-        path.write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+        save(rows, path)
     except OSError as exc:
         log(f"candidates: write failed, run continues ({exc})")
         return 0
     log(f"candidates: {kept} above threshold this run -> {len(rows)} in cache")
     return len(rows)
+
+
+def reuse_bodies(jobs: list[Job], path=None,
+                 log: Callable[[str], None] = print) -> int:
+    """Give this run's postings the bodies earlier runs already read.
+
+    A sitemap or Workday list carries no body, so without this every run
+    spent its detail budget re-reading the same top postings. On
+    jobs.virginia.gov the WAF allows about 36 reads a run, and the same 17
+    were read every time while 50 newer rows never got one.
+    """
+    path = path or config.CANDIDATES
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8-sig") or "[]")
+    except (OSError, ValueError):
+        return 0
+    # Keyed by URL as well as uid, because the uid is company and title, and
+    # two state agencies can both post an "Energy Analyst".
+    bodies = {(r["uid"], r.get("url")): r["description"] for r in rows
+              if isinstance(r, dict) and r.get("uid") and r.get("description")
+              and not r.get("partial")
+              and "partial-description" not in (r.get("flags") or [])}
+    reused = 0
+    for job in jobs:
+        if job.description:
+            continue
+        body = bodies.get((job.uid, job.url))
+        if body:
+            job.description = body
+            reused += 1
+    if reused:
+        log(f"  reused {reused} job description(s) from the last run")
+    return reused
 
 
 # What one WAF cooldown costs, and how many are worth sitting through before
@@ -280,7 +325,7 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
     rows = [r for r in rows if (r.get("score") or 0) >= config.MIN_SCORE_TO_REPORT]
     rows.sort(key=lambda r: (-(r.get("score") or 0), str(r.get("last_seen") or "")))
     try:
-        path.write_text(json.dumps(rows, separators=(",", ":")), encoding="utf-8")
+        save(rows, path)
     except OSError as exc:
         log(f"candidates: write failed ({exc})")
         return 0
