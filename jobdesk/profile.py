@@ -20,16 +20,15 @@ means the example cannot quietly rot, because the tests are using it.
 Set JOBDESK_PROFILE to point somewhere else entirely (an absolute path) to
 run against a third profile without touching either.
 
-Nothing here is Claude-shaped. These are TOML files a person edits in any
-text editor, and step 3's setup wizard just writes the same files from a
-form.
+These are TOML files a person edits in any text editor. The setup wizard
+writes the same files from a form.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import tomllib
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -48,9 +47,36 @@ class ProfileError(RuntimeError):
     """A profile is missing or unreadable. Raised with what to do about it."""
 
 
+# Profile reads happen tens of thousands of times in one scoring pass, so the
+# directory choice and each file's contents are cached. Both are rechecked
+# against the disk at most once a second, which is how an edit made in a text
+# editor is picked up without a restart. `forget()` drops everything at once,
+# for code that has just written a profile file itself.
+_RECHECK_S = 1.0
+_dir_cache: tuple[str | None, float, Path] | None = None
+_files: dict[tuple[str, str], tuple[float, int, dict[str, Any]]] = {}
+
+
+def forget() -> None:
+    global _dir_cache
+    _dir_cache = None
+    _files.clear()
+
+
 def directory() -> Path:
     """Which profile directory is in force, in precedence order."""
+    global _dir_cache
     override = os.environ.get("JOBDESK_PROFILE")
+    now = time.monotonic()
+    if (_dir_cache and _dir_cache[0] == override
+            and now - _dir_cache[1] < _RECHECK_S):
+        return _dir_cache[2]
+    found = _directory(override)
+    _dir_cache = (override, now, found)
+    return found
+
+
+def _directory(override: str | None) -> Path:
     if override:
         path = Path(override).expanduser()
         if not path.is_dir():
@@ -78,19 +104,28 @@ def path(name: str) -> Path:
     return directory() / name
 
 
-@lru_cache(maxsize=None)
-def _read(name: str, directory_key: str) -> dict[str, Any]:
-    # directory_key is in the signature only so the cache invalidates when
-    # JOBDESK_PROFILE changes mid-process, which is exactly what the tests do.
-    file = Path(directory_key) / name
-    if not file.exists():
+def _read(name: str, where: str) -> dict[str, Any]:
+    key = (name, where)
+    now = time.monotonic()
+    hit = _files.get(key)
+    if hit and now - hit[0] < _RECHECK_S:
+        return hit[2]
+    file = Path(where) / name
+    try:
+        stamp = file.stat().st_mtime_ns
+    except OSError:
         raise ProfileError(
-            f"{file} is missing. A profile needs: {', '.join(REQUIRED)}")
+            f"{file} is missing. A profile needs: {', '.join(REQUIRED)}") from None
+    if hit and hit[1] == stamp:
+        _files[key] = (now, stamp, hit[2])
+        return hit[2]
     try:
         with file.open("rb") as handle:
-            return tomllib.load(handle)
+            data = tomllib.load(handle)
     except tomllib.TOMLDecodeError as exc:
         raise ProfileError(f"{file} is not valid TOML: {exc}") from exc
+    _files[key] = (now, stamp, data)
+    return data
 
 
 def load(name: str) -> dict[str, Any]:
@@ -151,3 +186,70 @@ def file_stem() -> str:
 
 def _safe(text: str) -> str:
     return "".join(c for c in text if c.isalnum())
+
+
+def leftovers() -> list[str]:
+    """What a real profile still carries over from the fictional example.
+
+    The setup wizard starts a profile from the example and rewrites only the
+    identity block. Until the user replaces the rest, a resume built from it
+    puts their name on Wren Adeyemi's jobs, which is the one thing this tool
+    promises never to do. Empty when the profile is the example itself, since
+    that is the test fixture and is supposed to be fictional.
+    """
+    try:
+        if is_example():
+            return []
+        where = directory()
+    except ProfileError:
+        return []
+    found: list[str] = []
+
+    def both(name: str) -> tuple[dict, dict]:
+        try:
+            return _read(name, str(where)), _read(name, str(EXAMPLE))
+        except ProfileError:
+            return {}, {}
+
+    mine, theirs = both("master.toml")
+    jobs = {str(e.get("company", "")).strip().lower(): e.get("company", "")
+            for e in theirs.get("experience", [])}
+    kept = [jobs[c] for c in (str(e.get("company", "")).strip().lower()
+                              for e in mine.get("experience", [])) if c in jobs]
+    if kept:
+        found.append("master.toml still lists the example's jobs ("
+                     + ", ".join(kept) + ").")
+    example_bullets = {b.get("text") for b in theirs.get("bullet", [])}
+    same = sum(1 for b in mine.get("bullet", []) if b.get("text") in example_bullets)
+    if same:
+        found.append(f"master.toml still has {same} of the example's resume "
+                     f"bullets, word for word.")
+
+    mine, theirs = both("letter.toml")
+    example_text = {row.get("template") for rows in theirs.values()
+                    if isinstance(rows, list) for row in rows
+                    if isinstance(row, dict)}
+    same = sum(1 for rows in mine.values() if isinstance(rows, list)
+               for row in rows
+               if isinstance(row, dict) and row.get("template") in example_text)
+    if same:
+        found.append(f"letter.toml still has {same} of the example's "
+                     f"paragraphs.")
+
+    # A generic answer can match the example and still be true, so the
+    # answers file counts as unreviewed only while it keeps the wizard's
+    # header. The same goes for a letter file whose paragraphs were rewritten.
+    for name in ("letter.toml", "answers.toml"):
+        try:
+            head = (where / name).read_text(encoding="utf-8")[:2000]
+        except OSError:
+            continue
+        if UNREVIEWED in head and not any(name in f for f in found):
+            found.append(f"{name} is still the example's, unreviewed. Edit it, "
+                         f"then delete the NOT YOURS YET block at the top.")
+    return found
+
+
+# The marker the setup wizard writes at the top of a file it copied from the
+# example without changing.
+UNREVIEWED = "IT IS NOT YOURS YET"
