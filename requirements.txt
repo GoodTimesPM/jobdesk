@@ -11,10 +11,10 @@
 # -- radar: discovery ------------------------------------------------------
 requests>=2.31      # every job-board and ATS fetch
 
-# raw_postings ingestion for the Richmond Job Market Dashboard (plan item
-# 11). Pure-Python (no C build step), and the write is best-effort: a
-# missing or broken MySQL never blocks a radar run.
-pymysql>=1.1
+# Optional. The radar can copy every raw posting into MySQL for outside
+# analysis; without pymysql it logs one line and skips it. To turn it on:
+#   pip install pymysql
+# and set MYSQL_PASSWORD (plus MYSQL_HOST/USER/DB) in .env.
 
 # Verify TLS against the OS certificate store. Some employer careers sites
 # (jobs.virginia.gov) serve an incomplete certificate chain that browsers
