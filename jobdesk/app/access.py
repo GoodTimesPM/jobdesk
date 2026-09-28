@@ -53,11 +53,41 @@ COOKIE_MAX_AGE_S = 60 * 60 * 24 * 90
 PARAM = "k"
 
 
+# The token as last read from a file. A value in the environment that matches
+# it came from the file and follows the file when the file changes; one that
+# does not was set in the shell, and the shell wins.
+_FROM_FILE: str | None = None
+
+
+def _file_token() -> str | None:
+    for name in (".env.app", ".env"):
+        try:
+            text = (paths.ROOT / name).read_text(encoding="utf-8-sig")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key.strip() == TOKEN_ENV:
+                value = value.strip().strip('"').strip("'")
+                if value:
+                    return value
+    return None
+
+
 def token() -> str | None:
-    """The configured access token, or None if there is not one."""
-    paths.load_env(".env.app", ".env")
-    value = os.environ.get(TOKEN_ENV, "")
-    return value.strip() or None
+    """The configured access token, or None if there is not one.
+
+    Read from the file on every call, so a token edited into `.env` by hand
+    takes effect without a restart.
+    """
+    global _FROM_FILE
+    from_file = _file_token()
+    current = os.environ.get(TOKEN_ENV, "").strip()
+    if from_file and (not current or current == _FROM_FILE
+                      or (_FROM_FILE is None and current == from_file)):
+        os.environ[TOKEN_ENV] = current = from_file
+    _FROM_FILE = from_file
+    return current or None
 
 
 def mint() -> str:

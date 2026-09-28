@@ -49,6 +49,9 @@ async function call(path, options) {
 }
 
 const get = (path) => call(path);
+
+// A posting URL comes from a job board, so only http(s) ones become links.
+const webUrl = (url) => (/^https?:\/\//i.test(url || "") ? url : null);
 const post = (path, body) => call(path, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -179,7 +182,7 @@ async function poll() {
   try {
     data = await get(`/api/run?id=${encodeURIComponent(runs.watching)}&after=${runs.next}`);
   } catch (err) {
-    $("#out").textContent += "\n" + err.message;
+    $("#out").append("\n" + err.message);
     return;
   }
   if (data.missing) { $("#out").textContent = "that run has scrolled out of the list"; return; }
@@ -187,7 +190,9 @@ async function poll() {
   if (data.lines.length) {
     runs.next = data.next;
     const out = $("#out");
-    out.textContent += data.lines.join("\n") + "\n";
+    // append() adds a text node. `textContent +=` re-reads and re-parses the
+    // whole log on every poll, which gets slow on a long sweep.
+    out.append(data.lines.join("\n") + "\n");
     if ($("#follow").checked) out.scrollTop = out.scrollHeight;
   }
   if (!data.done) {
@@ -266,7 +271,7 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 // breaks the tie between two postings from the same day.
 const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
                 market: {}, marketIndex: null, starsGone: [],
-                lastRun: null };
+                lastRun: null, details: {}, pasted: {} };
 
 // The two orders the "Order" menu and Settings offer, as a column and a
 // direction. Clicking a column header picks a third, and the menu says so.
@@ -489,11 +494,13 @@ function marketCell(job) {
   const td = el("td", { class: "mkt" });
   if (!m) return td;
   const glyph = m.direction === "up" ? "▲" : (m.direction === "down" ? "▼" : "•");
-  const text = m.direction === "flat" ? "even" : glyph + Math.abs(m.delta) + "%";
+  const text = m.direction === "flat" ? "even" : glyph + Math.abs(m.delta);
   td.append(el("span", {
     class: "mktv " + m.direction + (m.confident ? "" : " thin"),
     text: text,
-    title: `Better than ${m.percentile}% of the ${m.peers} postings in `
+    title: (m.direction === "flat" ? "" : `${Math.abs(m.delta)} points `
+             + `${m.direction === "up" ? "above" : "below"} the middle. `)
+           + `Better than ${m.percentile}% of the ${m.peers} postings in `
            + `this group: ${m.group}.`
            + (m.confident ? "" : " A small group, so read it loosely."),
   }));
@@ -592,7 +599,7 @@ function drawStarsGone() {
   state.starsGone.forEach((s, i) => {
     if (i) note.append(document.createTextNode(", "));
     const label = `${s.title || "a posting"}${s.company ? " at " + s.company : ""}`;
-    note.append(s.url
+    note.append(webUrl(s.url)
       ? el("a", { href: s.url, target: "_blank", rel: "noopener noreferrer",
                   text: label })
       : document.createTextNode(label));
@@ -605,22 +612,46 @@ function drawStarsGone() {
 const PHONE = window.matchMedia("(max-width: 700px)");
 const narrow = () => PHONE.matches;
 
-const JOB_COLUMNS = ["score", "title", "company", "location", "age_days",
-                    "market", "salary", "source"];
-const JOB_COLUMNS_PHONE = ["score", "title", "market", "company", "location",
-                           "age_days", "salary", "source"];
+/* Star, score and title always lead. The rest follow Settings, and on a
+   phone the market arrow moves up beside the title: the sixth column there
+   is far enough into a sideways scroll that it reads as missing. */
+const JOB_COLUMNS = ["company", "location", "age_days", "market", "salary",
+                     "source"];
+
+function jobColumns() {
+  const chosen = (prefs.job_columns || JOB_COLUMNS)
+    .filter((k) => JOB_COLUMNS.includes(k));
+  if (!narrow() || !chosen.includes("market")) return chosen;
+  return ["market", ...chosen.filter((k) => k !== "market")];
+}
 
 function orderJobsHead() {
   const head = $("#jobs thead tr");
-  (narrow() ? JOB_COLUMNS_PHONE : JOB_COLUMNS).forEach((key) =>
+  const shown = jobColumns();
+  ["score", "title", ...shown].forEach((key) =>
     head.append(head.querySelector(`th[data-key="${key}"]`)));
+  JOB_COLUMNS.forEach((key) => {
+    const th = head.querySelector(`th[data-key="${key}"]`);
+    th.hidden = !shown.includes(key);
+    if (th.hidden) head.append(th);
+  });
 }
 
 PHONE.addEventListener("change", () => { orderJobsHead(); draw(); });
 
 
+/* The search box redraws after typing stops, not on every key. A queue of
+   a few hundred rows is a few hundred rows of DOM each time. */
+let drawTimer = null;
+function drawSoon() {
+  clearTimeout(drawTimer);
+  drawTimer = setTimeout(draw, 150);
+}
+
 function draw() {
+  clearTimeout(drawTimer);
   const rows = visible();
+  const columns = jobColumns();
   const body = $("#rows");
   body.textContent = "";
 
@@ -640,22 +671,21 @@ function draw() {
     if (job.applied) title.append(el("span", { class: "pill", text: job.app_status }));
     else if (job.prepared) title.append(el("span", { class: "pill", text: "packet ready" }));
 
-    const rest = [cell(job.company),
-      cell(job.remote ? "Remote" : (job.location || "—")),
-      cell(age(job)), salaryCell(job), cell(job.source)];
-    // Market is the sixth column, and on a phone the sixth column is two
-    // thirds of a sideways scroll away -- far enough that it reads as
-    // missing rather than as off-screen. It moves up next to the score
-    // there, which is the other number you scan a queue for.
-    tr.append(starCell(job), score, title,
-      ...(narrow() ? [marketCell(job)] : []),
-      ...rest.slice(0, 3), ...(narrow() ? [] : [marketCell(job)]),
-      ...rest.slice(3));
+    const cells = {
+      company: () => cell(job.company),
+      location: () => cell(job.remote ? "Remote" : (job.location || "—")),
+      age_days: () => cell(age(job)),
+      market: () => marketCell(job),
+      salary: () => salaryCell(job),
+      source: () => cell(job.source),
+    };
+    tr.append(starCell(job), score, title, ...columns.map((k) => cells[k]()));
     body.append(tr);
 
     if (state.open === job.uid) body.append(detailRow(job));
   });
 
+  drawMoreCount();
   $("#jobs-empty").hidden = rows.length > 0;
   $("#jobs-empty").textContent = state.jobs.length
     ? "Nothing matches those filters."
@@ -676,18 +706,26 @@ function jdBlocks(blocks) {
 }
 
 function detailRow(job) {
-  const td = el("td", { colSpan: 9 });
+  const td = el("td", { colSpan: 3 + jobColumns().length });
   const actions = el("div", { class: "actions" });
 
-  actions.append(el("a", { href: job.url, target: "_blank",
-    rel: "noopener noreferrer", text: "Open the posting ↗" }));
+  if (webUrl(job.url)) {
+    actions.append(el("a", { href: job.url, target: "_blank",
+      rel: "noopener noreferrer", text: "Open the posting ↗" }));
+  }
 
   // Pasting beats fetching whenever someone bothers to do it: a careers site
   // that hands a script a login page hands this textarea the real posting.
-  const paste = el("div", { class: "jd-paste" }, el("textarea", {
+  // What was pasted is kept per posting, because starring a row or typing in
+  // the search box redraws the table and would otherwise throw it away.
+  const kept = state.pasted[job.uid] || (state.pasted[job.uid] = { text: "", open: false });
+  const box = el("textarea", {
     rows: 8, placeholder: "Paste the job description here, then build.",
-  }));
-  paste.hidden = true;
+  });
+  box.value = kept.text;
+  box.addEventListener("input", () => { kept.text = box.value; });
+  const paste = el("div", { class: "jd-paste" }, box);
+  paste.hidden = !kept.open;
 
   actions.append(el("button", {
     class: job.prepared || job.applied ? "ghost" : "",
@@ -700,7 +738,8 @@ function detailRow(job) {
 
   actions.append(el("button", { class: "ghost", text: "Paste the description",
     on: { click: (e) => { e.stopPropagation(); paste.hidden = !paste.hidden;
-                          if (!paste.hidden) paste.querySelector("textarea").focus(); } } }));
+                          kept.open = !paste.hidden;
+                          if (!paste.hidden) box.focus(); } } }));
 
   if (job.application) {
     actions.append(el("button", { class: "ghost", text: "Open the folder",
@@ -731,12 +770,23 @@ function detailRow(job) {
   const jd = el("div", { class: "jd", text: "Loading the description…" });
   td.append(jd);
 
-  get("/api/job?uid=" + encodeURIComponent(job.uid)).then((full) => {
-    jd.replaceWith(full.blocks && full.blocks.length
-      ? jdBlocks(full.blocks)
-      : el("div", { class: "jd raw",
-          text: "This posting arrived without a description. Open it above, "
-              + "copy the text, and paste it in with the button." }));
+  // One fetch per posting per load of the list. A redraw reuses it; a new
+  // list (after a sweep or a rescore) has new row objects and fetches again.
+  let cached = state.details[job.uid];
+  if (!cached || cached.job !== job) {
+    cached = state.details[job.uid] = {
+      job, fetch: get("/api/job?uid=" + encodeURIComponent(job.uid)) };
+    cached.fetch.catch(() => { delete state.details[job.uid]; });
+  }
+  cached.fetch.then((full) => {
+    if (full.blocks && full.blocks.length) jd.replaceWith(jdBlocks(full.blocks));
+    else if (webUrl(job.url) && !cached.tried) readPosting(job, cached, jd);
+    else {
+      jd.classList.add("raw");
+      jd.textContent = "This posting arrived without a description. Open it "
+        + "above, copy the text, and paste it in with the button."
+        + (cached.error ? " " + cached.error : "");
+    }
     (full.guards || []).forEach((g) => {
       const line = el("div", { class: "guard", text: g.message });
       line.dataset.level = g.level;
@@ -747,6 +797,24 @@ function detailRow(job) {
   const tr = el("tr", { class: "detail" });
   tr.append(td);
   return tr;
+}
+
+// A row the radar never got a body for. One read of the posting page, once
+// per load of the list; on success the row takes the new score and pay.
+function readPosting(job, cached, jd) {
+  cached.tried = true;
+  jd.textContent = "Reading the posting…";
+  post("/api/job/read", { uid: job.uid }).then((full) => {
+    ["score", "tier", "reasons", "flags", "salary_min", "salary_max",
+     "jd_chars"].forEach((k) => { if (k in full) job[k] = full[k]; });
+    const market = state.market[job.uid];
+    if (market) market.salary_estimate = full.salary_estimate || null;
+    cached.fetch = Promise.resolve(full);
+    draw();
+  }).catch((err) => {
+    cached.error = err.message;
+    draw();
+  });
 }
 
 // Why the arrow points where it points. Four measures, each one a place in
@@ -762,7 +830,7 @@ function marketPanel(job) {
     const head = el("div", { class: "market-head" });
     head.append(el("span", { class: "mktv " + m.direction,
       text: (m.direction === "up" ? "▲" : m.direction === "down" ? "▼" : "•")
-            + (m.direction === "flat" ? " even" : Math.abs(m.delta) + "%") }));
+            + (m.direction === "flat" ? " even" : Math.abs(m.delta) + " pts") }));
     head.append(el("span", { class: "note",
       text: `against ${m.peers} postings in ${m.group}`
             + (m.confident ? "" : ", a small group to judge by") }));
@@ -888,12 +956,104 @@ $("#order").addEventListener("change", (ev) => {
 $("#reset-filters").addEventListener("click", () => {
   $("#search").value = "";
   applyFilters(prefs);
+  leftView();
   draw();
 });
 
-["#search", "#score-min", "#score-max", "#hide-applied", "#hide-prepared",
- "#remote-only", "#starred-only"].forEach((sel) =>
-  $(sel).addEventListener("input", draw));
+/* -- saved views and the More menu -- */
+
+const VIEW_BOXES = { hide_applied: "#hide-applied", hide_prepared: "#hide-prepared",
+                     remote_only: "#remote-only", starred_only: "#starred-only" };
+
+// The filters on screen now, in the shape Settings stores a view in.
+function currentFilters() {
+  const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
+  const [lo, hi] = scoreRange();
+  const f = { search: $("#search").value.trim().slice(0, 200),
+              score_min: clamp(lo), score_max: clamp(hi) };
+  Object.entries(VIEW_BOXES).forEach(([k, sel]) => { f[k] = $(sel).checked; });
+  if (ORDERS[$("#order").value]) f.jobs_sort = $("#order").value;
+  return f;
+}
+
+function drawViews(selected) {
+  const select = $("#view");
+  const views = prefs.views || [];
+  select.textContent = "";
+  select.append(el("option", { value: "", text: views.length ? "none" : "none saved" }));
+  views.forEach((v, i) => select.append(el("option", { value: String(i), text: v.name })));
+  select.value = selected === undefined || selected < 0 ? "" : String(selected);
+  $("#delete-view").hidden = select.value === "";
+}
+
+// Any filter change after picking a view means the view is no longer what
+// is on screen, so the menu stops claiming it is.
+function leftView() {
+  $("#view").value = "";
+  $("#delete-view").hidden = true;
+}
+
+// How many of the filters tucked inside More are narrowing the list, so a
+// closed menu still says something is on.
+function drawMoreCount() {
+  const on = Object.values(VIEW_BOXES).filter((sel) => $(sel).checked).length;
+  $("#more-count").textContent = on ? String(on) : "";
+  $("#more-count").title = on ? plural(on, "filter") + " on in here" : "";
+}
+
+async function saveViews(views, selected) {
+  const data = await post("/api/settings", { settings: { views } });
+  prefs = data.settings;
+  drawViews(selected);
+}
+
+$("#view").addEventListener("change", (ev) => {
+  const view = (prefs.views || [])[Number(ev.target.value)];
+  $("#delete-view").hidden = !view;
+  if (!view) return;
+  $("#search").value = view.filters.search || "";
+  applyFilters(Object.assign({}, prefs, view.filters));
+  draw();
+});
+
+$("#save-view").addEventListener("click", async () => {
+  const name = $("#view-name").value.trim();
+  if (!name) { $("#view-name").focus(); return; }
+  const views = (prefs.views || []).slice();
+  let at = views.findIndex((v) => v.name.toLowerCase() === name.toLowerCase());
+  if (at < 0 && views.length >= 12) {
+    banner("Twelve views is the most JobDesk keeps. Delete one first.", true);
+    return;
+  }
+  const view = { name, filters: currentFilters() };
+  if (at < 0) { views.push(view); at = views.length - 1; } else views[at] = view;
+  try {
+    await saveViews(views, at);
+    $("#view-name").value = "";
+  } catch (err) { banner(err.message, true); }
+});
+
+$("#delete-view").addEventListener("click", async () => {
+  const at = Number($("#view").value);
+  const views = (prefs.views || []).filter((_, i) => i !== at);
+  try { await saveViews(views); } catch (err) { banner(err.message, true); }
+});
+
+["#search", "#score-min", "#score-max", "#tier", "#order",
+ ...Object.values(VIEW_BOXES)].forEach((sel) =>
+  $(sel).addEventListener("input", leftView));
+
+// A click anywhere else closes the menu, the way a menu is expected to.
+document.addEventListener("click", (e) => {
+  const more = $("#jobs-more");
+  if (more.open && !more.contains(e.target)) more.open = false;
+});
+
+$("#search").addEventListener("input", drawSoon);
+["#score-min", "#score-max"].forEach((sel) =>
+  $(sel).addEventListener("input", drawSoon));
+["#hide-applied", "#hide-prepared", "#remote-only", "#starred-only"]
+  .forEach((sel) => $(sel).addEventListener("input", draw));
 
 // The preset writes the two boxes and then gets out of the way. It is a
 // shortcut for typing the numbers, not a third filter that can disagree with
@@ -916,7 +1076,7 @@ $("#rescore").addEventListener("click", async () => {
     state.jobs = data.jobs;
     stamp(data);
     draw();
-    banner(`${plural(data.moved, "posting")} changed score. Nothing was written.`);
+    banner(`${plural(data.moved, "posting")} changed score. ${data.note || ""}`.trim());
   } catch (err) {
     banner(err.message, true);
   } finally {
@@ -1288,7 +1448,7 @@ function appDetail(row) {
   const td = el("td", { colSpan: 8 });
   const actions = el("div", { class: "actions" });
 
-  if (row.url) {
+  if (webUrl(row.url)) {
     actions.append(el("a", { href: row.url, target: "_blank",
       rel: "noopener noreferrer", text: "Open the posting ↗" }));
   }
@@ -1453,12 +1613,21 @@ function drawArchive(data) {
       + `sweep saw ${(s.last_read || 0).toLocaleString()} of these again and `
       + `found ${(s.last_new || 0).toLocaleString()} new.`
     : "Nothing archived yet.";
+  const top = s.most_read;
+  $("#archive-reads").textContent = top && top.times > 1
+    ? `Each row is one posting, counted once however often it is seen. The `
+      + `last sweep read ${(s.last_read || 0).toLocaleString()} listings and `
+      + `${(s.last_new || 0).toLocaleString()} were new, because a posting `
+      + `stays up for weeks: ${top.company}'s ${top.title} has been read `
+      + `${top.times.toLocaleString()} times. The new count is what the radar `
+      + `is actually finding.`
+    : "";
 
   const body = $("#arc-rows");
   body.textContent = "";
   data.rows.forEach((row) => {
     const title = el("td", {},
-      row.url ? el("a", { href: row.url, target: "_blank",
+      webUrl(row.url) ? el("a", { href: row.url, target: "_blank",
         rel: "noopener noreferrer", text: row.title || "(untitled)" })
               : (row.title || "(untitled)"));
     body.append(el("tr", {},
@@ -1917,14 +2086,29 @@ $("#make-shortcut").addEventListener("click", async () => {
  * localStorage for theme.js, which applies them before the first paint.
  */
 
-const LOOK_KEYS = ["theme", "scheme", "font", "text_size", "density"];
+const LOOK_KEYS = ["theme", "scheme", "font", "text_size", "density", "accent"];
 let prefs = {
   jobs_sort: "newest", score_min: 45, score_max: 100, hide_applied: true,
   hide_prepared: false, remote_only: false, starred_only: false,
   start_tab: "jobs",
   theme: "system", scheme: "slate", font: "system", text_size: 100,
-  density: "normal",
+  density: "normal", accent: "",
+  job_columns: ["company", "location", "age_days", "market", "salary", "source"],
+  views: [],
 };
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+// Dark text on a light accent, white on a dark one, by WCAG luminance. The
+// crossover near 0.18 is where the two give the same contrast.
+function accentInk(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((c) => {
+    c /= 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.18 ? "#10161a" : "#ffffff";
+}
 let prefDefaults = Object.assign({}, prefs);   // replaced by the server's copy
 
 function applyLook(p) {
@@ -1937,6 +2121,19 @@ function applyLook(p) {
   /* A number, not an attribute, so the size can be any percentage the server
      will accept rather than one of a handful the stylesheet knows by name. */
   root.style.setProperty("--zoom", String((Number(p.text_size) || 100) / 100));
+  // A custom accent overrides the scheme's in both light and dark.
+  const accent = HEX.test(p.accent || "") ? p.accent : "";
+  ["light", "dark"].forEach((mode) => {
+    if (accent) {
+      root.style.setProperty(`--accent-${mode}`, accent);
+      root.style.setProperty(`--accent-ink-${mode}`, accentInk(accent));
+    } else {
+      root.style.removeProperty(`--accent-${mode}`);
+      root.style.removeProperty(`--accent-ink-${mode}`);
+    }
+  });
+  const shown = accent || getComputedStyle(root).getPropertyValue("--accent").trim();
+  if (HEX.test(shown)) $("#accent").value = shown.toLowerCase();
   const look = {};
   LOOK_KEYS.forEach((k) => { look[k] = p[k]; });
   try { localStorage.setItem("jobdesk.look", JSON.stringify(look)); } catch { /* private mode */ }
@@ -2004,6 +2201,65 @@ $$("[data-pref]").forEach((input) => input.addEventListener("change", async () =
   }
 }));
 
+/* -- accent colour -- */
+
+async function saveSetting(key, value) {
+  try {
+    const data = await post("/api/settings", { settings: { [key]: value } });
+    prefs = data.settings;
+    saved("Saved.");
+  } catch (err) {
+    saved(err.message);
+  }
+}
+
+// Dragging through the picker previews; letting go saves.
+$("#accent").addEventListener("input", (e) =>
+  applyLook(Object.assign({}, prefs, { accent: e.target.value })));
+$("#accent").addEventListener("change", async (e) => {
+  await saveSetting("accent", e.target.value);
+  applyLook(prefs);
+});
+$("#accent-reset").addEventListener("click", async () => {
+  await saveSetting("accent", "");
+  applyLook(prefs);
+});
+
+/* -- which columns the Jobs table shows -- */
+
+function drawColumnList() {
+  const list = $("#column-list");
+  list.textContent = "";
+  const shown = (prefs.job_columns || JOB_COLUMNS).filter((k) => JOB_COLUMNS.includes(k));
+  const order = [...shown, ...JOB_COLUMNS.filter((k) => !shown.includes(k))];
+  const save = async (columns) => {
+    await saveSetting("job_columns", columns);
+    drawColumnList();
+    orderJobsHead();
+    draw();
+  };
+  order.forEach((key, i) => {
+    const on = shown.includes(key);
+    const name = $(`#jobs th[data-key="${key}"]`).textContent;
+    const box = el("input", { type: "checkbox", checked: on });
+    box.addEventListener("change", () => save(box.checked
+      ? [...shown, key] : shown.filter((k) => k !== key)));
+    const move = (d) => {
+      const next = shown.slice();
+      [next[i], next[i + d]] = [next[i + d], next[i]];
+      save(next);
+    };
+    list.append(el("li", {},
+      el("label", { class: "check" }, box, " " + name),
+      el("button", { class: "ghost", type: "button", text: "↑",
+        disabled: !on || i === 0, "aria-label": `Move ${name} left`,
+        on: { click: () => move(-1) } }),
+      el("button", { class: "ghost", type: "button", text: "↓",
+        disabled: !on || i === shown.length - 1, "aria-label": `Move ${name} right`,
+        on: { click: () => move(1) } })));
+  });
+}
+
 let folderInfo = null;
 
 function drawFolders(f) {
@@ -2037,6 +2293,7 @@ async function loadSettings() {
     prefs = data.settings;
     prefDefaults = data.defaults;
     drawPrefs();
+    drawColumnList();
     drawFolders(data.folders);
   } catch (err) {
     saved(err.message);
@@ -2081,6 +2338,40 @@ $("#gear").addEventListener("click", () => show("settings"));
 
 // `stay` keeps the page where it is, for the end of the wizard: its "your
 // profile is written" message is on the Setup screen and should be read.
+// The tier floors and point caps come from the scorer, so a re-weighted rule
+// cannot leave this page describing the old one.
+const TIER_WORDS = { A: "is worth applying to today", B: "is a good fit",
+                     C: "is worth a look" };
+
+function drawScoring(scoring) {
+  const parts = $("#score-parts");
+  parts.textContent = "";
+  scoring.parts.forEach((p) => parts.append(el("li", {},
+    el("b", {}, p.label), ` up to ${p.max}${p.label === "Pay" ? ", when listed" : ""}`)));
+
+  const legend = $("#tier-legend");
+  legend.textContent = "The letter next to each score is a shorthand for it: ";
+  const select = $("#tier");
+  select.length = 1;
+  let ceiling = 100;
+  scoring.tiers.forEach(({ tier, floor }) => {
+    const range = ceiling === 100 ? `${floor} and up` : `${floor} to ${ceiling}`;
+    if (TIER_WORDS[tier]) {
+      legend.append(el("span", { class: `tier ${tier}` }, tier),
+                    ` ${range} ${TIER_WORDS[tier]}. `);
+      select.append(el("option", { value: `${floor},${ceiling}` },
+                       `${tier}, ${range}`));
+    }
+    ceiling = floor - 1;
+  });
+  const shown = scoring.tiers.find((t) => t.tier === "C");
+  if (shown) {
+    legend.append(`Below ${shown.floor} is hidden unless you ask for it.`);
+    select.append(el("option", { value: `${shown.floor},100` }, "everything scored"));
+  }
+  select.append(el("option", { value: "0,100" }, "everything, F-tier included"));
+}
+
 async function boot(stay) {
   orderJobsHead();
   try {
@@ -2093,12 +2384,18 @@ async function boot(stay) {
     } else if (s.using_example) {
       banner("Running on the example profile. Every score below belongs to a "
            + "made-up candidate until you finish setup.", false, true);
+    } else if (s.leftovers && s.leftovers.length) {
+      banner("Packets are off until your profile is yours. "
+           + s.leftovers.join(" "), true, true);
     } else {
       banner("");
     }
     if (s.settings) prefs = s.settings;
+    if (s.scoring) drawScoring(s.scoring);
     applyLook(prefs);
     applyFilters(prefs);
+    orderJobsHead();
+    drawViews();
     // Setup is a one-time wizard. Once it has written a profile its tab only
     // invites someone to overwrite that profile, so it goes; the phone and
     // shortcut panels that used to sit under it are in Settings now.

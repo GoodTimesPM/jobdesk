@@ -63,20 +63,6 @@
       <input type="number" id="score-max" min="0" max="100" step="1" value="100"
              inputmode="numeric" aria-label="Highest score to show">
     </label>
-    <label class="pick">Jump to
-      <select id="tier">
-        <option value="" selected>a range</option>
-        <option value="75,100">A, 75 and up</option>
-        <option value="60,74">B, 60 to 74</option>
-        <option value="45,59">C, 45 to 59</option>
-        <option value="45,100">everything scored</option>
-        <option value="0,100">everything, F-tier included</option>
-      </select>
-    </label>
-    <label class="check"><input type="checkbox" id="hide-applied" checked> Hide applied</label>
-    <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
-    <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
-    <label class="check"><input type="checkbox" id="starred-only"> Starred only</label>
     <label class="pick">Order
       <select id="order">
         <option value="newest">newest first</option>
@@ -84,10 +70,34 @@
         <option value="column" hidden>by column</option>
       </select>
     </label>
-    <button id="reset-filters" class="ghost" title="Put the filters back to what Settings says">Reset filters</button>
+    <label class="pick">View
+      <select id="view">
+        <option value="">none saved</option>
+      </select>
+    </label>
     <button id="sweep" class="ghost">Run the radar</button>
-    <button id="new-posting" class="ghost">A posting from elsewhere</button>
-    <button id="rescore" class="ghost">Rescore</button>
+    <details class="more" id="jobs-more">
+      <summary>More<span class="more-count" id="more-count"></span></summary>
+      <div class="more-menu">
+        <label class="pick">Jump to
+          <select id="tier">
+            <option value="" selected>a range</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="hide-applied" checked> Hide applied</label>
+        <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
+        <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
+        <label class="check"><input type="checkbox" id="starred-only"> Starred only</label>
+        <div class="more-row">
+          <input type="text" id="view-name" maxlength="40" placeholder="Name these filters" aria-label="Name for this view">
+          <button id="save-view" class="ghost">Save view</button>
+        </div>
+        <button id="delete-view" class="ghost" hidden>Delete this view</button>
+        <button id="reset-filters" class="ghost" title="Put the filters back to what Settings says">Reset filters</button>
+        <button id="new-posting" class="ghost">A posting from elsewhere</button>
+        <button id="rescore" class="ghost">Rescore</button>
+      </div>
+    </details>
     <div class="spacer"></div>
     <div class="counts" id="counts"></div>
   </section>
@@ -95,9 +105,8 @@
   <form class="manual" id="posting" hidden>
     <h2>A posting JobDesk never found</h2>
     <p class="note">
-      Something off a company&#39;s own careers page, or a link someone sent
-      you. It gets the same packet, the same guard rules and the same row on
-      the Applied tab as anything the radar turned up.
+      A posting from a careers page or a link someone sent you. It gets the
+      same packet, guard rules and Applied row as a radar find.
     </p>
     <div class="fields">
       <label>Company<input name="company" required></label>
@@ -105,7 +114,7 @@
       <label class="wide">Link<input name="url" placeholder="optional, but JobDesk will try to read the description from it"></label>
     </div>
     <label class="full">The job description
-      <textarea name="jd" rows="8" placeholder="Paste it here. Optional if the link above is readable, but pasting always beats fetching -- some sites hand a robot a login page."></textarea>
+      <textarea name="jd" rows="8" placeholder="Paste it here. Optional if the link works, but pasting is safer, since some sites show a script a login page."></textarea>
     </label>
     <div class="panel-foot">
       <button type="button" id="posting-build">Build the packet</button>
@@ -250,19 +259,10 @@
   <div class="panel-head">
     <h2>Everything the radar has ever seen</h2>
     <p class="note" id="archive-summary"></p>
+    <p class="note" id="archive-reads"></p>
     <p class="note">
-      Each of these is a <em>distinct</em> posting, counted once however many
-      times it has been seen. A sweep pulls around nine thousand listings and
-      almost all of them are ones it pulled this morning &mdash; a req stays up
-      for weeks, so the same Coinbase role has been counted here once and read
-      a hundred and forty-six times. The number below the count is what the
-      radar is genuinely finding.
-    </p>
-    <p class="note">
-      The Jobs tab holds a working queue: postings above the score floor, seen
-      in the last 30 days. This is the index behind it. It knows a title, a
-      company, a link and a score, and no more than that, which is all the
-      radar needs to tell a new posting from one it already reported.
+      Every posting the radar has ever reported, by title, company, link and
+      score. The Jobs tab only shows the last 30 days above the floor.
     </p>
   </div>
 
@@ -320,9 +320,8 @@
   <div class="panel-head">
     <h2>What counts as a good job</h2>
     <p class="note">
-      This page is how JobDesk decides which postings to put at the top. Tell
-      it what you want here, press Save, and every posting it already has is
-      scored again straight away, so you can see what changed.
+      What JobDesk ranks first. Press Save and every posting it has is scored
+      again, so you can see what moved.
     </p>
   </div>
 
@@ -333,21 +332,8 @@
       thing below that the posting matches, and takes points off for things
       you do not want.
     </p>
-    <ul class="points">
-      <li><b>Title</b> up to 35</li>
-      <li><b>Location</b> up to 25</li>
-      <li><b>Skills</b> up to 25</li>
-      <li><b>Experience</b> up to 15</li>
-      <li><b>How new it is</b> up to 10</li>
-      <li><b>Pay</b> up to 11, when listed</li>
-    </ul>
-    <p>
-      The letter next to each score is a shorthand for it:
-      <span class="tier A">A</span> 75 and up is worth applying to today,
-      <span class="tier B">B</span> 60 to 74 is a good fit,
-      <span class="tier C">C</span> 45 to 59 is worth a look.
-      Below 45 is hidden unless you ask for it.
-    </p>
+    <ul class="points" id="score-parts"></ul>
+    <p id="tier-legend"></p>
     <p class="note">
       Not sure why a job scored the way it did? Click it on the Jobs tab. The
       reasons are listed line by line, with the points each one was worth.
@@ -360,9 +346,8 @@
     <span class="note" id="criteria-status"></span>
   </div>
   <p class="note">
-    This page covers the settings people change. Everything else, like which
-    companies to watch and fine-tuning for unusual job titles, is in
-    <code id="criteria-file"></code>, with an explanation above each line.
+    The common settings. The rest, like which companies to watch, is in
+    <code id="criteria-file"></code>, with a note above each line.
     <button id="open-criteria-file" class="ghost small" type="button">Open its folder</button>
   </p>
 </main>
@@ -412,10 +397,9 @@
     <fieldset class="step" data-step="0">
       <h2>Start from your resume</h2>
       <p class="note">
-        Drop in a PDF, Word document or plain text file. JobDesk reads it to
-        pre-fill the next few screens, then deletes the upload. It never
-        rewrites what your resume says: it fills in your contact details and
-        offers the job titles it found so you can pick from them.
+        Drop in a PDF, Word file or text file. JobDesk reads it to fill in the
+        next screens, then deletes the upload. It never rewrites your resume,
+        only takes your contact details and the job titles in it.
       </p>
       <label class="drop" id="drop">
         <input type="file" id="resume" accept=".pdf,.docx,.txt,.md" hidden>
@@ -442,11 +426,10 @@
     <fieldset class="step" data-step="2" hidden>
       <h2>What you are looking for</h2>
       <p class="note">
-        Tier 1 is what you would take today. Tier 2 is reachable with the right
-        pitch. Tier 3 is a stretch. Titles are matched as text against the
-        posting, so keep them short and general: <em>operations analyst</em>
-        catches "Senior Operations Analyst II" but "Operations Analyst,
-        Payments" catches almost nothing.
+        Tier 1 you would take today, tier 2 needs the right pitch, tier 3 is a
+        stretch. Keep titles short: <em>operations analyst</em> matches
+        "Senior Operations Analyst II", and "Operations Analyst, Payments"
+        matches almost nothing.
       </p>
       <div id="title-picks" class="picks" hidden>
         <p class="note">Found in your resume. Click any that still fit:</p>
@@ -493,9 +476,9 @@
         <textarea name="dealbreakers" rows="3" placeholder="night shift&#10;door to door"></textarea>
       </label>
       <p class="note">
-        Added to the list JobDesk already screens for: unpaid work,
-        commission-only pay, and multi-level marketing. Most postings do not
-        state a salary, so the floor only counts against the ones that do.
+        On top of what JobDesk already screens out: unpaid, commission-only
+        and multi-level marketing. Most postings list no salary, so the floor
+        only counts against the ones that do.
       </p>
     </fieldset>
 
@@ -503,10 +486,9 @@
     <fieldset class="step" data-step="5" hidden>
       <h2>Companies worth watching</h2>
       <p class="note">
-        JobDesk checks these employers' own job boards every morning, where a
-        posting shows up days before it reaches the aggregators. Optional: the
-        general search runs regardless. Name them now and JobDesk will tell you
-        which command finds each one's board.
+        Optional. JobDesk reads these employers' own job boards every morning,
+        where postings show up days before the aggregators have them. It will
+        tell you which command finds each board.
       </p>
       <label class="full">One company per line
         <textarea name="employers" rows="6" placeholder="Target&#10;Kaiser Permanente&#10;Stripe"></textarea>
@@ -517,10 +499,8 @@
     <fieldset class="step" data-step="6" hidden>
       <h2>Where finished work goes</h2>
       <p class="note">
-        Optional. Give a folder outside this project and JobDesk copies each
-        finished resume and application packet there, so the files you work
-        from are not buried in a code directory. Leave blank to keep
-        everything inside the project.
+        Optional. JobDesk copies each finished resume and packet to this
+        folder too. Leave it blank to keep everything inside the project.
       </p>
       <div class="fields wide">
         <label>Resumes<input name="delivery_resumes" placeholder="D:\Job Search\Resumes"></label>
@@ -636,16 +616,29 @@
           <option value="roomy">Roomy, easier to tap</option>
         </select>
       </label>
+      <label>Accent colour
+        <span class="accent-row">
+          <input type="color" id="accent" aria-label="Accent colour">
+          <button type="button" id="accent-reset" class="ghost">Use the scheme&#39;s</button>
+        </span>
+      </label>
     </div>
+  </section>
+
+  <section class="panel" id="set-columns">
+    <h2>Jobs table columns</h2>
+    <p class="note">
+      Star, score and title always come first. Untick a column to hide it,
+      and use the arrows to move it.
+    </p>
+    <ul class="column-list" id="column-list"></ul>
   </section>
 
   <section class="panel" id="set-files">
     <h2>Where your files go</h2>
     <p class="note">
-      JobDesk always builds resumes and application packets inside its own
-      folder first. It can also copy each one to a folder of your choice,
-      like the one where you keep the rest of your job search. Leave a box
-      empty to skip the copy.
+      JobDesk builds everything in its own folder, and can copy each file to a
+      folder you pick. Leave a box empty to skip the copy.
     </p>
     <div class="folders" id="folders"></div>
     <div class="panel-foot">
@@ -657,9 +650,8 @@
   <section class="panel" id="set-profile">
     <h2>Your profile</h2>
     <p class="note">
-      Your details, work history and everything the Criteria tab edits live in
-      a folder of plain text files. The Criteria tab covers what most people
-      change. Open the folder to change anything else.
+      Your details and work history live in a folder of plain text files. The
+      Criteria tab edits the common parts. Open the folder for the rest.
     </p>
     <p class="path-line"><code id="profile-dir"></code></p>
     <div class="panel-foot">
@@ -671,11 +663,10 @@
   <section class="panel" id="phone-panel">
     <h2>JobDesk on your phone</h2>
     <p class="note">
-      Turns this window into something your phone can open: a token is written
-      to <code>.env</code>, JobDesk starts answering on this machine&#39;s
-      network address as well as on loopback, and a task brings it back up at
-      every logon &mdash; because the phone is the device you use when you are
-      not at the desk. Scan the code once and the phone stays paired.
+      Lets your phone open JobDesk. It writes a token to <code>.env</code>,
+      listens on this machine&#39;s network address as well as loopback, and
+      adds a task that starts it at logon. Scan the code once and the phone
+      stays paired.
     </p>
     <div class="phone-grid">
       <div class="phone-qr" id="phone-qr"></div>

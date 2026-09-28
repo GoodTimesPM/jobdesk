@@ -1,40 +1,21 @@
-"""Phone access as one switch, instead of five things you do in order.
+"""Phone access as one switch.
 
-Almost everything this file needs already existed. `net.auto()` finds an
-address a phone can reach, `access.mint()` makes a token, `autostart.install()`
-registers the logon task, `firewall.state()` knows whether the packets get
-through, and `qr.svg()` draws the result. What did not exist was a way to get
-all of it without leaving JobDesk: the honest instructions were mint a token,
-open `.env` in an editor, paste it, save, run a PowerShell command as
-administrator, then register a scheduled task. Six steps, two of which are
-"edit a credential file correctly" and "elevate", and all six happen at the
-desk, which is the machine you are sitting at *because* you are about to walk
-away from it.
+`turn_on()` puts together `net.auto()`, `access.mint()`,
+`autostart.install()`, `firewall.state()` and `qr.svg()`, which used to be
+six manual steps. `turn_off()` removes the logon task, and `state()` returns
+enough to draw the panel.
 
-So: one button. `turn_on()` does what it can, `turn_off()` undoes the one that
-matters, and `state()` answers "is this on, and what is the address" well
-enough to draw the panel with no other call.
+Two rules about `.env`, which also holds the Discord webhook and Notion token:
 
-Two rules this module will not bend on, both about the credential file:
+  * Write a token only when there is none. If one is configured,
+    `turn_on()` uses it, so a paired phone is never locked out by accident.
+  * Append one line and rewrite nothing, so the lines above cannot be lost.
 
-  * **It writes a token only when there is not one.** A request that can
-    rewrite `.env` is a request that can lock a paired phone out by accident,
-    and the accident looks like the feature working. If a token is already
-    configured, `turn_on()` uses it and leaves the file untouched.
-  * **It appends one line and rewrites nothing.** No parse, no reformat, no
-    round trip through a dict. `.env` here holds the Discord webhook and the
-    Notion token beside the access token, and a file that is only ever appended
-    to cannot lose the line above.
+`rotate()` breaks the first rule on purpose, from its own button.
 
-`rotate()` is the deliberate exception to the first rule and honours the
-second. Changing the token by accident is the failure the rule guards against;
-changing it on purpose is a thing a person needs to be able to do from the
-panel, because the alternative is opening a credential file in an editor.
-
-The one thing this cannot do for you is the firewall. Adding a rule needs
-administrator rights, and a page that could elevate itself would be worse than
-an unreachable phone, so the panel reports the rule and hands over the exact
-command. See `firewall.py`, where that argument is made in full.
+The firewall rule needs administrator rights, and a page that could elevate
+itself would be worse than an unreachable phone, so the panel shows the
+command instead. See `firewall.py`.
 """
 
 from __future__ import annotations
@@ -42,6 +23,7 @@ from __future__ import annotations
 import os
 import socket
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from .. import paths
 from . import access, autostart, firewall, net, qr
@@ -98,7 +80,7 @@ def _ensure_token() -> tuple[str, bool]:
         pass
     lead = "" if (not body or body.endswith("\n")) else "\n"
     with ENV_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(lead + "\n# Phone access. Written by JobDesk.\n"
+        handle.write(lead + "\n" + _BANNER + "\n"
                      + access.TOKEN_ENV + "=" + minted + "\n")
     # `paths.load_env` uses setdefault, so a stale value already in this
     # process's environment would win over the line just written, and the QR
@@ -107,20 +89,15 @@ def _ensure_token() -> tuple[str, bool]:
     return minted, True
 
 
+_BANNER = "# Phone access. Written by JobDesk."
+
+
 def rotate(port: int = DEFAULT_PORT) -> dict:
     """Mint a new token, replace the old line in `.env`, redraw the QR code.
 
-    This is the one write here that is not an append, and the rule it appears
-    to break, never change a token out from under a device using it, is the
-    rule it exists to serve. Rotating *is* the act of logging every paired
-    device out at once, and it is what you want the moment a token has been
-    read over your shoulder or carried out of the house on a phone that is not
-    coming back. So it is its own function behind its own button, and never a
-    side effect of the switch.
-
-    Only lines beginning `JOBDESK_ACCESS_TOKEN=` are touched, and the result is
-    moved into place atomically. Both matter, because this file also holds the
-    Discord webhook and the Notion token, and that is the only copy.
+    Logs every paired device out at once, for a token that was seen or a phone
+    that was lost. Only `JOBDESK_ACCESS_TOKEN=` lines change, and the file is
+    replaced atomically, since it holds the only copy of the other secrets.
     """
     fresh = access.mint()
     try:
@@ -128,8 +105,11 @@ def rotate(port: int = DEFAULT_PORT) -> dict:
     except OSError:
         lines = []
     prefix = access.TOKEN_ENV + "="
-    kept = [ln for ln in lines if not ln.strip().startswith(prefix)]
-    kept += ["", "# Phone access. Written by JobDesk.", prefix + fresh]
+    kept = [ln for ln in lines if not ln.strip().startswith(prefix)
+            and ln.strip() != _BANNER]
+    while kept and not kept[-1].strip():
+        kept.pop()
+    kept += ["", _BANNER, prefix + fresh]
     tmp = ENV_PATH.with_suffix(ENV_PATH.suffix + ".new")
     tmp.write_text("\n".join(kept) + "\n", encoding="utf-8")
     os.replace(tmp, ENV_PATH)
@@ -150,24 +130,42 @@ def _reachable(address: str, port: int) -> bool:
 def _neighbourhood(address: str | None) -> str:
     """The first three octets of an IPv4 address, as a prefix to compare with.
 
-    Deliberately not a subnet mask. Reading the real prefix length means asking
-    Windows, and getting it wrong in the other direction is worse: telling
-    someone their phone is on the wrong network when it is not sends them off
-    to reconfigure a router that was fine. Three octets is what a home router
-    hands out, and the panel says so as a likelihood rather than a rule.
+    Not the real subnet mask, which means asking Windows. Three octets is what
+    a home router hands out, so the panel calls a mismatch likely, not certain.
     """
     parts = (address or "").split(".")
     return ".".join(parts[:3]) + "." if len(parts) == 4 else ""
 
 
-def state(port: int = DEFAULT_PORT) -> dict:
+# Both probes spawn PowerShell, about a second each. The panel reads state on
+# every visit, so their answers are kept briefly; anything that changes them
+# asks for fresh ones.
+_PROBE_TTL_S = 15.0
+_probed: tuple[float, int, dict, str] | None = None
+
+
+def _probes(port: int, fresh: bool) -> tuple[dict, str]:
+    global _probed
+    now = time.monotonic()
+    if (not fresh and _probed and _probed[1] == port
+            and now - _probed[0] < _PROBE_TTL_S):
+        return _probed[2], _probed[3]
+    with ThreadPoolExecutor(2) as pool:
+        task = pool.submit(autostart.describe)
+        wall = pool.submit(firewall.state, port)
+        result = task.result(), wall.result()
+    _probed = (now, port, *result)
+    return result
+
+
+def state(port: int = DEFAULT_PORT, fresh: bool = True) -> dict:
     """Everything the panel draws, in one call.
 
     Nothing here raises. A machine with no tailnet and no LAN is a normal
     machine on a plane, and the panel's job in that case is to say so rather
     than to be an error.
     """
-    task = autostart.describe()
+    task, wall = _probes(port, fresh)
     key = access.token()
 
     address = kind = None
@@ -203,7 +201,7 @@ def state(port: int = DEFAULT_PORT) -> dict:
         # packet from this machine never meets the firewall, so a port that
         # answers here can still be a port the phone's request dies in front
         # of, with no error at either end. See `firewall.py`.
-        "firewall": firewall.state(port),
+        "firewall": wall,
         "firewall_fix": firewall.rule_command(port),
         "problem": problem,
         # Every other field here is a fact about this machine, and this machine
@@ -248,13 +246,7 @@ def turn_on(port: int = DEFAULT_PORT) -> dict:
 
 
 def turn_off(port: int = DEFAULT_PORT) -> dict:
-    """Remove the logon task. The token and any paired phone survive.
-
-    The address this process already bound stays bound until it exits, which is
-    honest rather than sloppy: closing a socket out from under a phone that is
-    mid-request is not an improvement, and "off" here means JobDesk stops
-    coming up on the network, not that the window you are looking at
-    disappears.
-    """
+    """Remove the logon task. The token and any paired phone survive, and the
+    address this process bound stays bound until it exits."""
     autostart.remove()
     return {**state(port), "minted": False}

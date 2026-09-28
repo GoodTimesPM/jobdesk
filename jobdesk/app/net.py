@@ -208,8 +208,8 @@ def advice(kind: str) -> str:
         return ("this address only exists inside your building. The phone can "
                 "reach it on the same wifi and nowhere else — not on cellular, "
                 "not from work. It is also your local network rather than a "
-                "private one, so the token is the only lock. Tailscale fixes "
-                "both.")
+                "private one, so the token is the only lock, and it crosses the "
+                "wifi unencrypted. Tailscale fixes all three.")
     if kind == "every interface":
         return ("0.0.0.0 is every network this machine ever joins, including "
                 "ones you did not choose. Prefer a tailnet address.")
