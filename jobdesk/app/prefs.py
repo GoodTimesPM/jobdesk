@@ -15,7 +15,9 @@ typo in it should cost that one setting rather than stop the app opening.
 
 from __future__ import annotations
 
+import copy
 import json
+import re
 from pathlib import Path
 
 from .. import paths, profile
@@ -41,7 +43,20 @@ DEFAULTS: dict[str, object] = {
     "font": "system",           # which typeface
     "text_size": 100,           # percent
     "density": "normal",        # compact | normal | roomy
+    "accent": "",               # "" for the scheme's own, or #rrggbb
+    # The Jobs table after star, score and title, in order. A column left
+    # out is hidden.
+    "job_columns": ["company", "location", "age_days", "market", "salary",
+                    "source"],
+    # Named filter sets for the Jobs tab: [{"name": ..., "filters": {...}}].
+    "views": [],
 }
+
+JOB_COLUMNS = ("company", "location", "age_days", "market", "salary", "source")
+VIEW_FILTERS = ("search", "score_min", "score_max", "hide_applied",
+                "hide_prepared", "remote_only", "starred_only", "jobs_sort")
+MAX_VIEWS = 12
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
 
 _CHOICES = {
     "jobs_sort": ("newest", "score"),
@@ -60,8 +75,29 @@ _RANGES = {"score_min": (0, 100), "score_max": (0, 100),
            "text_size": (80, 160)}
 
 
+def _view(value) -> bool:
+    if not isinstance(value, dict) or set(value) != {"name", "filters"}:
+        return False
+    name, filters = value["name"], value["filters"]
+    if not isinstance(name, str) or not 0 < len(name.strip()) <= 40:
+        return False
+    if not isinstance(filters, dict) or not set(filters) <= set(VIEW_FILTERS):
+        return False
+    return all(isinstance(v, str) and len(v) <= 200 if k == "search"
+               else _valid(k, v) for k, v in filters.items())
+
+
 def _valid(key: str, value) -> bool:
     default = DEFAULTS[key]
+    if key == "accent":
+        return value == "" or (isinstance(value, str) and bool(_HEX.fullmatch(value)))
+    if key == "job_columns":
+        return isinstance(value, list) and len(set(value)) == len(value) \
+            and all(v in JOB_COLUMNS for v in value)
+    if key == "views":
+        return isinstance(value, list) and len(value) <= MAX_VIEWS \
+            and all(_view(v) for v in value) \
+            and len({v["name"].strip().lower() for v in value}) == len(value)
     if key in _CHOICES:
         return value in _CHOICES[key]
     if isinstance(default, bool):
@@ -81,7 +117,7 @@ def load() -> dict[str, object]:
         saved = {}
     if not isinstance(saved, dict):
         saved = {}
-    out = dict(DEFAULTS)
+    out = copy.deepcopy(DEFAULTS)
     for key, value in saved.items():
         if key in DEFAULTS and _valid(key, value):
             out[key] = value
@@ -213,5 +249,5 @@ def set_delivery(changes: dict) -> dict:
             text = live.sub(lambda m: "# " + m.group(0), text)
 
     target.write_text(text.replace("\n", newline), encoding="utf-8")
-    profile._read.cache_clear()
+    profile.forget()
     return folders()

@@ -16,6 +16,8 @@ program and not two.
 
 from __future__ import annotations
 
+import gzip
+import ipaddress
 import json
 import mimetypes
 import socket
@@ -44,6 +46,7 @@ REQUIRE_TOKEN = False
 # attack, and reading it into memory unbounded is how a local server becomes
 # a local denial of service.
 MAX_BODY = 8 * 1024 * 1024
+GZIP_OVER = 16 * 1024
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,14 +61,29 @@ class Handler(BaseHTTPRequestHandler):
     # -- plumbing ----------------------------------------------------------
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
+        # The job list is most of a megabyte of JSON, and on the phone it
+        # crosses the wifi. It shrinks by about nine tenths.
+        zipped = (len(body) > GZIP_OVER and "image" not in content_type
+                  and "gzip" in (self.headers.get("Accept-Encoding") or ""))
+        if zipped:
+            body = gzip.compress(body, compresslevel=5)
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Vary", "Accept-Encoding")
+        if zipped:
+            self.send_header("Content-Encoding", "gzip")
         # The page never talks to anything but this server, so nothing here
         # needs a CDN, and saying so out loud means a stray <script src> from
         # a future edit fails loudly instead of quietly phoning home.
         self.send_header("Content-Security-Policy",
-                         "default-src 'self'; style-src 'self' 'unsafe-inline'")
+                         "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                         "frame-ancestors 'none'; form-action 'self'; "
+                         "base-uri 'none'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        # The first phone request carries the token in its URL. No referrer
+        # means it never leaves in a header to a job board's careers page.
+        self.send_header("Referrer-Policy", "no-referrer")
         # Nothing here is worth caching and a stale copy is expensive. The
         # files are on the same disk as the process reading them, so a cache
         # saves a read of a few kilobytes; what it costs is an updated page
@@ -83,21 +101,28 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _json(self, status: int, payload: object) -> None:
-        body = json.dumps(payload, default=str).encode("utf-8")
+        body = json.dumps(payload, default=str,
+                          separators=(",", ":")).encode("utf-8")
         self._send(status, body, "application/json; charset=utf-8")
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
             return {}
+        kind = (self.headers.get("Content-Type") or "").split(";")[0].strip()
+        if kind.lower() != "application/json":
+            raise ValueError("send the body as application/json")
         if length > MAX_BODY:
             raise ValueError(f"request body is {length} bytes, over the "
                              f"{MAX_BODY} byte limit")
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
+            parsed = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ValueError(f"body is not JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("the body should be a JSON object")
+        return parsed
 
     # -- the gate ----------------------------------------------------------
 
@@ -106,6 +131,28 @@ class Handler(BaseHTTPRequestHandler):
             return self.client_address[0]
         except (AttributeError, IndexError):
             return ""
+
+    def _host_ok(self) -> bool:
+        """Whether the Host header names this machine by address.
+
+        A web page can point its own hostname at 127.0.0.1 (DNS rebinding) and
+        then read this server as same-origin. Its requests still carry that
+        hostname in Host, so only `localhost` and this machine's own IP
+        addresses are answered. The phone URL is always an IP address.
+        """
+        host = urlparse("//" + (self.headers.get("Host") or "")).hostname or ""
+        return host == "localhost" or (_is_ip(host) and net.is_this_machine(host))
+
+    def _origin_ok(self) -> bool:
+        """A POST from a browser names its page's origin. It must be this one.
+
+        No Origin header means a non-browser client, which a web page cannot
+        forge a request as.
+        """
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        return urlparse(origin).netloc.lower() == (self.headers.get("Host") or "").lower()
 
     def _allowed(self, parsed) -> bool:
         """Whether this request may proceed, and the paired-device side effect.
@@ -119,6 +166,9 @@ class Handler(BaseHTTPRequestHandler):
         and in the browser's history. After that the cookie carries it and the
         URL is clean.
         """
+        if not self._host_ok():
+            self._send(421, b"Unknown host.", "text/plain; charset=utf-8")
+            return False
         if not REQUIRE_TOKEN:
             return True
         peer = self._peer()
@@ -173,6 +223,9 @@ class Handler(BaseHTTPRequestHandler):
         if not parsed.path.startswith("/api/"):
             self._json(404, {"error": "not found"})
             return
+        if not self._origin_ok():
+            self._json(403, {"error": "cross-origin request refused"})
+            return
         try:
             body = self._body()
         except ValueError as exc:
@@ -208,7 +261,8 @@ class Handler(BaseHTTPRequestHandler):
             # Anything else is a bug in here, and the traceback belongs in the
             # console where it can be read, not swallowed into a 500 body.
             traceback.print_exc()
-            self._json(500, {"error": f"{type(exc).__name__}: {exc}"})
+            self._json(500, {"error": f"{type(exc).__name__} in JobDesk. The "
+                                      f"console window has the details."})
 
     def _manifest(self) -> None:
         """The home-screen manifest, built per request rather than served flat.
@@ -259,6 +313,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         kind, _ = mimetypes.guess_type(target.name)
         self._send(200, target.read_bytes(), kind or "application/octet-stream")
+
+
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
 
 
 def probe(port: int = DEFAULT_PORT, host: str = HOST, timeout: float = 0.6):

@@ -331,8 +331,9 @@ _CARRIED_HEADER = """\
 #
 # The setup wizard does not write this one, because it holds writing rather
 # than settings and nothing should put words in your mouth. It is a working
-# starting point so the pipeline runs today; edit it when you have read what
-# is in it. Everything below this line is the original file, comments and all.
+# starting point; edit it when you have read what is in it, then delete this
+# block. Until you do, JobDesk will not build a packet. Everything below this
+# block is the original file, comments and all.
 # ---------------------------------------------------------------------------
 
 """
@@ -414,6 +415,6 @@ def write(answers: Answers, *, overwrite: bool = False) -> dict:
         TARGET.rename(backup)
     staging.rename(TARGET)
 
-    profile._read.cache_clear()       # the live profile just changed underneath
+    profile.forget()       # the live profile just changed underneath
     return {"directory": str(TARGET), "files": written,
             "carried": list(CARRIED)}

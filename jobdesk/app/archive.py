@@ -97,7 +97,15 @@ def summary() -> dict:
         "readings": sum(r["times_seen"] for r in rows),
         "last_read": sum(1 for r in rows if r["last_seen"] == last) if last else 0,
         "last_new": sum(1 for r in rows if r["first_seen"] == last) if last else 0,
+        "most_read": _most_read(rows),
     }
+
+
+def _most_read(rows: list[dict]) -> dict:
+    """The posting pulled the most times, for the note above the table."""
+    top = max(rows, key=lambda r: r["times_seen"] or 0)
+    return {"company": top["company"], "title": top["title"],
+            "times": top["times_seen"] or 0}
 
 
 def search(*, text: str = "", min_score: int = 0, since: str = "",

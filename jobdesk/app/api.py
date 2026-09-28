@@ -18,7 +18,9 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -66,29 +68,54 @@ def status(query, body) -> dict:
     return {
         "configured": configured,
         "using_example": profile.is_example(),
+        "leftovers": profile.leftovers() if not problems else [],
         "profile_dir": str(profile.directory()) if not problems else "",
         "problems": problems,
         "name": profile.identity().get("name", "") if not problems else "",
         "job_count": len(rows),
         "last_run": stamp,
         "settings": prefs.load(),
+        "scoring": _scoring(),
     }
 
 
+def _scoring() -> dict:
+    """Tier floors and point caps, so the page never restates them."""
+    from ..radar import score
+    return {"tiers": [{"tier": t, "floor": f} for t, f in score.TIER_FLOORS],
+            "parts": [{"label": l, "max": m} for l, m in score.SCORE_PARTS]}
+
+
+_CACHE: dict = {"key": None, "rows": [], "stamp": ""}
+_CACHE_LOCK = threading.Lock()
+
+
 def _candidates() -> tuple[list[dict], str]:
-    """The candidate cache and when the radar last wrote it."""
+    """The candidate cache and when the radar last wrote it.
+
+    Parsed once per version of the file. Opening a row used to decode the
+    whole couple of megabytes to find it. Callers copy what they change.
+    """
     path = radar_config.CANDIDATES
-    if not path.exists():
+    try:
+        info = path.stat()
+    except OSError:
         return [], ""
+    key = (info.st_mtime_ns, info.st_size)
+    with _CACHE_LOCK:
+        if _CACHE["key"] == key:
+            return _CACHE["rows"], _CACHE["stamp"]
     try:
         rows = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise BadRequest(
             f"{path.name} could not be read ({exc}). Run the radar again to "
             f"rebuild it: py -m jobdesk.radar.main")
-    stamp = datetime.fromtimestamp(path.stat().st_mtime,
-                                   timezone.utc).isoformat()
-    return [r for r in rows if isinstance(r, dict)], stamp
+    stamp = datetime.fromtimestamp(info.st_mtime, timezone.utc).isoformat()
+    rows = [r for r in rows if isinstance(r, dict)]
+    with _CACHE_LOCK:
+        _CACHE.update(key=key, rows=rows, stamp=stamp)
+    return rows, stamp
 
 
 def pulse(query, body) -> dict:
@@ -313,6 +340,74 @@ def job(query, body) -> dict:
         f"of the cache -- the radar keeps 30 days.")
 
 
+_READ_LOCK = threading.Lock()
+
+
+def read_posting(query, body) -> dict:
+    """Read the body of a posting that reached the list without one.
+
+    The radar reads bodies in bulk and a WAF can stop it partway, so some
+    rows arrive blank. This is one page, fetched because someone opened the
+    row, the same read a click on the link would make. The body goes back into
+    the cache and the row is rescored, so the pay and the years come from the
+    posting and not an estimate. Returns the row the way `/api/job` does.
+    """
+    from ..radar import candidates, score
+    from ..radar.models import Job
+    from ..radar.sources import ats
+
+    uid = _text(body, "uid")
+    rows, _ = _candidates()
+    row = next((r for r in rows if r.get("uid") == uid), None)
+    if row is None:
+        raise BadRequest(f"no posting with id {uid} in the current list")
+    partial = bool(row.get("partial")
+                   or "partial-description" in (row.get("flags") or []))
+    if (row.get("description") or "").strip() and not partial:
+        return job({"uid": [uid]}, {})
+
+    found = Job.from_dict(row)
+    found.partial = partial
+    try:
+        got = ats.partial_detail(found)
+    except ats.Challenged as why:
+        raise BadRequest(f"{why}. The posting is live, so open it and paste "
+                         f"the text in.")
+    except Exception as exc:
+        raise BadRequest(f"the posting could not be read ({exc})")
+    if not got:
+        raise BadRequest("the page had no description to read. Open it and "
+                         "paste the text in.")
+
+    score.score_job(found)
+    update = {"description": found.description[:candidates.MAX_DESCRIPTION_CHARS],
+              "partial": False,
+              "salary_min": found.salary_min, "salary_max": found.salary_max}
+    # Same rule as `rescore`: example scores never replace real ones.
+    if not profile.is_example():
+        update.update(score=found.score, tier=found.tier,
+                      reasons=found.reasons, flags=found.flags,
+                      job_family=found.job_family,
+                      required_years=score.required_years(found))
+
+    path = radar_config.CANDIDATES
+    with _READ_LOCK:
+        try:
+            info = path.stat()
+            fresh = json.loads(path.read_text(encoding="utf-8-sig") or "[]")
+            for r in fresh:
+                if isinstance(r, dict) and r.get("uid") == uid:
+                    r.update(update)
+            candidates.save(fresh, path)
+            # The modified time is what the page calls the radar's last run.
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+        except (OSError, ValueError) as exc:
+            raise BadRequest(f"the posting was read but not saved ({exc})")
+    with _CACHE_LOCK:
+        _CACHE["key"] = None
+    return job({"uid": [uid]}, {})
+
+
 def market_context(query, body) -> dict:
     """Peer-group context for every posting in the current list.
 
@@ -460,6 +555,13 @@ def targeting(query, body) -> dict:
     }
 
 
+def _replace(path, text: str) -> None:
+    """Write through a temp file, so a crash mid-write leaves the old file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def save_targeting(query, body) -> dict:
     """Patch `targeting.toml`, then rescore the stored postings against it.
 
@@ -487,15 +589,15 @@ def save_targeting(query, body) -> dict:
     except tomlpatch.PatchError as exc:
         raise BadRequest(f"targeting.toml could not be edited: {exc}")
 
-    path.write_text(patched, encoding="utf-8")
-    profile._read.cache_clear()          # the next lookup reads the new file
+    _replace(path, patched)
+    profile.forget()          # the next lookup reads the new file
     try:
         result = rescore({}, {})
     except Exception:
         # A file that scores nothing is worse than an unsaved change, so put
         # the old one back before re-raising.
-        path.write_text(original, encoding="utf-8")
-        profile._read.cache_clear()
+        _replace(path, original)
+        profile.forget()
         raise
     result["saved"] = list(top) + list(tables)
     return result
@@ -532,30 +634,56 @@ def save_folders(query, body) -> dict:
 
 
 def rescore(query, body) -> dict:
-    """Re-run scoring over the cached postings and report what moved.
+    """Re-run scoring over the cached postings, save it, and report what moved.
 
-    Writes nothing. The table redraws from what comes back; the cache is the
-    radar's file and only the radar rewrites it.
+    The new scores go back into the cache, so a reload or the next pulse shows
+    the same numbers this returned. The file keeps its old modified time,
+    because that time is what the page calls the radar's last run. If the
+    radar rewrote the file while this was scoring, its version wins.
     """
-    from ..radar import score
+    from ..radar import candidates, score
     from ..radar.models import Job
 
+    path = radar_config.CANDIDATES
     rows, stamp = _candidates()
+    try:
+        read_at = path.stat()
+    except OSError:
+        read_at = None
     before = {r.get("uid"): (r.get("score") or 0) for r in rows}
-    scored = []
+    saved, scored = [], []
     for row in rows:
         job_obj = score.score_job(Job.from_dict(row))
-        out = {k: v for k, v in row.items() if k not in _LIST_DROP}
-        out.update(score=job_obj.score, tier=job_obj.tier,
-                   reasons=job_obj.reasons, flags=job_obj.flags,
-                   job_family=job_obj.job_family)
+        full = dict(row)
+        full.update(score=job_obj.score, tier=job_obj.tier,
+                    reasons=job_obj.reasons, flags=job_obj.flags,
+                    job_family=job_obj.job_family,
+                    required_years=score.required_years(job_obj))
+        saved.append(full)
+        out = {k: v for k, v in full.items() if k not in _LIST_DROP}
         out["age_days"] = _age_days(row.get("posted_at"),
                                     row.get("first_seen"))
         out["was"] = before.get(row.get("uid"), 0)
         scored.append(out)
+
+    written = False
+    # Scores against the fictional example candidate must never replace the
+    # radar's real ones.
+    if read_at is not None and not profile.is_example():
+        try:
+            now = path.stat()
+            if (now.st_mtime_ns, now.st_size) == (read_at.st_mtime_ns,
+                                                  read_at.st_size):
+                candidates.save(saved, path)
+                os.utime(path, ns=(read_at.st_atime_ns, read_at.st_mtime_ns))
+                written = True
+        except OSError:
+            pass
+    with _CACHE_LOCK:
+        _CACHE["key"] = None
+
     _mark_rows(scored)
     scored.sort(key=lambda r: (-r["score"], r.get("company") or ""))
-
     moved = sum(1 for r in scored if r["score"] != r["was"])
     return {
         "jobs": scored,
@@ -563,7 +691,11 @@ def rescore(query, body) -> dict:
         "moved": moved,
         "tiers": {t: sum(1 for r in scored if r["tier"] == t)
                   for t in ("A", "B", "C", "D", "F")},
-        "note": "Scores only. Nothing was written and no posting was fetched.",
+        "note": ("Scores saved. No posting was fetched." if written else
+                 "Scores only, on the example profile. Nothing was saved."
+                 if profile.is_example() else
+                 "Scores only. The radar was writing the list, so nothing "
+                 "was saved."),
     }
 
 
@@ -600,17 +732,17 @@ def archive_search(query, body) -> dict:
     """The whole history of what the radar has seen, filtered server-side."""
     return archive.search(
         text=(query.get("q") or [""])[0],
-        min_score=int((query.get("min_score") or ["0"])[0] or 0),
+        min_score=_int_query(query, "min_score", 0),
         since=(query.get("since") or [""])[0],
-        limit=int((query.get("limit") or ["200"])[0] or 200),
-        offset=int((query.get("offset") or ["0"])[0] or 0),
+        limit=max(1, min(_int_query(query, "limit", 200), 1000)),
+        offset=max(0, _int_query(query, "offset", 0)),
     ) | {"summary": archive.summary()}
 
 
 def archive_companies(query, body) -> dict:
     """Who posts the most and whose postings actually score."""
     return {"companies": archive.companies(
-        int((query.get("limit") or ["60"])[0] or 60))}
+        max(1, min(_int_query(query, "limit", 60), 500)))}
 
 
 # ---------------------------------------------------------------------------
@@ -827,7 +959,8 @@ def phone_state(query, body) -> dict:
     """
     from . import phone
 
-    return phone.state(_int_query(query, "port", phone.DEFAULT_PORT))
+    return phone.state(_int_query(query, "port", phone.DEFAULT_PORT),
+                       fresh=False)
 
 
 def phone_switch(query, body) -> dict:
@@ -900,6 +1033,7 @@ ROUTES = {
     ("GET", "/api/jobs"): jobs,
     ("GET", "/api/pulse"): pulse,
     ("GET", "/api/job"): job,
+    ("POST", "/api/job/read"): read_posting,
     ("GET", "/api/market"): market_context,
     ("POST", "/api/star"): set_star,
     ("GET", "/api/targeting"): targeting,

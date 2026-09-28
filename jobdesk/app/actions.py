@@ -49,7 +49,7 @@ def sweep(emit, *, dry: bool = False, only: str = "") -> dict:
 
     emit(f"radar sweep starting{' (dry run)' if dry else ''}\n")
     code = radar_main.run(dry_run=dry, only=only or None)
-    profile._read.cache_clear()
+    profile.forget()
     rows, stamp = candidate_rows()
     emit(f"\nsweep finished with code {code}; {len(rows)} postings in the cache\n")
     return {"code": code, "jobs": len(rows), "last_run": stamp, "dry": dry}
@@ -120,6 +120,12 @@ def build_packet(emit, *, uid: str = "", url: str = "", company: str = "",
     override gets worked around outside the tool, where nothing is logged --
     but the override is written into the packet's own record either way.
     """
+    leftover = profile.leftovers()
+    if leftover:
+        raise ActionError(
+            "your profile still holds the example candidate's writing, and a "
+            "packet built from it would put your name on it. "
+            + " ".join(leftover))
     if uid:
         cand = candidate(uid)
     else:
@@ -218,7 +224,10 @@ def packet_files(app_id: str) -> dict:
     a file to someone else's careers site, and this tool would not do it if it
     could.
     """
-    folder = apply_config.packet_dir(app_id)
+    try:
+        folder = apply_config.packet_dir(app_id)
+    except ValueError as exc:
+        raise ActionError(str(exc)) from None
     if not folder.is_dir():
         raise ActionError(
             f"no packet folder for {app_id}. It may have been deleted, or "
