@@ -1,7 +1,7 @@
-"""Discord delivery for overdue follow-ups (plan item 10's push surface).
+"""Discord delivery for overdue follow-ups.
 
-A webhook, same shape as jobdesk/radar/discord.py -- copied rather than
-imported, per job-search/PROJECT.md's sub-project isolation rule. This
+A webhook, same shape as jobdesk/radar/plugins/discord.py -- copied rather
+than imported, because the three packages never import each other. This
 pipeline is run-once and stateless (the CLI, or the scheduled `auto` task
 three times a day), so there is no long-lived process to hold a bot
 connection.

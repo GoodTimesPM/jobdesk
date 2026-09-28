@@ -1,6 +1,6 @@
 """Bridge between the two Notion trackers and the packet-build trigger.
 
-Plan item 6's automatic trigger used to be "this posting scored >= 80"
+The automatic packet trigger used to be "this posting scored >= 80"
 (`cmd_auto`, 2026-08-11). You changed that on 2026-08-20: a score is Job
 Radar's opinion, and grinding out 80+ drafts nobody asked to apply to yet
 decided nothing. The new trigger is your own hand on the go signal -- the
@@ -18,8 +18,8 @@ from two tables:
      so the folder is already in APPLICATIONS by the time you go to
      actually apply.
 
-No shared code with Job Radar's own `radar/notion.py` -- sub-projects stay
-isolated (see ../PROJECT.md), so this hits the REST API directly with its own
+No shared code with Job Radar's own `radar/notion.py` -- the packages stay
+isolated, so this hits the REST API directly with its own
 small copy of the same handful of calls, rather than importing that module.
 """
 

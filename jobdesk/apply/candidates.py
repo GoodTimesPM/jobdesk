@@ -2,7 +2,7 @@
 
 Primary source is Job Radar's candidate cache (`data/radar/candidates.json`),
 which carries the JD body and the scoring context. If that file doesn't exist
-yet -- Job Radar hasn't run since this sub-project was built, or it's paused --
+yet -- Job Radar hasn't run yet, or it's paused --
 the newest digest is parsed instead, which gives everything except the JD text.
 That fallback matters: the failure mode to avoid is "the apply tool is useless
 because the discovery tool didn't run today".

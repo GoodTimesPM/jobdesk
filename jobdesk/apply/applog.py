@@ -1,8 +1,7 @@
 """The application log -- the submission record behind every guard rule.
 
-This file is the point of the sub-project as much as the packets are. Plan
-item 13 calls a submission log "real blacklist risk that automation actively
-prevents", and item 8's funnel analytics has nothing to analyze without it.
+The guard rules read it to stop a duplicate submission, and the funnel
+has nothing to analyze without it.
 
 One JSON list, one row per application, written atomically. It is committed
 on purpose: it is the dataset behind the weekly review, and it contains
@@ -95,7 +94,7 @@ class Application:
     follow_up_pinged: str = ""       # the follow_up_due value already pushed
                                       # to Discord, so a due date pings once
     resume_variant: str = ""         # the packet folder the resume came from
-    agency: str = ""                 # plan item 13: who submitted, if not direct
+    agency: str = ""                 # who submitted, if not direct
     packet: str = ""                 # the delivered folder's NAME, never a
                                      # path: this file is tracked in git
     auto: bool = False               # built by `auto`, unread by a human
@@ -306,7 +305,7 @@ class Log:
         `stage` defaults to whatever status the application was already at --
         the furthest point it reached before the no -- because a rejection at
         `screening` (never read past the resume) and one at `interview`
-        (something said out loud) are different problems, and plan item 8
+        (something said out loud) are different problems, and the funnel
         has nothing to analyze if that distinction isn't recorded here.
         """
         app.rejected_stage = stage or app.status
@@ -330,7 +329,7 @@ class Log:
             counts[key] = counts.get(key, 0) + 1
         return counts
 
-    # -- funnel (plan item 8) ----------------------------------------------
+    # -- funnel -------------------------------------------------------------
     def funnel(self) -> dict[str, int]:
         counts = {s: 0 for s in STATUSES}
         for row in self.rows:

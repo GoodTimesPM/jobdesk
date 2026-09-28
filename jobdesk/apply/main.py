@@ -371,8 +371,8 @@ def cmd_auto(args) -> int:
     What it does *not* do is finish the job. An auto packet ships with the
     `why-company` placeholder unanswered, because that is the one thing a bank
     cannot write, and the letter gate may have dropped paragraphs. It is a
-    draft that saves the twenty minutes, not a packet to submit unread -- and
-    plan item 6 still holds: nothing here submits anything.
+    draft that saves the twenty minutes, not a packet to submit unread.
+    Nothing here submits anything.
     """
     log = Log()
     push_follow_ups(log)

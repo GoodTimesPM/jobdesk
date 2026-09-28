@@ -1,8 +1,7 @@
-"""Building one application packet -- the actual product of this sub-project.
+"""Building one application packet.
 
-Plan item 6 draws the line exactly here: automation produces everything up to
-the submit button and stops. What comes out of this module is a folder you
-opens, reads, and submits from by hand, in about three to five minutes instead
+Automation produces everything up to the submit button and stops. What comes
+out of this module is a folder you open, read, and submit from by hand, in about three to five minutes instead
 of twenty-five.
 
     {date}_{Company}_{Role}/
@@ -30,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from .. import profile
 from . import answers as answers_mod
 from . import config, engine, guard, letter as letter_mod
 from .applog import Application, Log
@@ -110,6 +110,12 @@ def build(candidate: Candidate, jd_text: str, *, log: Log,
           auto: bool = False, echo=print) -> Result:
     """Run the whole pipeline for one posting."""
     result = Result(ok=False)
+    leftover = profile.leftovers()
+    if leftover:
+        result.problems = leftover + [
+            "Replace the example's content with your own before building a "
+            "packet. Nothing was written."]
+        return result
     company, role = candidate.company.strip(), candidate.title.strip()
     folder_name = f"{date.today().isoformat()}_{safe(company)}_{safe(role)}"
     folder = config.packet_dir(folder_name)

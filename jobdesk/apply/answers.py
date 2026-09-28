@@ -1,4 +1,4 @@
-"""The ATS free-text answer bank (plan item 5).
+"""The ATS free-text answer bank.
 
 Not clever, and deliberately so: the value is that the answers exist, are
 consistent between applications, and are one keypress away at the moment the
