@@ -1,4 +1,4 @@
-"""Self-checks for the JobDesk window (plan items 3 and 4).
+"""Self-checks for the JobDesk window.
 
     py tests/test_app.py
 
@@ -40,7 +40,7 @@ sys.path.insert(0, str(ROOT))
 os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
 
 import jobdesk
-from jobdesk import paths
+from jobdesk import paths, profile
 from jobdesk.app import (access, actions, api, archive, desktop, jdstruct,
                          market, net, phone, resume_import, runner, server,
                          setup, stars, tomlpatch)
@@ -254,6 +254,28 @@ def test_write() -> None:
               targeting["family_titles"] == [],
               str(targeting["family_titles"]))
 
+        # The wizard leaves the example's jobs and writing in place. Until the
+        # user replaces them, nothing may build a packet from that profile.
+        from jobdesk import profile
+        os.environ["JOBDESK_PROFILE"] = str(written)
+        profile.forget()
+        try:
+            left = profile.leftovers()
+            check("a fresh profile knows it still has the example's jobs",
+                  any("Front Range Property Group" in p for p in left), str(left))
+            check("and the example's unreviewed answers",
+                  any(p.startswith("answers.toml") for p in left), str(left))
+            try:
+                actions.build_packet(lambda _: None, company="Acme", title="Analyst",
+                                     jd="x" * 2000, allow_fetch=False)
+                check("a packet build refuses it", False, "it built")
+            except actions.ActionError as exc:
+                check("a packet build refuses it", "example" in str(exc), str(exc))
+        finally:
+            os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
+            profile.forget()
+        check("the example profile itself is not flagged", profile.leftovers() == [])
+
         example = (ROOT / "profile.example" / "targeting.toml").read_text(encoding="utf-8")
         check("the generated file keeps the documentation",
               comments((written / "targeting.toml").read_text(encoding="utf-8"))
@@ -329,6 +351,23 @@ class Live:
         except urllib.error.HTTPError as err:
             return err.code, err.read()
 
+    def send(self, path, data=None, headers=None):
+        """A request with headers urllib would otherwise fill in for us."""
+        import http.client
+        conn = http.client.HTTPConnection(server.HOST, self.port, timeout=10)
+        try:
+            conn.putrequest("POST" if data is not None else "GET", path,
+                            skip_host="Host" in (headers or {}))
+            for name, value in (headers or {}).items():
+                conn.putheader(name, value)
+            if data is not None:
+                conn.putheader("Content-Length", str(len(data)))
+            conn.endheaders(data)
+            res = conn.getresponse()
+            return res.status, res.read()
+        finally:
+            conn.close()
+
     def _open(self, request):
         try:
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -374,7 +413,20 @@ def test_api() -> None:
 
         code, body = live.post("/api/rescore", {})
         check("rescore answers", code == 200 and "moved" in body)
-        check("rescore says it wrote nothing", "Nothing was written" in body["note"])
+        check("rescore on the example profile saves nothing",
+              "Nothing was saved" in body["note"], body.get("note"))
+        import gzip as _gzip
+        import http.client
+        conn = http.client.HTTPConnection(server.HOST, live.port, timeout=10)
+        conn.request("GET", "/app.js", headers={"Accept-Encoding": "gzip"})
+        res = conn.getresponse()
+        packed = res.read()
+        conn.close()
+        check("a large answer is gzipped when the client asks",
+              res.getheader("Content-Encoding") == "gzip"
+              and b"function" in _gzip.decompress(packed))
+        code, bad = live.get("/api/archive?limit=abc&offset=-5")
+        check("a junk archive limit is not a 500", code == 200, str(bad)[:120])
 
         # The example profile is shared code; the panel must refuse to edit it.
         code, body = live.get("/api/targeting")
@@ -420,9 +472,17 @@ def test_api() -> None:
         check("an unknown kind of run is refused", code == 400)
         code, body = live.get("/api/run?id=nope&after=0")
         check("an unknown run is not an error", code == 200 and body.get("missing"))
-        code, body = live.get("/api/packet?id=nope")
+        code, body = live.get("/api/packet?id=2026-01-01_Nope_Nope")
         check("an unknown packet is a readable 400",
               code == 400 and "no packet folder" in body["error"])
+        for bad in ("..", "C:%5CWindows", "2026-01-01_x%2F..%2F.."):
+            code, body = live.get("/api/packet?id=" + bad)
+            check(f"a packet id of {bad} is refused, not listed",
+                  code == 400 and "not a packet id" in body.get("error", ""),
+                  f"{code} {body}")
+        code, body = live.get("/api/packet/file?id=..&name=.env")
+        check("a packet file outside packets/ is refused", code == 400,
+              f"{code} {body}")
         code, body = live.post("/api/open", {"path": str(ROOT.parent)})
         check("Explorer will not open a path outside the project", code == 400)
 
@@ -431,6 +491,27 @@ def test_api() -> None:
 
         code, body = live.get("/api/setup/save")
         check("a POST route rejects a GET", code == 404)
+
+        # A page elsewhere on the web must not be able to drive this server,
+        # by rebinding its own hostname to 127.0.0.1 or by a plain form POST.
+        code, _ = live.send("/api/phone", headers={"Host": f"evil.example:{live.port}"})
+        check("a request naming another host is refused", code == 421, str(code))
+        code, _ = live.send("/api/pulse", headers={"Host": f"localhost:{live.port}"})
+        check("localhost is still a name for this machine", code == 200, str(code))
+        code, _ = live.send("/api/setup/check", b'{"name":""}',
+                            {"Content-Type": "application/json",
+                             "Origin": "https://evil.example"})
+        check("a POST from another origin is refused", code == 403, str(code))
+        code, _ = live.send("/api/setup/check", b'{"name":""}',
+                            {"Content-Type": "text/plain"})
+        check("a POST that is not JSON is refused", code == 400, str(code))
+        code, _ = live.send("/api/setup/check", b'[1]',
+                            {"Content-Type": "application/json"})
+        check("a JSON body that is not an object is a 400", code == 400, str(code))
+        code, _ = live.send("/api/setup/check", b'{"name":""}',
+                            {"Content-Type": "application/json",
+                             "Origin": live.base})
+        check("a POST from the page's own origin goes through", code == 200, str(code))
 
         # Loopback is not a reason to serve arbitrary files.
         code, body = live.get("/../jobdesk/profile.py")
@@ -625,6 +706,31 @@ def test_access() -> None:
     finally:
         paths.ROOT = root
         shutil.rmtree(empty, ignore_errors=True)
+        os.environ.pop(access.TOKEN_ENV, None)
+        if saved is not None:
+            os.environ[access.TOKEN_ENV] = saved
+
+    # A token edited into .env by hand counts without a restart, and rotating
+    # twice leaves one banner line behind, not two.
+    saved = os.environ.pop(access.TOKEN_ENV, None)
+    saved_env, saved_from = phone.ENV_PATH, access._FROM_FILE
+    scratch = Path(tempfile.mkdtemp(prefix="jobdesk-env-"))
+    paths.ROOT, phone.ENV_PATH, access._FROM_FILE = scratch, scratch / ".env", None
+    try:
+        (scratch / ".env").write_text("OTHER=1\nJOBDESK_ACCESS_TOKEN=first\n")
+        check("the token is read from .env", access.token() == "first")
+        (scratch / ".env").write_text("OTHER=1\nJOBDESK_ACCESS_TOKEN=second\n")
+        check("an edit to .env takes effect without a restart",
+              access.token() == "second", str(access.token()))
+        phone.rotate()
+        phone.rotate()
+        text = (scratch / ".env").read_text()
+        check("rotating twice leaves one banner", text.count(phone._BANNER) == 1, text)
+        check("and one token line", text.count(access.TOKEN_ENV) == 1, text)
+        check("and the other lines alone", "OTHER=1" in text)
+    finally:
+        paths.ROOT, phone.ENV_PATH, access._FROM_FILE = root, saved_env, saved_from
+        shutil.rmtree(scratch, ignore_errors=True)
         os.environ.pop(access.TOKEN_ENV, None)
         if saved is not None:
             os.environ[access.TOKEN_ENV] = saved
@@ -866,8 +972,11 @@ def test_criteria() -> None:
            score.tier_for(59), score.tier_for(45), score.tier_for(44))
           == ("A", "B", "B", "C", "C", "D"))
     page = (ROOT / "jobdesk" / "app" / "static" / "index.html").read_text(encoding="utf-8")
-    check("the page's explainer says the same thing",
-          "75 and up" in page and "60 to 74" in page and "45 to 59" in page)
+    check("the page states no tier floors of its own",
+          "75 and up" not in page and "60 to 74" not in page)
+    check("the page gets the floors from the scorer",
+          [(t["tier"], t["floor"]) for t in api._scoring()["tiers"]]
+          == list(score.TIER_FLOORS))
 
 
 def test_settings() -> None:
@@ -895,6 +1004,33 @@ def test_settings() -> None:
         check("an old text size still loads",
               prefs.load()["text_size"] == 115)
 
+        # The customizations: an accent, the table's columns, saved views.
+        check("an accent colour saves", prefs.save({"accent": "#AA3355"})["accent"] == "#AA3355")
+        check("a blank accent means the scheme's", prefs.save({"accent": ""})["accent"] == "")
+        cols = prefs.save({"job_columns": ["salary", "company"]})["job_columns"]
+        check("columns save in the order given", cols == ["salary", "company"])
+        view = {"name": "Remote analyst", "filters": {"search": "analyst",
+                "score_min": 60, "score_max": 100, "remote_only": True,
+                "jobs_sort": "score"}}
+        check("a view saves", prefs.save({"views": [view]})["views"] == [view])
+        check("a view survives a reload", prefs.load()["views"] == [view])
+        for bad in ({"accent": "red"}, {"accent": "#12345"},
+                    {"job_columns": ["title"]}, {"job_columns": ["salary", "salary"]},
+                    {"job_columns": "salary"},
+                    {"views": [{"name": "", "filters": {}}]},
+                    {"views": [{"name": "x", "filters": {"score_min": 400}}]},
+                    {"views": [{"name": "x", "filters": {"password": "y"}}]},
+                    {"views": [dict(view), dict(view)]},
+                    {"views": [{"name": f"v{i}", "filters": {}} for i in range(13)]}):
+            try:
+                prefs.save(bad)
+                check(f"{str(bad)[:60]} is refused", False)
+            except prefs.Invalid:
+                check(f"{str(bad)[:60]} is refused", True)
+        check("the defaults are not shared with a loaded copy",
+              prefs.load()["job_columns"] is not prefs.DEFAULTS["job_columns"])
+        prefs.save({"views": [], "job_columns": list(prefs.JOB_COLUMNS)})
+
         # Three vocabularies have to agree: the server decides what is valid,
         # the stylesheet paints it, and the menu offers it. Any one of them
         # gaining a scheme on its own is a setting that saves and does
@@ -914,6 +1050,15 @@ def test_settings() -> None:
         for size in ("80", "100", "160"):
             check(f"text size {size} is offered and valid",
                   f'<option value="{size}">' in html and prefs._valid("text_size", int(size)))
+        for key in prefs.JOB_COLUMNS:
+            check(f"the table has a {key} column to show or hide",
+                  f'data-key="{key}"' in html)
+        check("the rarer filters sit behind More",
+              'id="jobs-more"' in html and html.index('id="jobs-more"')
+              < html.index('id="remote-only"'))
+        check("the page has the view and accent controls",
+              all(f'id="{i}"' in html for i in
+                  ("view", "save-view", "delete-view", "accent", "column-list")))
 
         flipped = prefs.save({"score_min": 90, "score_max": 50})
         check("a backwards range is swapped, not refused",
@@ -981,7 +1126,7 @@ def test_delivery_edit() -> None:
         shutil.copytree(example, tmp / "profile")
         profile.REAL = tmp / "profile"
         os.environ["JOBDESK_PROFILE"] = str(tmp / "profile")
-        profile._read.cache_clear()
+        profile.forget()
         target = tmp / "profile" / "delivery.toml"
         before = comments(target.read_text(encoding="utf-8"))
 
@@ -1006,7 +1151,7 @@ def test_delivery_edit() -> None:
         profile.REAL = real
         if saved_env is not None:
             os.environ["JOBDESK_PROFILE"] = saved_env
-        profile._read.cache_clear()
+        profile.forget()
         shutil.rmtree(tmp, ignore_errors=True)
 
 
@@ -1285,6 +1430,94 @@ def test_stars() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_rescore_saves() -> None:
+    section("a rescore survives a reload")
+    from jobdesk.radar import config as radar_config
+    tmp = Path(tempfile.mkdtemp())
+    original, was_example = radar_config.CANDIDATES, profile.is_example
+    try:
+        path = tmp / "candidates.json"
+        row = {"uid": "u1", "title": "Staff Accountant", "company": "Acme",
+               "url": "https://example.com/1", "source": "test",
+               "description": "", "score": 1, "tier": "F"}
+        path.write_text(json.dumps([row]), encoding="utf-8")
+        os.utime(path, (1_700_000_000, 1_700_000_000))
+        radar_config.CANDIDATES = path
+        profile.is_example = lambda: False
+        body = api.rescore({}, {})
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        check("the new score is in the file",
+              saved[0]["score"] == body["jobs"][0]["score"], str(saved[0])[:120])
+        check("the note says it saved", "saved" in body["note"], body["note"])
+        check("the radar's run time is kept",
+              int(path.stat().st_mtime) == 1_700_000_000)
+        rows, _ = api._candidates()
+        check("the next read sees the saved scores",
+              rows[0]["score"] == body["jobs"][0]["score"])
+    finally:
+        radar_config.CANDIDATES = original
+        profile.is_example = was_example
+        with api._CACHE_LOCK:
+            api._CACHE["key"] = None
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_read_posting() -> None:
+    section("opening a blank row reads the posting")
+    from jobdesk.radar import config as radar_config
+    from jobdesk.apply import config as apply_config
+    from jobdesk.radar.sources import ats
+    tmp = Path(tempfile.mkdtemp())
+    original, was_example = radar_config.CANDIDATES, profile.is_example
+    apply_original = apply_config.RADAR_CANDIDATES
+    was_read = ats.partial_detail
+    try:
+        path = tmp / "candidates.json"
+        row = {"uid": "u1", "title": "Energy Analyst",
+               "company": "Commonwealth of Virginia",
+               "url": "https://example.com/energy", "source": "sitemap",
+               "description": "", "score": 1, "tier": "F"}
+        path.write_text(json.dumps([row]), encoding="utf-8")
+        os.utime(path, (1_700_000_000, 1_700_000_000))
+        radar_config.CANDIDATES = apply_config.RADAR_CANDIDATES = path
+        profile.is_example = lambda: False
+
+        def fake(job):
+            job.description = "Starting Salary Range: $54,808 - $70,000. " * 10
+            return True
+        ats.partial_detail = fake
+        body = api.read_posting({}, {"uid": "u1"})
+        saved = json.loads(path.read_text(encoding="utf-8"))[0]
+        check("the body comes back as blocks", body["jd_chars"] > 0)
+        check("the body is saved", saved["description"].startswith("Starting"))
+        check("the stated pay is saved", saved["salary_min"] == 54808.0,
+              str(saved.get("salary_min")))
+        check("the row is rescored", saved["score"] == body["score"] != 1)
+        check("the radar's run time is kept",
+              int(path.stat().st_mtime) == 1_700_000_000)
+
+        row2 = dict(row, uid="u2", url="https://example.com/2")
+        path.write_text(json.dumps([row2]), encoding="utf-8")
+
+        def blocked(job):
+            raise ats.Challenged("Commonwealth of Virginia: AWS WAF answered "
+                                 "202 with 'challenge'")
+        ats.partial_detail = blocked
+        try:
+            api.read_posting({}, {"uid": "u2"})
+            check("a bot check is reported", False)
+        except api.BadRequest as exc:
+            check("a bot check is reported", "paste" in str(exc), str(exc))
+    finally:
+        ats.partial_detail = was_read
+        radar_config.CANDIDATES = original
+        apply_config.RADAR_CANDIDATES = apply_original
+        profile.is_example = was_example
+        with api._CACHE_LOCK:
+            api._CACHE["key"] = None
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main() -> int:
     test_tomlpatch()
     test_patch_table()
@@ -1310,6 +1543,8 @@ def main() -> int:
     test_market_route()
     test_age()
     test_version()
+    test_rescore_saves()
+    test_read_posting()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 
