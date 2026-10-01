@@ -132,6 +132,28 @@ Seniority is read as a rank, not as a word. "Associate Director" is a
 director. "Senior Associate" is not early-career. A requisition number ending
 in 1 is not level 1.
 
+Pay works the same way in the other direction. A band that starts at or above
+`salary_ceiling` in `targeting.toml` (twice `salary_target` unless you set it)
+is a level you are not at, and it scores 0. A $380k engineering band used to
+score in the high seventies because the title matched and pay only ever added
+points. A band past three quarters of the ceiling loses points instead of
+earning the salary bonus. A lone dollar figure in the body never blocks,
+because it is as often a sign-on bonus as a salary. Adzuna's guessed salaries
+are ignored, since it marks them as predicted and they are not what the
+employer posted.
+
+A language the posting requires and you do not speak is a closed door too.
+The languages you speak come from your own skills in `master.toml`, or a
+`languages = [...]` list there, and English is assumed. "Bilingual" in the
+title, "fluent in Spanish" or "Korean required" scores 0. "Spanish a plus" or
+a language under the preferred qualifications costs a few points. "Polish the
+deck" and "Spanish Fork, UT" are not language requirements.
+
+**Closed postings leave.** A row stays on the board for 30 days after the last
+run that found it. Each run rechecks a few of the rows it did not see, and
+one whose page now answers 404 or 410 is removed rather than sitting there as
+a snippet for a month.
+
 **Synonyms (experimental).** `targeting.toml` has a `[[synonym]]` section
 saying which other words mean the same job or the same tool. One table, read
 three times: the title score, the skill score, and the queries the boards are
