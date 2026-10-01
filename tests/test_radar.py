@@ -1137,6 +1137,125 @@ def salary_check() -> int:
     return 0
 
 
+def gates_check() -> int:
+    """Pay well past the profile's level, and languages it does not speak.
+
+    Netflix's $380k-$610k "Data Engineer (L5)" scored 78 on the author's
+    board because a high salary only ever added points, and "Bilingual
+    Business Operations Analyst" reached the 70s because a second language
+    was an 8-point dealbreaker. Both are rejections in practice, so both are
+    gates now.
+    """
+    print("Pay and language gate self-check")
+    print("=" * 72)
+    from jobdesk.radar import languages
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    def job(text: str, title: str = "Staff Accountant", **kw) -> Job:
+        j = Job(title=title, company="Test Co", url="http://x",
+                source="greenhouse", location="Denver, CO", **kw)
+        j.description = ("Looking for 1-2 years of experience with the "
+                         "general ledger, reconciliation and Excel. " + text)
+        return score.score_job(j)
+
+    ceiling = score.pay_ceiling()
+    want("the ceiling defaults to twice the target",
+         ceiling, 2.0 * profile.SALARY_TARGET)
+
+    # -- pay ----------------------------------------------------------------
+    j = job("Compensation: $380,000 - $610,000 per year.")
+    want("a band that starts past the ceiling blocks",
+         (j.score, j.flags), (0, ["salary-above-level"]))
+    j = job("", salary_min=int(ceiling) + 5_000)
+    want("so does a figure the source sent",
+         j.flags, ["salary-above-level"])
+    stretch = int(ceiling * 0.8)
+    j = job(f"Salary: ${stretch:,} - ${stretch + 10_000:,}.")
+    want("a band in the stretch zone costs points instead",
+         (j.score > 0, "salary-above-level" in j.flags), (True, True))
+    plain = job("Salary: $70,000 - $80,000.")
+    want("and scores below the same job at a fitting band",
+         j.score < plain.score, True)
+    j = job(f"A one-time sign-on bonus of ${int(ceiling) + 5_000:,}.")
+    want("a lone figure in the body never blocks", j.score > 0, True)
+
+    # -- languages: what counts as asking -----------------------------------
+    def req(title: str, body: str, tail: str = ""):
+        return languages.required(title, body, tail)
+
+    want("'fluent in Spanish' is required",
+         req("Analyst", "Must be fluent in Spanish and English."),
+         (["spanish"], []))
+    want("'Spanish/English bilingual' is required",
+         req("Analyst", "Spanish/English bilingual required."),
+         (["spanish"], []))
+    want("'Bilingual' in the title is required",
+         req("Bilingual Business Operations Analyst", ""), (["bilingual"], []))
+    want("'Spanish a plus' is only preferred",
+         req("Analyst", "Bilingual (Spanish) a plus."), ([], ["spanish"]))
+    want("a language below the preferred marker is only preferred",
+         req("Analyst", "SQL.", "Preferred: Mandarin speaking"),
+         ([], ["mandarin"]))
+    want("'Polish the deck' and 'Spanish Fork' are not languages",
+         req("Analyst", "Polish the final deck. Office in Spanish Fork, UT."),
+         ([], []))
+    want("'written and verbal communication' names no language",
+         req("Analyst", "Strong written and verbal communication skills."),
+         ([], []))
+
+    # -- languages: what the profile speaks ---------------------------------
+    real = languages.spoken
+    try:
+        languages.spoken = lambda: frozenset({"english"})
+        j = job("Must be fluent in Spanish.")
+        want("an unspoken required language blocks",
+             (j.score, j.flags), (0, ["language-required"]))
+        j = job("Must be bilingual.")
+        want("so does a bare 'must be bilingual'", j.flags,
+             ["language-required"])
+        j = job("Spanish speaking a plus.")
+        want("an unspoken preferred one costs points",
+             (j.score > 0, "language-preferred" in j.flags), (True, True))
+
+        languages.spoken = lambda: frozenset({"english", "spanish"})
+        j = job("Must be fluent in Spanish.")
+        want("a language the skills list passes", j.score > 0, True)
+        j = job("Must be bilingual.")
+        want("and covers a bare 'bilingual'", j.score > 0, True)
+        want("but not a different language",
+             languages.unspoken(["korean"]), ["korean"])
+    finally:
+        languages.spoken = real
+
+    # -- languages: read off master.toml ------------------------------------
+    real_load = languages._profile.load
+    try:
+        languages._profile.load = lambda name: {
+            "skill": [{"term": "Mandarin", "category": "language",
+                       "detail": "conversational"}]}
+        want("a skill naming Mandarin also answers 'Chinese'",
+             languages.unspoken(["chinese", "mandarin", "bilingual"]), [])
+        languages._profile.load = lambda name: {
+            "identity": {"languages": ["Portuguese"]}}
+        want("an [identity] languages list counts",
+             languages.unspoken(["portuguese", "spanish"]), ["spanish"])
+    finally:
+        languages._profile.load = real_load
+        languages._memo["data"] = None
+
+    print()
+    for line in fails:
+        print("  FAILED: " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
 def plugins_check() -> int:
     """Hold the delivery registry to its two promises, with no network.
 
@@ -1358,6 +1477,79 @@ def partials_check() -> int:
     want("a two-line stub does not beat 500 characters", ok, False)
     ok, _ = try_page("<html>no markup here</html>")
     want("a page with no markup fills nothing", ok, False)
+
+    # A staffing agency's whole post can be shorter than MIN_FULL_BODY. It
+    # still wins when it holds the snippet, cut mid-word the way Adzuna cuts.
+    short = ("Title: Business Analyst Location: Mechanicsville, VA (Hybrid) "
+             "Skill Required: Business and system analysis experience. "
+             "Strong Agile/Scrum experience. Experience with Azure DevOps "
+             "Boards. Ability to write clear user stories and acceptance "
+             "criteria. Ability to interpret basic SQL queries. Nice to have: "
+             "Experience with microservices. Tolling domain experience.")
+    cut = short[:short.index("Nice to have") + 18] + "..."
+    ok, job = try_page(page("BUSINESS ANALYST", short), body=cut)
+    want("a short posting that holds the snippet replaces it", ok, True)
+    want("and it is no longer partial", job.partial, False)
+    other = ("We are hiring a Business Analyst to join a growing team. "
+             "Apply now for a rewarding role with great benefits. " * 3)
+    ok, _ = try_page(page("Business Analyst", other), body=cut)
+    want("a short page that is some other summary does not", ok, False)
+
+    # -- a closed posting is a fact, and is said -----------------------------
+    def gone(status):
+        try:
+            try_page("<html>Page not found</html>", status=status)
+        except ats.Gone:
+            return True
+        return False
+
+    want("a 404 everywhere says the posting is gone", gone(404), True)
+    want("and so does a 410", gone(410), True)
+    want("but a 500 is only a miss", gone(500), False)
+
+    # The sweep at the end of a run. A temp file, never the real board.
+    import tempfile
+    from jobdesk.radar import candidates as cand_mod
+
+    def row(uid, last_seen, score=70):
+        return {"uid": uid, "title": "Business Analyst", "company": uid,
+                "url": f"https://www.adzuna.com/details/{uid}",
+                "source": "adzuna", "description": snippet, "partial": True,
+                "flags": ["partial-description"], "score": score,
+                "last_seen": last_seen}
+
+    def sweep(rows, outcome, budget=20):
+        seen = []
+
+        def fake(job):
+            seen.append(job.company)
+            if outcome == "gone":
+                raise ats.Gone("x")
+            return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidates.json"
+            path.write_text(json.dumps(rows), encoding="utf-8")
+            saved = ats.partial_detail
+            ats.partial_detail = fake
+            try:
+                cand_mod.repair_partials(path, log=lambda *_: None,
+                                         budget=budget, wait=False)
+            finally:
+                ats.partial_detail = saved
+            left = json.loads(path.read_text(encoding="utf-8"))
+        return [r["uid"] for r in left], seen
+
+    today, older = "2026-10-01T21:00:00", "2026-09-20T21:00:00"
+    left, seen = sweep([row("closed", older), row("listed", today)], "gone")
+    want("a taken-down row the run did not see leaves the board",
+         "closed" in left, False)
+    want("one the feed still lists stays", "listed" in left, True)
+    want("and the sweep only reads rows the run did not see", seen, ["closed"])
+    left, seen = sweep([row(f"r{i}", older) for i in range(5)]
+                       + [row("listed", today)], "miss", budget=2)
+    want("the sweep stops at its budget", len(seen), 2)
+    want("and a miss removes nothing", len(left), 6)
     # An untitled node cannot be checked, so it is judged on the body alone
     # rather than refused -- the length gate is still standing.
     ok, _ = try_page('<script type="application/ld+json">'
@@ -1566,7 +1758,7 @@ if __name__ == "__main__":
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
         raise SystemExit(scoring_check() or rules_check()
-                         or salary_check() or dates_check()
+                         or salary_check() or gates_check() or dates_check()
                          or gather_check() or partials_check()
                          or bodies_check() or mysql_check())
     elif "--salary" in args:

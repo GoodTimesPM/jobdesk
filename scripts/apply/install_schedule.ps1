@@ -5,7 +5,7 @@
 #
 #   .\install_schedule.ps1                          # 07:20 / 12:50 / 17:20
 #   .\install_schedule.ps1 -Times "07:20"           # once a day
-#   .\install_schedule.ps1 -MinScore 90 -Max 5
+#   .\install_schedule.ps1 -Max 5
 #
 # The times are 20 minutes behind the radar's 07:00 / 12:30 / 17:00 sweeps on
 # purpose: `auto` reads data/radar/candidates.json, which is only written
@@ -14,30 +14,29 @@
 
 param(
     [string[]]$Times = @("07:20", "12:50", "17:20"),
-    [int]$MinScore = 80,
     [int]$Max = 10,
     [string]$TaskName = "JobRadarApply"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$runner = Join-Path $PSScriptRoot "run_auto.ps1"
 
-if (-not (Test-Path $runner)) { throw "Missing runner: $runner" }
-if (-not (Get-Command py.exe -ErrorAction SilentlyContinue)) {
-    throw "Could not find py.exe on PATH."
+# pythonw.exe, never powershell.exe. PowerShell draws its console before it
+# reads -WindowStyle Hidden, so the old task flashed a window three times a
+# day. jobdesk.apply.auto_task writes the output to the log itself.
+$pyw = Join-Path $root ".venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pyw)) {
+    $pyw = (Get-Command pythonw.exe -ErrorAction SilentlyContinue).Source
 }
+if (-not $pyw) { throw "Could not find pythonw.exe." }
 
 Write-Host "Task name : $TaskName"
-Write-Host "Runner    : $runner"
+Write-Host "Runner    : $pyw"
 Write-Host "Working   : $root"
 Write-Host "Times     : $($Times -join ', ')"
-Write-Host "Floor     : score >= $MinScore, at most $Max packet(s) per run"
+Write-Host "Limit     : at most $Max packet(s) per run"
 
-# -WindowStyle Hidden so no console flashes up three times a day. The runner
-# uses py.exe rather than pythonw.exe deliberately - see the note in it.
-$argument = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runner`" -MinScore $MinScore -Max $Max"
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argument -WorkingDirectory $root
+$action = New-ScheduledTaskAction -Execute $pyw -Argument "-m jobdesk.apply.auto_task --max $Max" -WorkingDirectory $root
 
 $triggers = @()
 foreach ($t in $Times) {
@@ -46,7 +45,7 @@ foreach ($t in $Times) {
 
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings -Description "Assisted Apply: build draft application packets for postings Job Radar scored at or above the floor. Never submits anything." -Force | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings -Description "Assisted Apply: build draft packets for postings Notion shows as newly applied. Never submits anything." -Force | Out-Null
 
 Write-Host ""
 Write-Host "Registered. Run it once now with:"
