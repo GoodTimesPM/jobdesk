@@ -225,18 +225,27 @@ def render(plan: Plan, path: Path,
     pdf.section_header("Experience")
     for i, section in enumerate(plan.experience):
         entry = section.entry
+        # Company and location, then title and dates, each pair split by
+        # the right margin and never by a dash. Workday's autofill reads the
+        # first line of a job as the employer, and "Title / Company - Place"
+        # put a title with a dash in it ("Total Restaurant Foods - Subs")
+        # in the Company field and left Job Title empty.
         pdf.set_font("Helvetica", "B", lay.pt(9.5))
         pdf.set_text_color(30, 30, 30)
-        title = ascii_safe(entry.title)
-        pdf.cell(pdf.get_string_width(title) + 2, lay.lh(4.5), title)
+        company = ascii_safe(entry.company)
+        pdf.cell(pdf.get_string_width(company) + 2, lay.lh(4.5), company)
         pdf.set_font("Helvetica", "", lay.pt(8.5))
         pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, lay.lh(4.5), ascii_safe(entry.dates), align="R",
+        pdf.cell(0, lay.lh(4.5), ascii_safe(entry.location or ""), align="R",
                  new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "I", lay.pt(9))
         pdf.set_text_color(80, 80, 80)
-        org = f"{entry.company} - {entry.location}" if entry.location else entry.company
-        pdf.cell(0, lay.lh(4), ascii_safe(org), new_x="LMARGIN", new_y="NEXT")
+        title = ascii_safe(entry.title)
+        pdf.cell(pdf.get_string_width(title) + 2, lay.lh(4), title)
+        pdf.set_font("Helvetica", "", lay.pt(8.5))
+        pdf.set_text_color(100, 100, 100)
+        pdf.cell(0, lay.lh(4), ascii_safe(entry.dates), align="R",
+                 new_x="LMARGIN", new_y="NEXT")
         pdf.ln(lay.sp(1.5))
         for chosen in section.chosen:
             pdf.bullet(ascii_safe(chosen.text))
