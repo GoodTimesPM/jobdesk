@@ -373,6 +373,9 @@ def read_posting(query, body) -> dict:
     except ats.Challenged as why:
         raise BadRequest(f"{why}. The posting is live, so open it and paste "
                          f"the text in.")
+    except ats.Gone:
+        raise BadRequest("the posting has been taken down, so there is "
+                         "nothing left to read.")
     except Exception as exc:
         raise BadRequest(f"the posting could not be read ({exc})")
     if not got:
