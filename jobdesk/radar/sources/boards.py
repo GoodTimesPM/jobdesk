@@ -250,6 +250,11 @@ def adzuna(_cfg: dict | None = None) -> list[Job]:
         if not isinstance(data, dict):
             continue
         for j in data.get("results", []):
+            # Adzuna fills in a model's guess when the ad states no pay, and
+            # marks it with salary_is_predicted. The guess arrives as one
+            # figure with cents ($212,436.10 for a Power BI developer) and was
+            # being read as pay posted up front.
+            guessed = str(j.get("salary_is_predicted", "0")) == "1"
             out.append(Job(
                 title=j.get("title", ""),
                 company=(j.get("company") or {}).get("display_name", ""),
@@ -258,8 +263,8 @@ def adzuna(_cfg: dict | None = None) -> list[Job]:
                 location=(j.get("location") or {}).get("display_name", ""),
                 description=j.get("description", ""),
                 posted_at=parse_date(j.get("created")),
-                salary_min=_num(j.get("salary_min")),
-                salary_max=_num(j.get("salary_max")),
+                salary_min=None if guessed else _num(j.get("salary_min")),
+                salary_max=None if guessed else _num(j.get("salary_max")),
                 external_id=str(j.get("id", "")),
                 # Adzuna cuts every description at 500 characters and appends
                 # an ellipsis -- measured across a full Richmond pull, all 222

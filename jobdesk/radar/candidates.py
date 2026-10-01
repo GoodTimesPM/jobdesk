@@ -221,8 +221,14 @@ def reuse_bodies(jobs: list[Job], path=None,
 COOLDOWN_SECONDS = 480
 MAX_COOLDOWNS = 4
 
+# Rows the end-of-run sweep rechecks. Each is one or two page reads at five
+# seconds apiece, so twenty adds two to three minutes to a run, and a closed
+# ad leaves the board within a day or two instead of sitting there a month.
+SWEEP_BUDGET = 20
 
-def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
+
+def repair_partials(path=None, log: Callable[[str], None] = print,
+                    budget: int | None = None, wait: bool = True) -> int:
     """Fetch the real posting for every row here whose body never arrived.
 
     Two kinds of row qualify, and they got here by different routes:
@@ -243,7 +249,19 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
     rescores them, and saves.
 
     Safe to run twice: a row that fills is no longer missing a body and is not
-    tried again, and a row whose posting has expired stays exactly as it was.
+    tried again.
+
+    A row whose posting answers 404 everywhere is dropped, but only if the
+    latest run did not see it. Adzuna keeps listing an ad for a while after
+    its page goes, and a posting still being advertised stays until the feed
+    lets go of it too. Before this, closed ads sat on the board as snippets
+    for the whole RETENTION_DAYS: 42 of them on 2026-10-01.
+
+    `budget` is the radar's own call, made at the end of every run (see
+    SWEEP_BUDGET). It checks only rows the run did not see, since
+    `fill_partials` already tried the rest, least recently checked first so
+    a few unreadable rows cannot take the budget every time. It does not
+    wait out a bot check either.
     """
     import time
     from collections import Counter
@@ -263,12 +281,25 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
             return True
         return not (r.get("description") or "").strip()
 
+    latest = max((str(r.get("last_seen") or "") for r in rows), default="")
+
+    def carried(r: dict) -> bool:
+        return str(r.get("last_seen") or "") < latest
+
     todo = [r for r in rows if wants_body(r) and r.get("url")]
+    if budget is not None:
+        todo = [r for r in todo if carried(r)]
+        todo.sort(key=lambda r: (str(r.get("checked_at") or ""),
+                                 -(r.get("score") or 0)))
     if not todo:
-        log("candidates: every row already has its posting")
+        if budget is None:
+            log("candidates: every row already has its posting")
         return 0
 
+    stamp = datetime.now(timezone.utc).isoformat()
     fixed = 0
+    tried = 0
+    closed: set[str] = set()
     blocked: dict[str, str] = {}
     cooldowns: Counter[str] = Counter()
     queue = list(todo)
@@ -277,6 +308,9 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
         host = http._host(row["url"])
         if host in blocked:
             continue
+        if budget is not None and tried >= budget:
+            break
+        tried += 1
         job = Job.from_dict(row)
         job.partial = bool(row.get("partial")
                            or "partial-description" in (row.get("flags") or []))
@@ -294,7 +328,7 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
             # Before this was caught at all, a repair that met the WAF on its
             # fifth request reported 78 live postings as expired.
             cooldowns[host] += 1
-            if cooldowns[host] > MAX_COOLDOWNS:
+            if not wait or cooldowns[host] > MAX_COOLDOWNS:
                 blocked[host] = str(why)
                 continue
             log(f"  {why} - waiting {COOLDOWN_SECONDS}s "
@@ -302,8 +336,17 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
             time.sleep(COOLDOWN_SECONDS)
             queue.insert(0, row)
             continue
-        except Exception:
+        except ats.Gone:
+            row["checked_at"] = stamp
+            if carried(row):
+                closed.add(row["uid"])
+                log(f"  {row.get('company')} | {str(row.get('title'))[:40]} "
+                    f"-> taken down, off the board")
             continue
+        except Exception:
+            row["checked_at"] = stamp
+            continue
+        row["checked_at"] = stamp
         if not got:
             continue
         fixed += 1
@@ -318,19 +361,28 @@ def repair_partials(path=None, log: Callable[[str], None] = print) -> int:
         log(f"  {why} - the postings on {host} are live, we just cannot read "
             f"them; open one and use the paste button")
 
-    if not fixed:
-        log(f"candidates: none of the {len(todo)} posting(s) could be fetched")
+    if not (fixed or closed):
+        if budget is None:
+            log(f"candidates: none of the {len(todo)} posting(s) could be fetched")
+        else:
+            # The checked_at stamps still matter: they move the next run on
+            # to rows it has not tried.
+            try:
+                save(rows, path)
+            except OSError:
+                pass
         return 0
 
-    rows = [r for r in rows if (r.get("score") or 0) >= config.MIN_SCORE_TO_REPORT]
+    rows = [r for r in rows if r.get("uid") not in closed
+            and (r.get("score") or 0) >= config.MIN_SCORE_TO_REPORT]
     rows.sort(key=lambda r: (-(r.get("score") or 0), str(r.get("last_seen") or "")))
     try:
         save(rows, path)
     except OSError as exc:
         log(f"candidates: write failed ({exc})")
         return 0
-    log(f"candidates: repaired {fixed} of {len(todo)} posting(s) that "
-        f"reached the board without one")
+    log(f"candidates: repaired {fixed} and removed {len(closed)} taken down, "
+        f"of {len(todo)} posting(s) without a description")
     return fixed
 
 

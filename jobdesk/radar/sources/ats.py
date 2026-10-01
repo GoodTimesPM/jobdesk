@@ -433,6 +433,18 @@ class Challenged(RuntimeError):
     """
 
 
+class Gone(RuntimeError):
+    """Every address for the posting answered 404 or 410: it was taken down.
+
+    Raised for the same reason as Challenged. "No body on the page" and "no
+    page" read the same as False, and on 2026-10-01 42 of the board's 50
+    snippet-only rows were Adzuna ads that had closed weeks earlier.
+    """
+
+
+GONE_STATUSES = (404, 410)
+
+
 def challenge_reason(resp) -> str:
     """Name the bot check, or "" if the response is a real page.
 
@@ -617,6 +629,30 @@ MIN_FULL_BODY = 900
 MIN_ANY_BODY = 200
 
 
+# Below this the snippet is too short to prove anything by containing it.
+MIN_PROOF_WORDS = 20
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _extends(snippet: str, body: str) -> bool:
+    """True when `body` holds the snippet's text, so it is the posting the
+    snippet was cut from and not another summary.
+
+    MIN_FULL_BODY turned away whole postings that are simply short. Staffing
+    agencies post a few lines, and on 2026-09-30 two Business Analyst reqs sat
+    on the board as snippets while Adzuna's own page held all 633 and 770
+    characters of them. The snippet's last word is dropped, since Adzuna cuts
+    mid-word ("Experienc...").
+    """
+    want = _words(snippet)[:-1]
+    if len(want) < MIN_PROOF_WORDS:
+        return False
+    return f" {' '.join(want)} " in f" {' '.join(_words(body))} "
+
+
 def _title_words(title: str) -> set[str]:
     return {w for w in re.split(r"[^a-z0-9]+", (title or "").lower())
             if len(w) > 3}
@@ -655,7 +691,9 @@ def partial_detail(job: Job) -> bool:
     location stays as it was and salary is taken only when we have none.
     """
     want = _title_words(job.title)
-    for url in _urls_to_try(job.url):
+    urls = _urls_to_try(job.url)
+    missing = 0
+    for url in urls:
         # Slower than the default 1.5s, and the same rate `sitemap_detail`
         # reads a careers page at. This is one page a person could have opened
         # by clicking the link in the digest, and reading a few hundred of
@@ -663,6 +701,8 @@ def partial_detail(job: Job) -> bool:
         # of us: a repair at 1.5s got four postings before it started
         # answering 202.
         resp = http.get(url, timeout=TIMEOUT, allow_redirects=True, spacing=5.0)
+        if resp is not None and resp.status_code in GONE_STATUSES:
+            missing += 1
         if resp is None or resp.status_code >= 400:
             continue
         # Same rule as `sitemap_detail`, and for the same reason: a bot check
@@ -675,7 +715,9 @@ def partial_detail(job: Job) -> bool:
         for node in job_postings_in(resp.text):
             body = clean_text(node.get("description") or "")
             floor = MIN_FULL_BODY if job.description else MIN_ANY_BODY
-            if len(body) < floor or len(body) <= len(job.description):
+            if len(body) <= len(job.description):
+                continue
+            if len(body) < floor and not _extends(job.description, body):
                 continue
             got = _title_words(str(node.get("title") or ""))
             if want and got and not (want & got):
@@ -687,6 +729,9 @@ def partial_detail(job: Job) -> bool:
                 if low or high:
                     job.salary_min, job.salary_max = low, high
             return True
+    if missing == len(urls):
+        raise Gone(f"{http._host(job.url)}: the posting answers "
+                   f"{'/'.join(map(str, GONE_STATUSES))}")
     return False
 
 
