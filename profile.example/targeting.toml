@@ -284,6 +284,9 @@ advanced_degree_terms = [
 # bonus. Denver entry accounting runs roughly $48-62k.
 salary_floor = 45000
 salary_target = 68000
+# A band that starts at or above the ceiling is for someone past this level
+# and scores 0. Optional; it defaults to twice the target.
+# salary_ceiling = 136000
 
 # Postings older than this are near-dead: recruiters review in arrival order,
 # and most requisitions stop being read long before they come down.
