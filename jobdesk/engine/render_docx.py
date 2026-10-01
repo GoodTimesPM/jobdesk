@@ -195,13 +195,20 @@ def render(plan: Plan, path: Path, layout: Layout | None = None) -> Path:
             Pt(_USABLE_WIDTH.pt + 2 * (54 - 54 * lay.side / MARGIN)),
             WD_TAB_ALIGNMENT.RIGHT,
         )
-        _run(p, entry.title, bold=True, size=10.5, color=(30, 30, 30))
-        _run(p, "\t" + entry.dates, size=9.5, color=(100, 100, 100))
+        # Same order as the PDF, for the same parser: company first, title
+        # second, and a tab between fields rather than a dash.
+        _run(p, entry.company, bold=True, size=10.5, color=(30, 30, 30))
+        if entry.location:
+            _run(p, "\t" + entry.location, size=9.5, color=(100, 100, 100))
 
         p = doc.add_paragraph()
         _tight(p, after=2)
-        org = f"{entry.company} - {entry.location}" if entry.location else entry.company
-        _run(p, org, italic=True, size=10, color=(80, 80, 80))
+        p.paragraph_format.tab_stops.add_tab_stop(
+            Pt(_USABLE_WIDTH.pt + 2 * (54 - 54 * lay.side / MARGIN)),
+            WD_TAB_ALIGNMENT.RIGHT,
+        )
+        _run(p, entry.title, italic=True, size=10, color=(80, 80, 80))
+        _run(p, "\t" + entry.dates, size=9.5, color=(100, 100, 100))
 
         for chosen in section.chosen:
             bullet(chosen.text)
