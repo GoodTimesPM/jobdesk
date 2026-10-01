@@ -9,7 +9,7 @@ from __future__ import annotations
 import functools
 import re
 
-from . import profile
+from . import languages, profile
 from .models import Job, division_in
 
 # "5+ years", "5-7 years", "minimum of 5 years", "at least five years".
@@ -807,7 +807,9 @@ def _dealbreaker_points(job: Job) -> tuple[int, list[str], list[str]]:
     hay = job.haystack
     points, reasons, flags = 0, [], []
     for label, penalty, phrases in profile.DEALBREAKER_SIGNALS:
-        hit = _has_any(hay, phrases)
+        # The language gate in score_job owns spoken languages. A posting
+        # that reaches here asks only for ones the profile speaks.
+        hit = _has_any(hay, [p for p in phrases if not languages.asks(p)])
         if hit:
             points += penalty
             reasons.append(f"{label} ({hit})")
@@ -855,6 +857,35 @@ def _freshness_points(job: Job) -> tuple[int, list[str], list[str]]:
     return -18, [f"posted {age:.0f}d ago - likely evergreen/ghost"], ["ghost-suspect"]
 
 
+def pay_ceiling() -> float:
+    """The pay at which a band is for someone well past this profile.
+
+    `salary_ceiling` in targeting.toml, or twice `salary_target`. Nobody hires
+    an entry-level analyst onto a band that starts at $150k, and Netflix's
+    $380k-$610k "Data Engineer (L5)" scored 78 because the title matched and
+    a high salary only ever added points.
+    """
+    return float(profile.SALARY_CEILING or 2 * profile.SALARY_TARGET)
+
+
+# Where "well above your range" starts, as a share of the ceiling: 1.5x the
+# target when the ceiling is the default 2x.
+PAY_STRETCH = 0.75
+
+
+def _band_floor(job: Job) -> tuple[float | None, bool]:
+    """The bottom of the posted band, and whether it is firm enough to block.
+
+    Firm means the source sent the number, or the body states a range. A lone
+    figure read off the body can be a sign-on bonus or a budget, so it only
+    costs points.
+    """
+    stated = bool(job.salary_min or job.salary_max)
+    lo, hi = parse_salary(job)
+    low = lo or hi
+    return low, stated or bool(lo and hi)
+
+
 def _salary_points(job: Job) -> tuple[int, list[str], list[str]]:
     lo, hi = parse_salary(job)
     if lo:
@@ -862,6 +893,10 @@ def _salary_points(job: Job) -> tuple[int, list[str], list[str]]:
     top = hi or lo
     if not top:
         return 0, [], []
+    low = lo or hi
+    if low >= PAY_STRETCH * pay_ceiling():
+        return -10, [f"pays {job.salary_text} - well above your range, "
+                     f"likely a senior role"], ["salary-above-level"]
 
     # Posting a salary is a small sign of a real, funded req (Virginia does not
     # require it). Applies even below the floor.
@@ -990,6 +1025,32 @@ def score_job(job: Job) -> Job:
                        f"~{profile.YEARS_COMFORTABLE}yr range"]
         job.flags = ["over-experienced-req"]
         return job
+
+    # Pay gate. A band that starts past the ceiling is a level, not a perk.
+    low, firm = _band_floor(job)
+    if firm and low and low >= pay_ceiling():
+        job.score = 0
+        job.tier = "F"
+        job.reasons = [f"pays from ${low:,.0f} - past your ceiling of "
+                       f"${pay_ceiling():,.0f}, a band for a senior hire"]
+        job.flags = ["salary-above-level"]
+        return job
+
+    # Language gate. Only languages the profile's skills list may be required.
+    must, nice = languages.required(job.title, _binding_text(job),
+                                    _preferred_tail(job))
+    missing = languages.unspoken(must)
+    if missing:
+        job.score = 0
+        job.tier = "F"
+        job.reasons = [f"requires {', '.join(n.title() for n in missing)}, "
+                       f"which your skills do not list"]
+        job.flags = ["language-required"]
+        return job
+    for name in languages.unspoken(nice):
+        total -= 4
+        reasons.append(f"{name.title()} preferred, not in your skills")
+        flags.append("language-preferred")
 
     title_pts, why = _title_tier(job.title)
     total += title_pts

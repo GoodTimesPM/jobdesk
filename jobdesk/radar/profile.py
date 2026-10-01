@@ -65,6 +65,9 @@ _OPTIONAL = {
     "SYNONYMS_ENABLED": ("synonyms_enabled", True),
     "SYNONYM_DISCOUNT": ("synonym_discount", 6),
     "SEARCH_SYNONYM_LIMIT": ("search_synonym_limit", 6),
+    # The pay that says a posting is for someone well past this profile's
+    # level. 0 means twice `salary_target`; see score.pay_ceiling.
+    "SALARY_CEILING": ("salary_ceiling", 0),
 }
 
 

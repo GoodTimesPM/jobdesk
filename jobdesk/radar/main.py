@@ -175,6 +175,13 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     # `new_jobs` -- a posting found yesterday and not applied to yet is still a
     # candidate today, and this is the file that answers "what can I apply to".
     candidates.write(jobs, log=log)
+    # Rows this run did not see keep their snippet for up to a month unless
+    # something rechecks them, and a closed ad never fills. See SWEEP_BUDGET.
+    try:
+        candidates.repair_partials(log=log, budget=candidates.SWEEP_BUDGET,
+                                   wait=False)
+    except Exception as exc:
+        log(f"candidates: sweep failed, run continues ({exc})")
 
     plugins.deliver(jobs, stats, new_jobs, log=log)
     store.save()
