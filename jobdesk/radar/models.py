@@ -32,8 +32,43 @@ def _from_cp1252(match: re.Match) -> str:
         return " "
 
 
+# The shape of a posting, kept as plain text. A list item becomes a line that
+# starts with a bullet, a heading becomes a line that ends in a colon, and the
+# end of any block becomes a line break. Everything else about the markup goes.
+_ITEM = re.compile(r"<li\b[^>]*>", re.I)
+_BLOCK = re.compile(
+    r"<(?:br|/?(?:p|div|ul|ol|li|tr|h[1-6]|section|article|table|blockquote))"
+    r"\b[^>]*>", re.I)
+# A heading tag, or a paragraph that is nothing but bold, which is how every
+# rich-text editor's user writes a section title. The inner text may not cross
+# into another paragraph, or "<p><b>Note:</b> text</p>...<p><b>Pay</b></p>"
+# would read as one long heading.
+_INNER = r"((?:(?!</?(?:p|div|h[1-6])\b).)*?)"
+_HEADING = re.compile(
+    r"<(h[1-6])\b[^>]*>" + _INNER + r"</\1\s*>"
+    r"|<(p|div)\b[^>]*>\s*<(strong|b)\b[^>]*>" + _INNER
+    + r"</\4\s*>\s*:?\s*</\3\s*>", re.I | re.S)
+_LINE_SPACE = re.compile(r"[^\S\n]+")
+_LINE_BREAKS = re.compile(r"\s*\n\s*")
+_EMPTY_BULLET = re.compile(r"• *\n")
+
+
+def _heading(match: re.Match) -> str:
+    inner = _TAGS.sub(" ", match.group(2) or match.group(5) or "").strip()
+    if not inner:
+        return "\n"
+    return "\n" + inner + ("" if inner.endswith(":") else ":") + "\n"
+
+
 def clean_text(raw: str | None) -> str:
-    """Strip HTML tags and collapse whitespace. JD bodies arrive as HTML.
+    """Strip HTML tags and tidy whitespace, keeping line breaks and bullets.
+
+    The page rebuilds a posting's lists and headings from these lines
+    (`app.jdstruct`). This used to collapse every newline as well, so a
+    Workday posting with eleven bullet points was stored, and shown, as one
+    3,000-character paragraph. Spaces and tabs inside a line still collapse,
+    and a run of blank lines is one break. Text with no markup keeps its own
+    line breaks, so running this twice gives the same text.
 
     Tags first, then entities: decoding first would turn a written `&lt;`
     into a `<` that the tag stripper then eats along with everything up to
@@ -48,8 +83,14 @@ def clean_text(raw: str | None) -> str:
     """
     if not raw:
         return ""
-    text = html.unescape(_TAGS.sub(" ", raw))
-    return _WS.sub(" ", _C1.sub(_from_cp1252, text)).strip()
+    text = _HEADING.sub(_heading, raw)
+    text = _ITEM.sub("\n• ", text)
+    text = _BLOCK.sub("\n", text)
+    text = html.unescape(_TAGS.sub(" ", text))
+    text = _LINE_SPACE.sub(" ", _C1.sub(_from_cp1252, text))
+    text = _LINE_BREAKS.sub("\n", text)
+    # "<li><p>Text</p></li>" puts the bullet and its text on two lines.
+    return _EMPTY_BULLET.sub("• ", text).strip()
 
 
 def parse_date(value: Any) -> datetime | None:

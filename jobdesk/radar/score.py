@@ -16,9 +16,13 @@ from .models import Job, division_in
 # The (?<!\d) and the required range separator stop a calendar year from
 # reading as a requirement: "2014 year over year" once scored as 14 years.
 # The top of a range is kept, because "3-5 years" is a band and both ends
-# say something.
+# say something. "Four (4) or more years" read as no requirement at all until
+# the closing bracket and "or more" were allowed between the number and
+# "years", and a 4-year Power BI posting scored 91 for saying nothing.
+_OR_MORE = r"(?:or\s+(?:more|greater)\s+)?"
 _YEARS_PATTERNS = [
-    re.compile(r"(?<!\d)(\d{1,2})\s*\+?\s*(?:(?:-|to|–|—)\s*(\d{1,2})\s*)?\+?\s*years?\b", re.I),
+    re.compile(r"(?<!\d)(\d{1,2})\)?\s*\+?\s*(?:(?:-|to|–|—)\s*(\d{1,2})\s*)?\+?\s*"
+               + _OR_MORE + r"years?\b", re.I),
     re.compile(r"minimum(?:\s+of)?\s+(?<!\d)(\d{1,2})\s*years?\b", re.I),
     re.compile(r"at least\s+(?<!\d)(\d{1,2})\s*years?\b", re.I),
 ]
@@ -28,7 +32,30 @@ _WORD_NUMBERS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
 }
 _WORD_YEARS = re.compile(
-    r"\b(" + "|".join(_WORD_NUMBERS) + r")\s*(?:\+)?\s*years", re.I)
+    r"\b(" + "|".join(_WORD_NUMBERS) + r")\s*(?:\(\d{1,2}\))?\s*(?:\+)?\s*"
+    + _OR_MORE + r"years", re.I)
+
+# "Two (2) to four (4) years" is a band from two, and read word by word it was
+# a bare "(4) years" that blocked at four. Numbers become digits, with the
+# bracketed copy dropped, before any years pattern looks at the text.
+_SPELLED = re.compile(
+    r"\b(" + "|".join(_WORD_NUMBERS) + r")\b(?:\s*\(\s*\d{1,2}\s*\))?", re.I)
+
+
+# The years a posting takes in place of a degree. "Bachelor's and 2 years, or
+# a high school diploma and 4 years" asks a graduate for two, and "in lieu of
+# a degree, 5 years" asks a graduate for nothing. Either one read as the
+# requirement blocked postings a graduate qualifies for.
+_DEGREE_SWAP = re.compile(
+    r"(?i)(?:in\s+lieu\s+of\s+(?:a|an|the)?\s*(?:\w+\s+){0,2}degree"
+    r"|without\s+a\s+(?:\w+\s+)?degree"
+    r"|high\s+school\s+diploma|\bged\b)"
+    r"[^.;]{0,60}?\d{1,2}\s*\+?\s*(?:or\s+more\s+)?years?")
+
+
+def _numerals(text: str) -> str:
+    text = _SPELLED.sub(lambda m: str(_WORD_NUMBERS[m.group(1).lower()]), text)
+    return _DEGREE_SWAP.sub(" ", text)
 
 # Salary written in the JD body. Most dollar amounts in a posting are not pay
 # ("$200B in spend", "tuition up to $2500"), so an amount has to sit near a
@@ -115,6 +142,7 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
     "3-5 years" is (3, 5). A bare "5+ years" is (5, 5): the plus is open-ended
     and inventing a ceiling for it would be worse than having none.
     """
+    text = _numerals(text)
     bands: list[tuple[int, int]] = []
     for pat in _YEARS_PATTERNS:
         for m in pat.finditer(text):
@@ -141,7 +169,7 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
 
 def _tail_bands(job: Job) -> list[tuple[int, int]]:
     """Years requirements below the preferred marker that still bind."""
-    tail = _preferred_tail(job)
+    tail = _numerals(_preferred_tail(job))
     if not tail:
         return []
     kept: list[tuple[int, int]] = []
@@ -212,7 +240,7 @@ def blocking_years(job: Job) -> int | None:
     gate), and "or equivalent experience" or "we will train" returns None, so
     the posting is demoted by `_experience_points` instead of removed.
     """
-    text = _binding_text(job)
+    text = _numerals(_binding_text(job))
     if not text:
         return None
 
@@ -601,12 +629,64 @@ def job_family(title: str) -> str:
     return "unclassified"
 
 
+# Every country but the US, so a location is not foreign only when the
+# profile's own list happened to name it. "Remote - Luxembourg" scored 90
+# because non_us_markers stopped at the larger countries. Two are left out:
+# Georgia is also a state, and the kingdom east of Israel shares its name
+# with a common first name, place and surname.
+COUNTRIES = (
+    "afghanistan", "albania", "algeria", "andorra", "angola", "argentina",
+    "armenia", "australia", "austria", "azerbaijan", "bahamas", "bahrain",
+    "bangladesh", "barbados", "belarus", "belgium", "belize", "benin",
+    "bhutan", "bolivia", "bosnia", "botswana", "brazil", "brunei",
+    "bulgaria", "burkina faso", "burundi", "cambodia", "cameroon", "canada",
+    "cape verde", "chile", "china", "colombia", "congo", "costa rica",
+    "croatia", "cyprus", "czech republic", "czechia", "denmark", "djibouti",
+    "dominican republic", "ecuador", "egypt", "el salvador", "estonia",
+    "eswatini", "ethiopia", "fiji", "finland", "france", "gabon", "gambia",
+    "germany", "ghana", "greece", "guatemala", "guyana", "haiti",
+    "honduras", "hong kong", "hungary", "iceland", "india", "indonesia",
+    "iran", "iraq", "ireland", "israel", "italy", "ivory coast",
+    "jamaica", "japan", "kazakhstan", "kenya", "kosovo", "kuwait",
+    "kyrgyzstan", "laos", "latvia", "lebanon", "liberia", "libya",
+    "liechtenstein", "lithuania", "luxembourg", "madagascar", "malawi",
+    "malaysia", "maldives", "mali", "malta", "mauritius", "mexico",
+    "moldova", "monaco", "mongolia", "montenegro", "morocco", "mozambique",
+    "myanmar", "namibia", "nepal", "netherlands", "new zealand",
+    "nicaragua", "nigeria", "north macedonia", "norway", "oman",
+    "pakistan", "panama", "paraguay", "peru", "philippines", "poland",
+    "portugal", "qatar", "romania", "russia", "rwanda", "saudi arabia",
+    "senegal", "serbia", "singapore", "slovakia", "slovenia", "somalia",
+    "south africa", "south korea", "spain", "sri lanka", "sudan",
+    "suriname", "sweden", "switzerland", "syria", "taiwan", "tajikistan",
+    "tanzania", "thailand", "togo", "trinidad", "tunisia", "turkey",
+    "turkiye", "uganda", "ukraine", "united arab emirates", "uae",
+    "united kingdom", "uruguay", "uzbekistan", "venezuela", "vietnam",
+    "yemen", "zambia", "zimbabwe",
+)
+
+# US places named after countries ("Lebanon, PA", "Peru, IN", "New Mexico").
+# A location that also names a state or the US is read as the US.
+_US_PLACE = re.compile(
+    r"(?i)\bnew mexico\b|\bunited states\b|\busa\b|\bu\.s\.|"
+    r",\s*(?:a[klrz]|c[aot]|d[ce]|fl|ga|hi|i[adln]|k[sy]|la|m[adeinost]|"
+    r"n[cdehjmvy]|o[hkr]|pa|ri|s[cd]|t[nx]|ut|v[at]|w[aivy])\b")
+
+
+_US_WORK = re.compile(
+    r"(?i)(?:authori[sz]ed|eligible|legally able)\s+to\s*work\s*in\s+the\s+"
+    r"(?:united\s+states|u\.?s\b)")
+
+
 def non_us_location(location: str) -> str | None:
     """The foreign country/city named in the location, if any."""
-    loc = f" {location.lower()} "
-    for marker in profile.NON_US_MARKERS:
-        if _word(marker).search(loc):
-            return marker
+    loc = f" {location.lower()} ".replace("new mexico", "")
+    # The state exemption is for country names only. ", IN" and ", CA" are
+    # also India and Canada, so "Bangalore, IN" stays foreign.
+    us_place = bool(_US_PLACE.search(location))
+    for name in (*profile.NON_US_MARKERS, *COUNTRIES):
+        if _word(name).search(loc) and not (us_place and name in COUNTRIES):
+            return name
     return None
 
 
@@ -623,6 +703,11 @@ def _geo_points(job: Job) -> tuple[int, list[str], list[str]]:
     # A foreign location beats every other geo signal, including a "remote"
     # tag -- "Remote, Philippines" is remote, just not for you.
     foreign = non_us_location(job.location)
+    # A board's country tag can be wrong. Himalayas files Minnesota postings
+    # under Mongolia (MN), and the posting itself asks for US work
+    # authorization. The profile's own markers still win over the text.
+    if foreign in COUNTRIES and foreign not in profile.NON_US_MARKERS             and _US_WORK.search(body):
+        foreign = None
     if foreign and not is_local:
         flags.append("remote-but-not-US")
         return -100, [f"located outside the US ({foreign})"], flags
@@ -695,6 +780,67 @@ def _stack_points(job: Job) -> tuple[int, list[str], list[str]]:
     if foreign:
         reasons.append("unfamiliar stack: " + ", ".join(foreign[:4]))
     return points, reasons, hits
+
+
+# Products a posting can ask for years of. Coursework and home projects stand
+# in for a year or two of a tool; past that the screen is asking for a job
+# where you used it, and a general "2-3 years" band does not say so. A
+# profile adds its own with `products`.
+PRODUCTS = (
+    "power bi", "tableau", "looker", "qlik", "excel", "power query", "dax",
+    "sql server", "sql", "t-sql", "pl/sql", "python", "sas", "spss", "stata",
+    "alteryx", "snowflake", "databricks", "redshift", "bigquery", "aws",
+    "azure", "gcp", "salesforce", "servicenow", "workday", "sap", "oracle",
+    "netsuite", "dynamics 365", "sharepoint", "jira", "google analytics",
+    "hubspot", "marketo", "quickbooks", "peoplesoft", "epic", "cerner",
+    "power apps", "power automate", "ssrs", "ssis", "informatica", "dbt",
+    "airflow", "spark", "kubernetes", "terraform", "matlab", "autocad",
+)
+TOOL_YEARS_PENALTY = 12
+# The years figure and the product have to sit in one clause: "4+ years of
+# professional experience developing reporting solutions with Power BI".
+_TOOL_CLAUSE = 140
+
+
+def tool_years(job: Job) -> list[tuple[int, str]]:
+    """(years, product) for each requirement that names a product.
+
+    Binding half only, and the product has to come after the figure and before
+    the clause ends, so "3+ years of experience. Tools: Excel" stays a general
+    requirement.
+    """
+    text = _numerals(_binding_text(job))
+    if not text:
+        return []
+    products = list(PRODUCTS) + [str(p).lower() for p in profile.PRODUCTS]
+    found: dict[str, int] = {}
+    matches = [m for pat in _YEARS_PATTERNS for m in pat.finditer(text)]
+    for m in matches:
+        clause = re.split(r"[.;\n•]|\s-\s", text[m.end():m.end() + _TOOL_CLAUSE])[0]
+        clause = clause.lower()
+        if "experience" not in clause and "proficien" not in clause \
+                and "using" not in clause and "working with" not in clause:
+            continue
+        bands = _bands_in(m.group(0))
+        if not bands:
+            continue
+        years = max(b[0] for b in bands)
+        for product in products:
+            if _said(clause, product):
+                found[product] = max(found.get(product, 0), years)
+    return sorted(((y, p) for p, y in found.items()), reverse=True)
+
+
+def _tool_years_points(job: Job) -> tuple[int, list[str], list[str]]:
+    """A penalty for years of one product past what school work covers."""
+    over = [(y, p) for y, p in tool_years(job) if y > profile.YEARS_COMFORTABLE]
+    if not over:
+        return 0, [], []
+    years, product = over[0]
+    named = product.upper() if len(product) <= 3 else product.title()
+    return -TOOL_YEARS_PENALTY, [
+        f"{years}+ years of {named} experience asked - more than coursework "
+        f"or projects stand in for"], ["tool-years"]
 
 
 def _experience_points(job: Job) -> tuple[int, list[str], list[str]]:
@@ -1056,7 +1202,8 @@ def score_job(job: Job) -> Job:
     total += title_pts
     reasons.append(why)
 
-    for fn in (_geo_points, _experience_points, _education_points,
+    for fn in (_geo_points, _experience_points, _tool_years_points,
+               _education_points,
                _no_experience_points, _freshness_points, _salary_points,
                _agency_points, _dealbreaker_points, _syndication_points):
         pts, why, fl = fn(job)

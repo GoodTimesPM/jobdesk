@@ -68,6 +68,8 @@ _OPTIONAL = {
     # The pay that says a posting is for someone well past this profile's
     # level. 0 means twice `salary_target`; see score.pay_ceiling.
     "SALARY_CEILING": ("salary_ceiling", 0),
+    # Products beyond score.PRODUCTS that a posting can ask for years of.
+    "PRODUCTS": ("products", []),
 }
 
 

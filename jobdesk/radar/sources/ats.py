@@ -343,7 +343,10 @@ def workday_detail(job: Job, entry: dict) -> bool:
     base = f"https://{entry['host']}"
     site_path = f"/{entry['site']}"
     prefix = base + site_path
-    if not job.url.startswith(prefix):
+    # Workday matches the site name in any case, and the list hands back
+    # links in its own casing ("StrykerCareers" for a "strykercareers"
+    # entry), so the comparison cannot be exact.
+    if not job.url.lower().startswith(prefix.lower()):
         return False
     url = (f"{base}/wday/cxs/{entry['tenant']}/{entry['site']}"
            f"{job.url[len(prefix):]}")
