@@ -1137,6 +1137,83 @@ def salary_check() -> int:
     return 0
 
 
+def tool_years_check() -> int:
+    """Years of one named product, and years written as "Four (4) or more".
+
+    Insight Global's Power BI Developer asked for "Four (4) or more years of
+    professional experience developing ... with Microsoft Power BI" and scored
+    91 with "no explicit years requirement": neither years pattern allowed the
+    bracket or "or more". Past a year or two, years of one product mean a job
+    where you used it, so those cost points even inside the general band.
+    """
+    print("Product years self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    def job(text: str) -> Job:
+        j = Job(title="Data Analyst", company="Test Co", url="http://x",
+                source="greenhouse", location="Denver, CO")
+        j.description = "About the team. " * 20 + "Requirements: " + text
+        return j
+
+    comfortable = profile.YEARS_COMFORTABLE
+    over = comfortable + 1
+
+    want("'Four (4) or more years' reads as four",
+         score.required_band(job("Four (4) or more years of experience.")),
+         (4, 4))
+    want("'3 or more years' reads as three",
+         score.required_band(job("3 or more years of experience.")), (3, 3))
+    want("'Two (2) to four (4) years' is a band from two",
+         score.required_band(job("Two (2) to four (4) years' experience.")),
+         (2, 4))
+    want("'five to seven years' is a band from five",
+         score.required_band(job("Five to seven years of experience.")),
+         (5, 7))
+    want("the high school route's years are not the graduate's",
+         score.required_band(job("Bachelor's degree and 2 years of relevant "
+                                 "experience, or High School Diploma or GED "
+                                 "and 4 years of relevant experience.")),
+         (2, 2))
+    want("years in lieu of a degree are not a requirement",
+         score.blocking_years(job("Bachelor's degree required. In lieu of a "
+                                  "degree, 5 years industry experience.")),
+         None)
+    want("'2-5 years' is still a band",
+         score.required_band(job("2-5 years of experience.")), (2, 5))
+    want("the Power BI posting's wording finds the product",
+         score.tool_years(job("Four (4) or more years of professional "
+                              "experience developing business intelligence "
+                              "and reporting solutions with Microsoft Power "
+                              "BI.")), [(4, "power bi")])
+    want("a product after the clause ends is not tied to the years",
+         score.tool_years(job(f"{over}+ years of experience in reporting. "
+                              "Tools: Tableau.")), [])
+    want("a year count with no product is not a product requirement",
+         score.tool_years(job(f"{over}+ years of experience.")), [])
+
+    pts, _, flags = score._tool_years_points(
+        job(f"{over}+ years of experience building dashboards in Tableau."))
+    want("years of a product past the comfortable range cost points",
+         (pts, flags), (-score.TOOL_YEARS_PENALTY, ["tool-years"]))
+    pts, _, flags = score._tool_years_points(
+        job(f"{comfortable} years of experience with Power BI."))
+    want("years of a product inside the comfortable range cost nothing",
+         (pts, flags), (0, []))
+
+    print()
+    for line in fails:
+        print("  " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
 def gates_check() -> int:
     """Pay well past the profile's level, and languages it does not speak.
 
@@ -1163,6 +1240,29 @@ def gates_check() -> int:
         j.description = ("Looking for 1-2 years of experience with the "
                          "general ledger, reconciliation and Excel. " + text)
         return score.score_job(j)
+
+    for where, expected in (("Remote - Luxembourg", "luxembourg"),
+                            ("Bangalore, IN", "bangalore"),
+                            ("Peru, IN", None), ("Panama City, FL", None),
+                            ("Lebanon, PA", None),
+                            ("Albuquerque, New Mexico", None)):
+        want(f"{where!r} is {'abroad' if expected else 'the US'}",
+             score.non_us_location(where), expected)
+    def abroad(text: str) -> bool:
+        j = Job(title="Staff Accountant", company="Test Co", url="http://x",
+                source="himalayas", location="Mongolia")
+        j.description = text
+        return "remote-but-not-US" in score.score_job(j).flags
+
+    want("a board's country tag loses to US work authorization",
+         abroad("Candidates must be authorized to work in the United States."),
+         False)
+    want("a country tag alone still blocks", abroad("Remote role."), True)
+    want("a title written in French needs French",
+         languages.required("Analyste d'affaires technique / Technical "
+                            "Business Analyst", "", ""), (["french"], []))
+    want("an English title needs nothing",
+         languages.required("Technical Business Analyst", "", ""), ([], []))
 
     ceiling = score.pay_ceiling()
     want("the ceiling defaults to twice the target",
@@ -1624,6 +1724,20 @@ def bodies_check() -> int:
          clean_text("<p>Commissions 	Investigate</p>"),
          "Commission’s • Investigate")
 
+    from jobdesk.app import jdstruct
+    posting = ("<p><strong>Job Statements</strong></p><p>Not an exhaustive "
+               "list.</p><ul><li><p>Builds ERP reports.</p></li>"
+               "<li>Researches integration  failures.</li></ul>"
+               "<p><b>Note:</b> other duties.</p>")
+    kept = clean_text(posting)
+    want("a posting keeps its headings, lines and bullets", kept,
+         "Job Statements:\nNot an exhaustive list.\n• Builds ERP reports.\n"
+         "• Researches integration failures.\nNote: other duties.")
+    want("cleaning cleaned text changes nothing", clean_text(kept), kept)
+    want("the page reads the bullets back as a list",
+         [b["kind"] for b in jdstruct.structure(kept)],
+         ["heading", "para", "list", "para"])
+
     def read(body: str):
         job = Job(title="Energy Analyst", company="Commonwealth of Virginia",
                   url="https://x.test/energy", source="sitemap")
@@ -1758,7 +1872,8 @@ if __name__ == "__main__":
         raise SystemExit(plugins_check())
     elif "--scoring" in args:
         raise SystemExit(scoring_check() or rules_check()
-                         or salary_check() or gates_check() or dates_check()
+                         or salary_check() or gates_check() or tool_years_check()
+                         or dates_check()
                          or gather_check() or partials_check()
                          or bodies_check() or mysql_check())
     elif "--salary" in args:
