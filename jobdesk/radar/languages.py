@@ -75,6 +75,14 @@ _SOFT = re.compile(r"(?:preferred|a\s+plus|is\s+a\s+plus|desired|"
                    r"nice\s+to\s+have|bonus|helpful|advantage|encouraged)")
 _WINDOW = 60
 
+# Job words only French uses. "Analyste" and "d'affaires" never appear in an
+# English title, and "technicien" is not how anyone spells technician.
+_FRENCH_TITLE = re.compile(
+    r"\b(?:analyste|d['’]affaires|gestionnaire|conseill[eè]re?|"
+    r"d[ée]veloppeu(?:r|se)|ing[ée]nieure?|technicienn?e?|"
+    r"coordonnat(?:eur|rice)|charg[ée]e? de|adjointe?|"
+    r"sp[ée]cialiste|responsable de|agente? de)\b")
+
 _memo: dict = {"data": None, "spoken": frozenset()}
 
 
@@ -122,6 +130,11 @@ def required(title: str, binding: str, tail: str) -> tuple[list[str], list[str]]
     # A language in the title is the job.
     for m in re.finditer(_LANG, title):
         add(must, m.group(1))
+    # So is a title written in one. "Analyste d'affaires technique /
+    # Technical Business Analyst" is a Quebec posting, wherever the board
+    # says it is.
+    if _FRENCH_TITLE.search(title):
+        add(must, "french")
     if _BILINGUAL.search(title):
         add(must, "bilingual")
 

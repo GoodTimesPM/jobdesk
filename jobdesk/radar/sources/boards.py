@@ -360,7 +360,7 @@ def hackernews(_cfg: dict | None = None) -> list[Job]:
         # HN convention: the first line is "Company | Role | Location | ..."
         from ..models import clean_text
         flat = clean_text(text)
-        head = flat.split(".")[0][:200]
+        head = flat.split("\n")[0].split(".")[0][:200]
         parts = [p.strip() for p in head.split("|")]
         company = parts[0] if parts else "Unknown"
         title = parts[1] if len(parts) > 1 else head[:80]
