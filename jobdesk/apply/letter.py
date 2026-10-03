@@ -333,7 +333,7 @@ def build(*, company: str, role: str, family: str, resume_text: str,
             -relevance(e.get("template", ""), jd_text, company),
         ))
         taken = 0
-        # Two paragraphs that both open "At Spargo I..." read as one story told
+        # Two paragraphs that both open "At Initech I..." read as one story told
         # twice. Where entries declare an `employer`, spend each one once --
         # but a repeated employer is better than a short letter, so the pass
         # runs twice and the second one stops caring.
