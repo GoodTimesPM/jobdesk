@@ -765,7 +765,15 @@ option.dead     { color: var(--bad); }
      sized to the screen rather than to the table above it, so opening a row
      never widens the scroll. */
   .detail td { white-space: normal; max-width: none; width: 1px; }
-  .detail td > * { max-width: calc(100vw - 48px); }
+  /* `.detail .jd` is named as well because its 92ch desktop measure is the
+     more specific rule and won, leaving a description 645px wide on a 390px
+     phone. Sticky so a row opened after scrolling the table sideways still
+     starts at the left of the screen. */
+  .detail td > *, .detail .jd {
+    max-width: calc(100vw - 48px); box-sizing: border-box;
+    position: sticky; left: 8px;
+  }
+  .detail .actions { flex-wrap: wrap; }
 
   .panel { padding: 13px; }
   .manual .fields, .fields { grid-template-columns: 1fr; }
