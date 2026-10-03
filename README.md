@@ -60,7 +60,7 @@ your packets stay where they are, and the script prints the paths.
 
 | Tab | |
 |---|---|
-| **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Newest first by default. Filter by score range, search, sort any column. Open a row for the full posting, and build a packet from it. |
+| **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Newest first by default. Filter by score range, search, sort any column. Open a row for the full posting, with the employer's own headings and bullet points, and build a packet from it. |
 | **Applied** | The submission log. What you sent, when, what came back, and which sources actually reply. |
 | **Archive** | Every posting ever seen, including the ones that scored too low to surface. Which employers post constantly and never score is a useful thing to know. |
 | **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. |
@@ -76,6 +76,10 @@ otherwise), registers the app to come back at logon, and draws a QR code.
 Scan it and JobDesk opens on the phone, full queue, full packets.
 
 Add it to the home screen and it gets its own icon and its own window.
+
+The server the phone talks to stays up for weeks. It checks its own code once
+a minute and starts a fresh copy of itself after an update, so the phone is
+never answered by last month's version.
 
 Anything that is not this machine needs the token. There is no password, no
 account and no cloud in the path -- the phone is talking to the computer on
@@ -128,6 +132,18 @@ floor in the posting wins, and a range is a band rather than its lower end, so
 "3-5 years" does not pass as a three. Tools are the opposite. Ask for DAX and
 you are asking for Power BI, and that is not a judgment call.
 
+Years can be written any way a posting likes. "Four (4) or more years" and
+"two (2) to four (4) years" read as 4 and as 2 to 4. A route for people
+without a degree ("or a high school diploma and 4 years", "in lieu of a
+degree, 5 years") is not the requirement for someone who has one.
+
+Years of one product are stricter than years in general. Coursework and
+projects stand in for a year or two of Power BI or Tableau, and past
+`years_comfortable` a request like "3+ years of experience with Tableau"
+costs 12 points even when 3 years would otherwise be a stretch you can make.
+The products it knows are in `score.PRODUCTS`, and `products = [...]` in
+`targeting.toml` adds your own.
+
 Seniority is read as a rank, not as a word. "Associate Director" is a
 director. "Senior Associate" is not early-career. A requisition number ending
 in 1 is not level 1.
@@ -148,6 +164,14 @@ The languages you speak come from your own skills in `master.toml`, or a
 title, "fluent in Spanish" or "Korean required" scores 0. "Spanish a plus" or
 a language under the preferred qualifications costs a few points. "Polish the
 deck" and "Spanish Fork, UT" are not language requirements.
+A title written in French ("Analyste d'affaires technique") needs French
+too, since it is a Quebec posting wherever the board files it.
+
+A location in any other country scores 0, not only the countries listed in
+`non_us_markers`. A US place named after one ("Lebanon, PA", "Peru, IN",
+"New Mexico") stays in the US. A board's country tag can be wrong, so a
+posting that asks you to be authorized to work in the United States is not
+blocked by a country the board guessed. Your own `non_us_markers` still win.
 
 **Closed postings leave.** A row stays on the board for 30 days after the last
 run that found it. Each run rechecks a few of the rows it did not see, and
