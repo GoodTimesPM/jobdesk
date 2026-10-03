@@ -231,6 +231,12 @@ foreign_skills = [
 years_comfortable = 2
 max_years_stretch = 3
 
+# Years of one named product ("3+ years of experience with Tableau") past
+# years_comfortable cost 12 points, since school and home projects stand in
+# for a year or two of a tool and not more. score.PRODUCTS lists the ones it
+# knows; add your field's here.
+# products = ["epic", "procore"]
+
 # The standard HR escape hatch. "5 years of experience OR an equivalent
 # combination of education and experience" is not a 5-year gate. One of these
 # phrases downgrades the hard block to the ordinary out-of-range penalty, so
