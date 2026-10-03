@@ -236,7 +236,7 @@ def _guess_titles(sections: dict[str, str]) -> list[str]:
     ones that are real, which is the honest interface for a job that cannot be
     done reliably without guessing: a title line and the company line directly
     under it are structurally identical, and no amount of regex separates
-    "Datacenter Technician" from "Lorien (Amazon Web Services)". Offering both
+    "Datacenter Technician" from "Acme Staffing (Globex Cloud)". Offering both
     and asking beats picking one and being wrong half the time.
 
     What narrows it to a short list is date adjacency. Every experience entry

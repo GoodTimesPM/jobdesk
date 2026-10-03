@@ -405,8 +405,13 @@ function stamp(data) {
   const tiers = data.tiers || {};
   const parts = ["A", "B", "C", "D"].map((t) => `${t} ${tiers[t] || 0}`);
   const floor = data.floor;
+  // The F rows are kept for the market data and never shown, so counting
+  // them made a rescore that screened out fourteen postings look like it
+  // changed nothing.
+  const out = state.jobs.filter((j) => j.tier === "F").length;
   $("#counts").textContent =
-    `${state.jobs.length} postings · ${parts.join(" · ")}` +
+    `${state.jobs.length - out} postings · ${parts.join(" · ")}` +
+    (out ? ` · ${out} screened out` : "") +
     (floor && floor.capped
       ? ` · nothing under ${floor.lowest} made the cache (floor is ${floor.configured})`
       : "") +
@@ -1169,7 +1174,11 @@ function visibleApps() {
     if (!q) return true;
     return `${r.company} ${r.role}`.toLowerCase().includes(q);
   });
-  return sortRows(rows, apps.sort, apps.dir);
+  // Prepared rows first, whatever the sort: they are the ones still waiting on
+  // you to send them. The column sort orders each group, and Array.sort is
+  // stable, so it survives the second pass.
+  return sortRows(rows, apps.sort, apps.dir).sort((a, b) =>
+    (b.status === "prepared") - (a.status === "prepared"));
 }
 
 // Four states worth telling apart by colour, which is fewer than there are

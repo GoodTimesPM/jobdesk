@@ -21,6 +21,8 @@ import ipaddress
 import json
 import mimetypes
 import socket
+import subprocess
+import sys
 import threading
 import traceback
 import webbrowser
@@ -28,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
-from .. import __version__
+from .. import __version__, noconsole, paths
 from . import access, api, market, net
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -451,9 +453,62 @@ def serve(port: int = DEFAULT_PORT, open_browser: bool = True, host=None) -> Non
     print("Ctrl-C to stop.")
     if open_browser:
         threading.Timer(0.4, webbrowser.open, args=(url,)).start()
+    else:
+        threading.Thread(target=_watch_code, args=(httpd,),
+                         name="jobdesk-code-watch", daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nstopped")
     finally:
         httpd.server_close()
+    if _restart["due"]:
+        subprocess.Popen([sys.executable, "-m", "jobdesk.app", *sys.argv[1:]],
+                         cwd=str(paths.ROOT), close_fds=True,
+                         **noconsole.flags())
+
+
+# The headless server is the one the phone talks to. It starts at logon and
+# stays up for weeks, and Python reads its modules once, so a server started
+# on the 17th answers with the 17th's code. The phone saved a colour scheme,
+# that old copy did not know the key and dropped it, and the menu snapped
+# back. It now notices new code on disk and starts a fresh copy of itself.
+CODE_CHECK_SECONDS = 60
+_restart = {"due": False}
+
+
+def _code_stamp() -> float:
+    package = Path(__file__).resolve().parents[1]
+    return max((f.stat().st_mtime for f in package.rglob("*.py")), default=0.0)
+
+
+def _imports_cleanly() -> bool:
+    """Whether the code on disk starts. Restarting into a file saved halfway
+    through an edit would take the phone's server down with nothing to bring
+    it back."""
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", "import jobdesk.app.server"],
+            cwd=str(paths.ROOT), capture_output=True, timeout=60,
+            **noconsole.flags())
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+def _watch_code(httpd) -> None:
+    import time
+    started = seen = _code_stamp()
+    while True:
+        time.sleep(CODE_CHECK_SECONDS)
+        try:
+            now = _code_stamp()
+        except OSError:
+            continue
+        # Changed, and the same as a minute ago, so a restart does not land
+        # between two saves of one edit.
+        if now != started and now == seen and _imports_cleanly():
+            _restart["due"] = True
+            httpd.shutdown()
+            return
+        seen = now
