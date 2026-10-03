@@ -145,11 +145,29 @@ def render(plan: Plan, path: Path, layout: Layout | None = None) -> Path:
         pPr.append(borders)
 
     def bullet(text: str) -> None:
-        p = doc.add_paragraph()
+        # A real Word list item, not a paragraph that starts with "- ".
+        # Workday's autofill reads a job's description as every paragraph
+        # after its title, up to the next one with a date in it. With text
+        # dashes it could not see where the bullets stopped, so the next
+        # employer's company line landed at the end of the previous job's
+        # description and that employer's own entry had no company. List
+        # numbering is the marker a parser can see. It goes on the paragraph
+        # as well as through the style, since some parsers only look there.
+        p = doc.add_paragraph(style="List Bullet")
         _tight(p, after=2)
         p.paragraph_format.left_indent = Pt(18 * lay.type)
         p.paragraph_format.first_line_indent = Pt(-9 * lay.type)
-        _run(p, "- " + text, size=10)
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        num = OxmlElement("w:numPr")
+        level = OxmlElement("w:ilvl")
+        level.set(qn("w:val"), "0")
+        ref = OxmlElement("w:numId")
+        ref.set(qn("w:val"), "1")
+        num.append(level)
+        num.append(ref)
+        p._p.get_or_add_pPr().insert(1, num)
+        _run(p, text, size=10)
 
     # -- summary ----------------------------------------------------------
     if plan.summary:
