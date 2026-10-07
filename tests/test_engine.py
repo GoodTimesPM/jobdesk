@@ -146,6 +146,29 @@ def test_vocab() -> None:
     ):
         ok(term in VOCAB.find(text), f"{text!r} -> {term}")
 
+    # `implies` and `echo`, the two fields that widen tailoring.
+    ok("reporting" in VOCAB.expand(["powerbi"]),
+       "a Power BI tag is also evidence of reporting")
+    ok(VOCAB.surfaces("financial-reporting", "Prepare Financial Statements "
+                      "and financial statements") == ["Financial Statements"],
+       "surfaces keep the posting's casing, once per phrase")
+    with tempfile.TemporaryDirectory() as tmp:
+        bad = Path(tmp) / "vocabulary.toml"
+        for body, why in (
+            ('{ id="x", label="X", kind="method", aliases=["x"], echo=["y"] }',
+             "an echo phrase that is not an alias"),
+            ('{ id="x", label="X", kind="method", aliases=["x"], implies=["nope"] }',
+             "an implies id that does not exist"),
+            ('{ id="x", label="X", kind="soft", aliases=["x"], echo=["x"] }',
+             "an echo list on a soft term"),
+        ):
+            bad.write_text(f"term = [\n  {body},\n]\n", encoding="utf-8")
+            try:
+                load_vocab(bad)
+                ok(False, f"load rejects {why}")
+            except ValueError:
+                ok(True, f"load rejects {why}")
+
 
 def test_jd() -> None:
     print("\n[jd] sections, years, family")
@@ -213,6 +236,34 @@ def test_tailor() -> None:
     ok(all(c.variant.id == "frpg.ap" for c in splan.all_chosen()
            if c.bullet.id == "frpg.ap"),
        "a bullet the JD doesn't differentiate keeps its base phrasing")
+
+    # The posting's own wording of a skill the profile backs up lands in a
+    # Core Competencies row, spelled the posting's way.
+    ok(("financial-reporting", "Financial Statements") in plan.echo,
+       f"'financial statements' is echoed from the posting (got {plan.echo})")
+    ok(plan.skills[-1] == ("Core Competencies",
+                           [phrase for _, phrase in plan.echo]),
+       "the echoed phrases are the last SKILLS row")
+    have = tailor.evidenced(MASTER, VOCAB)
+    ok(all(tid in have for tid, _ in plan.echo),
+       "every echoed phrase stands in for a term the profile backs up")
+    before = "\n".join(line for line in plan.plain_text().splitlines()
+                       if not line.startswith("Core Competencies:")).lower()
+    ok(not any(phrase.lower() in before for _, phrase in plan.echo),
+       "nothing is echoed that the resume already says")
+    # A term the profile has no evidence for never echoes, however loudly
+    # the posting asks. Nothing in Wren's profile mentions Outlook or Office.
+    office = parse(ACCOUNTING_JD + "\nRequirements:\nMicrosoft Office and "
+                   "Microsoft 365\n", "Acme", "Staff Accountant")
+    ok("outlook" not in have and not any(
+           tid == "outlook" for tid, _ in tailor.build(MASTER, office, VOCAB).echo),
+       "an unevidenced term is never echoed")
+    ok(tailor.display("ad hoc reports") == "Ad Hoc Reports"
+       and tailor.display("etl and kpi reporting") == "ETL and KPI Reporting",
+       "phrases are title-cased with acronyms kept upper-case")
+    ok(tailor.display("Data manipulation") == "Data Manipulation"
+       and tailor.display("BI solutions") == "BI Solutions",
+       "a phrase that opened a sentence in the posting is still title-cased")
     ok(any(c.bullet.id == "meridian.vendor" for c in splan.all_chosen()),
        "a billing JD selects the vendor-inquiry bullet")
 
@@ -270,17 +321,25 @@ def test_truth() -> None:
 
     d = parse(ACCOUNTING_JD, "Acme", "Staff Accountant")
     plan = tailor.build(MASTER, d, VOCAB)
-    ok(not verify.verify_plan(plan), "verify_plan passes on a clean plan")
+    ok(not verify.verify_plan(plan, vocab=VOCAB), "verify_plan passes on a clean plan")
+
+    # An echoed phrase has to be the term's echo phrase, from the posting.
+    echoed = tailor.build(MASTER, d, VOCAB)
+    echoed.echo.append(("financial-reporting", "SEC Reporting"))
+    echoed.skills[-1][1].append("SEC Reporting")
+    ok(any("not an echo phrase" in p
+           for p in verify.verify_plan(echoed, vocab=VOCAB)),
+       "a Core Competencies phrase outside the echo list fails verification")
 
     # And a plan carrying text that is not in master.toml is caught.
     plan.all_chosen()[0].variant.text = "Led a team of 12 staff accountants."
-    ok(any("approved phrasings" in p for p in verify.verify_plan(plan)),
+    ok(any("approved phrasings" in p for p in verify.verify_plan(plan, vocab=VOCAB)),
        "invented bullet text fails verification")
 
     with_drafts = tailor.build(MASTER, fa, VOCAB, include_draft=True)
     ok(any(c.bullet.draft for c in with_drafts.all_chosen()),
        "--include-draft does let drafts through")
-    ok(any("draft content" in p for p in verify.verify_plan(with_drafts)),
+    ok(any("draft content" in p for p in verify.verify_plan(with_drafts, vocab=VOCAB)),
        "...and verify still flags them when the flag isn't passed")
 
 
@@ -339,6 +398,20 @@ def test_render() -> None:
         ok(report.images == 0, "no images embedded")
         ok(not verify.verify_pdf(plan, report.text),
            "every selected bullet is present in the PDF text layer")
+
+        # Projects sit below Experience (the user's call), and the company line
+        # holds the company and nothing else: Workday read a location there
+        # as part of the employer's name.
+        for text in (report.text, doc_text, txt_path.read_text("utf-8")):
+            heads = [l.strip().upper() for l in text.splitlines()]
+            if plan.projects:
+                ok(heads.index("EXPERIENCE") < heads.index("PROJECTS"),
+                   "Projects comes after Experience in every format")
+        lines = [l.strip() for l in report.text.splitlines()]
+        company = plan.experience[0].entry.company
+        ok(company in lines and plan.experience[0].entry.location not in
+           lines[lines.index(company)],
+           "the company line carries no location")
 
         # -- one page, whatever it costs -------------------------------
         # Every renderer guards on `plan.summary`, and all three have to.
