@@ -8,6 +8,8 @@ deadline. So it is checked mechanically on every run instead of promised:
   2. no draft bullet is in the plan unless --include-draft was passed
   3. every one of those strings appears verbatim in the rendered PDF's own
      text layer -- read back out of the file, not trusted from memory
+  4. every phrase in the Core Competencies row is an `echo` phrase of a term
+     the profile can back up, spelled the way this posting spells it
 
 Step 3 matters because the PDF is what gets sent. If the renderer ever mangles,
 truncates, or silently drops a line, this catches it before an employer does.
@@ -19,7 +21,8 @@ from __future__ import annotations
 import re
 
 from .master import Master
-from .tailor import Plan
+from .tailor import Plan, evidenced
+from .vocab import Vocabulary
 
 _NORM = re.compile(r"\s+")
 
@@ -29,7 +32,8 @@ def normalize(text: str) -> str:
     return _NORM.sub(" ", text).strip().lower()
 
 
-def verify_plan(plan: Plan, include_draft: bool = False) -> list[str]:
+def verify_plan(plan: Plan, include_draft: bool = False,
+                vocab: Vocabulary | None = None) -> list[str]:
     problems: list[str] = []
     master: Master = plan.master
 
@@ -52,6 +56,33 @@ def verify_plan(plan: Plan, include_draft: bool = False) -> list[str]:
                 f"{source.id}: draft content reached the resume. Drafts are "
                 f"unconfirmed claims -- confirm it in master.toml first."
             )
+
+    if plan.echo:
+        problems += _verify_echo(plan, include_draft, vocab)
+    return problems
+
+
+def _verify_echo(plan: Plan, include_draft: bool,
+                 vocab: Vocabulary | None) -> list[str]:
+    if vocab is None:
+        return ["the plan has a Core Competencies row but no vocabulary was "
+                "given to check it against"]
+    problems: list[str] = []
+    have = evidenced(plan.master, vocab, include_draft)
+    low_jd = plan.jd.raw.lower()
+    for tid, phrase in plan.echo:
+        term = vocab.terms.get(tid)
+        if term is None or phrase.lower() not in {e.lower() for e in term.echo}:
+            problems.append(f"'{phrase}' is not an echo phrase of {tid}")
+        if tid not in have:
+            problems.append(f"'{phrase}' stands in for {tid}, which nothing in "
+                            f"the profile backs up")
+        if phrase.lower() not in low_jd:
+            problems.append(f"'{phrase}' was echoed but the posting never says it")
+    row = plan.skills[-1][1] if plan.skills else []
+    if row != [phrase for _, phrase in plan.echo]:
+        problems.append("the Core Competencies row does not match the echoed "
+                        "phrases")
     return problems
 
 
@@ -69,6 +100,10 @@ def verify_pdf(plan: Plan, pdf_text: str) -> list[str]:
                 f"{chosen.variant.id}: selected but missing from the rendered "
                 f"PDF (dropped, wrapped badly, or truncated)"
             )
+
+    for _, phrase in plan.echo:
+        if normalize(phrase) not in haystack:
+            problems.append(f"Core Competencies: '{phrase}' missing from the PDF")
 
     ident = plan.master.identity
     for field_ in ("name", "email", "phone"):

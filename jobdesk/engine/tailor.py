@@ -7,6 +7,11 @@ approved fragments with two interpolations: the tools the JD actually asked for
 industry word. Nothing else is generated, which is why `verify.py` can prove
 mechanically that a rendered PDF says nothing the master file doesn't.
 
+The one other thing added is the "Core Competencies" row: the posting's own
+wording of skills the profile can already back up (see `_echo`). Those phrases
+come from the vocabulary's `echo` lists, never from free text, and `verify`
+checks each one against the evidence.
+
 Selection is maximal-marginal-coverage, not top-N-by-score. Ranking bullets by
 raw relevance and taking the best four gets you four bullets about Active
 Directory for a JD that mentions it once; greedy coverage spends each slot on
@@ -15,6 +20,7 @@ whatever the resume hasn't answered yet.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from . import config
@@ -56,6 +62,10 @@ class Plan:
     experience: list[Section]
     projects: list[Section]
     notes: list[str] = field(default_factory=list)
+    # (term id, phrase as printed) for the Core Competencies row. The row
+    # itself is the last entry in `skills`; this keeps what each phrase is
+    # standing in for, so `verify` can check it.
+    echo: list[tuple[str, str]] = field(default_factory=list)
 
     # -- content access ----------------------------------------------------
     def all_chosen(self) -> list[ChosenBullet]:
@@ -125,12 +135,14 @@ def _selectable(vocab: Vocabulary) -> set[str]:
     return vocab.of_kind(config.SELECTION_KINDS)
 
 
-def _value(tags, jd: JobDescription, selectable: set[str]) -> float:
-    return sum(jd.weight_of(t) for t in tags if t in selectable)
+def _value(tags, jd: JobDescription, selectable: set[str],
+           vocab: Vocabulary) -> float:
+    # Expanded, so a Power BI bullet also answers a JD asking for dashboards.
+    return sum(jd.weight_of(t) for t in vocab.expand(tags) if t in selectable)
 
 
-def _pick_variant(bullet: Bullet, jd: JobDescription,
-                  selectable: set[str]) -> tuple[Variant, bool]:
+def _pick_variant(bullet: Bullet, jd: JobDescription, selectable: set[str],
+                  vocab: Vocabulary) -> tuple[Variant, bool]:
     """Choose the phrasing whose vocabulary best matches this JD.
 
     Base text wins ties by half a point, so a tailored resume only diverges
@@ -138,7 +150,7 @@ def _pick_variant(bullet: Bullet, jd: JobDescription,
     """
     best, best_score = None, float("-inf")
     for i, phrasing in enumerate(bullet.phrasings()):
-        score = _value(phrasing.tags, jd, selectable) + (0.5 if i == 0 else 0.0)
+        score = _value(phrasing.tags, jd, selectable, vocab) + (0.5 if i == 0 else 0.0)
         if score > best_score:
             best, best_score = phrasing, score
     assert best is not None
@@ -159,18 +171,19 @@ def _select_bullets(master: Master, jd: JobDescription, vocab: Vocabulary,
 
     def marginal(bullet: Bullet) -> float:
         return sum(
-            jd.weight_of(t) for t in bullet.tags
+            jd.weight_of(t) for t in vocab.expand(bullet.tags)
             if t in selectable and t not in covered
         )
 
     def take(entry_id: str, bullet: Bullet, reason: str) -> None:
-        variant, _ = _pick_variant(bullet, jd, selectable)
+        variant, _ = _pick_variant(bullet, jd, selectable, vocab)
         gain = marginal(bullet)
         sections[entry_id].chosen.append(ChosenBullet(
             bullet=bullet, variant=variant,
-            value=_value(bullet.tags, jd, selectable), gain=gain, reason=reason,
+            value=_value(bullet.tags, jd, selectable, vocab), gain=gain,
+            reason=reason,
         ))
-        for t in bullet.tags:
+        for t in vocab.expand(bullet.tags):
             covered[t] = covered.get(t, 0) + 1
         pool[entry_id].remove(bullet)
 
@@ -183,7 +196,7 @@ def _select_bullets(master: Master, jd: JobDescription, vocab: Vocabulary,
             if not candidates:
                 break
             best = max(candidates, key=lambda b: (marginal(b),
-                                                  _value(b.tags, jd, selectable),
+                                                  _value(b.tags, jd, selectable, vocab),
                                                   b.priority))
             take(entry.id, best, "required to keep the role represented")
 
@@ -195,7 +208,7 @@ def _select_bullets(master: Master, jd: JobDescription, vocab: Vocabulary,
             if len(section.chosen) >= entry.max_bullets:
                 continue
             for bullet in pool[entry.id]:
-                key = (marginal(bullet), _value(bullet.tags, jd, selectable),
+                key = (marginal(bullet), _value(bullet.tags, jd, selectable, vocab),
                        bullet.priority, entry.id, bullet)
                 if best is None or key[:3] > best[:3]:
                     best = key
@@ -253,7 +266,8 @@ def _pick_coursework(master: Master, jd: JobDescription,
     limit = int(master.render.get("coursework_shown", 7))
     ranked = sorted(
         master.coursework,
-        key=lambda c: (-_value(c.tags, jd, selectable), -c.priority, c.name),
+        key=lambda c: (-_value(c.tags, jd, selectable, vocab), -c.priority,
+                        c.name),
     )
     return ranked[:limit]
 
@@ -316,6 +330,92 @@ def _build_summary(master: Master, jd: JobDescription, vocab: Vocabulary,
     return " ".join(p for p in (opening.text, middle, closing_text) if p)
 
 
+def evidenced(master: Master, vocab: Vocabulary,
+              include_draft: bool = False) -> set[str]:
+    """Every term the profile can back up, with what those terms imply.
+
+    Taken from the whole profile, not just this page: whether a skill is true
+    does not change with which bullets fit today.
+    """
+    tags: set[str] = {s.term for s in master.skills}
+    for course in master.coursework:
+        tags.update(course.tags)
+    for bullet in master.bullets:
+        if bullet.draft and not include_draft:
+            continue
+        for phrasing in bullet.phrasings():
+            tags.update(phrasing.tags)
+    return vocab.expand(tags)
+
+
+# Kept upper-case when an echoed phrase is title-cased.
+_ACRONYMS = {"etl", "elt", "uat", "sla", "slas", "kpi", "kpis", "sop", "sops",
+             "bi", "it", "qa", "rca", "aws", "crm", "erp", "api", "apis"}
+_SMALL = {"and", "or", "of", "for", "to", "in", "on", "the", "a", "with"}
+_WORDS = re.compile(r"[A-Za-z0-9]+|[^A-Za-z0-9]+")
+
+
+def display(phrase: str) -> str:
+    """How an echoed phrase is printed: title case, the JD's acronyms kept.
+
+    Not the JD's casing as-is: a phrase that opens a sentence comes back as
+    "Data manipulation", which sits badly in a row of "Data Analytics".
+    """
+    out = []
+    for i, word in enumerate(_WORDS.findall(phrase)):
+        if not word[0].isalnum():
+            out.append(word)
+        elif word[1:] != word[1:].lower():
+            out.append(word)            # BI, SQL, eCommerce: the JD's own
+        elif word.lower() in _ACRONYMS:
+            out.append(word.upper())
+        elif word.lower() in _SMALL and i > 0:
+            out.append(word.lower())
+        else:
+            out.append(word[0].upper() + word[1:])
+    return "".join(out)
+
+
+def _echo(master: Master, jd: JobDescription, vocab: Vocabulary,
+          said: str, include_draft: bool) -> list[tuple[str, str]]:
+    """The posting's wording of skills the profile already has.
+
+    For each term the JD weights and the profile evidences, take the JD's own
+    spelling of that term's echo phrases, skipping any the resume already
+    says. Most-weighted terms first, `per_term` phrases each, `echo_terms`
+    phrases in all. The phrases are synonyms by construction (the vocabulary
+    refuses an echo phrase that is not an alias), so this widens the words
+    an ATS can match without adding a claim.
+    """
+    limit = int(master.render.get("echo_terms", 8))
+    if limit <= 0:
+        return []
+    per_term = int(master.render.get("echo_per_term", 2))
+    have = evidenced(master, vocab, include_draft)
+    low_said = said.lower()
+    ranked = sorted(
+        (t for t in jd.weights if t in have),
+        key=lambda t: (-jd.weight_of(t), -jd.counts.get(t, 0), t),
+    )
+    out: list[tuple[str, str]] = []
+    taken: set[str] = set()
+    for tid in ranked:
+        n = 0
+        for surface in vocab.surfaces(tid, jd.raw):
+            key = surface.lower()
+            if key in taken or re.search(
+                    rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", low_said):
+                continue
+            out.append((tid, display(surface)))
+            taken.add(key)
+            n += 1
+            if n == per_term or len(out) == limit:
+                break
+        if len(out) == limit:
+            break
+    return out
+
+
 # --------------------------------------------------------------------------
 
 def build(master: Master, jd: JobDescription, vocab: Vocabulary,
@@ -332,6 +432,10 @@ def build(master: Master, jd: JobDescription, vocab: Vocabulary,
         master=master, jd=jd, summary=summary, skills=skills,
         coursework=coursework, experience=experience, projects=projects,
     )
+    plan.echo = _echo(master, jd, vocab, plan.plain_text(), include_draft)
+    if plan.echo:
+        label = str(master.render.get("echo_label", "Core Competencies"))
+        plan.skills.append((label, [phrase for _, phrase in plan.echo]))
     if jd.years_required and jd.years_required > 3:
         plan.notes.append(
             f"This JD's binding requirement is {jd.years_required} years. "

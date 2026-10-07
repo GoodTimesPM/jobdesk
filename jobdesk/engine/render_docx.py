@@ -213,11 +213,9 @@ def render(plan: Plan, path: Path, layout: Layout | None = None) -> Path:
             Pt(_USABLE_WIDTH.pt + 2 * (54 - 54 * lay.side / MARGIN)),
             WD_TAB_ALIGNMENT.RIGHT,
         )
-        # Same order as the PDF, for the same parser: company first, title
-        # second, and a tab between fields rather than a dash.
+        # Same order as the PDF, for the same parser: the company alone,
+        # then the title, with a tab before the dates rather than a dash.
         _run(p, entry.company, bold=True, size=10.5, color=(30, 30, 30))
-        if entry.location:
-            _run(p, "\t" + entry.location, size=9.5, color=(100, 100, 100))
 
         p = doc.add_paragraph()
         _tight(p, after=2)
