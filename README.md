@@ -63,7 +63,7 @@ your packets stay where they are, and the script prints the paths.
 | **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Newest first by default. Filter by score range, search, sort any column. Open a row for the full posting, with the employer's own headings and bullet points, and build a packet from it. |
 | **Applied** | The submission log. What you sent, when, what came back, and which sources actually reply. |
 | **Archive** | Every posting ever seen, including the ones that scored too low to surface. Which employers post constantly and never score is a useful thing to know. |
-| **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. |
+| **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. The **About you** pane shows everything a resume or letter is built from (contact details, transcript, skills, jobs, projects, letter paragraphs) and edits it in place; an edit that breaks a content rule is refused with the reason. |
 | **Console** | Whatever is running, streaming. Discovery runs, engine builds, packet assembly. |
 | **Setup** | The first-run wizard, the phone pairing, the Desktop shortcut, the logon task. |
 | **Settings** | The gear at the top right. What the Jobs tab opens with, light or dark, six colour schemes, the font, the text size, row spacing, and where packets get written. |
