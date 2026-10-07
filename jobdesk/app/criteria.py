@@ -29,7 +29,8 @@ SECTIONS = [
             "analyst\" also matches \"Senior Data Analyst II\"."),
         "outro": (
             "A title that matches none of these, and that JobDesk does not "
-            "otherwise recognise as your line of work, cannot score above 40."),
+            "otherwise recognise as your line of work, cannot score above 40. "
+            "Every title here is also searched for; how often is below."),
         "fields": [
             ("tier_1_titles", "list", "Jobs you would take today",
              "Worth 35 points."),

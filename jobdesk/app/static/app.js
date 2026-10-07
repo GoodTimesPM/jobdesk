@@ -113,7 +113,7 @@ function show(view) {
   if (view === "jobs" && !state.jobs.length) loadJobs();
   if (view === "applied") loadApplications();
   if (view === "archive" && !archive.loaded) searchArchive(0);
-  if (view === "criteria") loadCriteria();
+  if (view === "criteria") { loadCriteria(); if (critPane === "about") loadAbout(); }
   if (view === "console") loadRuns();
   // Every field in the phone panel is a live reading -- the address changes
   // with the network, the firewall rule can be added in another window, and
@@ -1740,6 +1740,13 @@ async function loadCriteria() {
       });
       box.append(grid);
       if (s.outro) box.append(el("p", { class: "outro", text: s.outro }));
+      // Read-only: the search follows the lists above, so there is nothing
+      // separate to edit, only how often each title goes out.
+      if (s.id === "titles" && data.search) {
+        box.append(el("div", { class: "crit-search" },
+          el("span", { class: "label", text: "What JobDesk searches for" }),
+          ...data.search.text.map((line) => el("p", { text: line }))));
+      }
       form.append(box);
     });
     $("#save-criteria").disabled = false;
@@ -1792,6 +1799,178 @@ $("#save-criteria").addEventListener("click", async () => {
 });
 
 $("#open-criteria-file").addEventListener("click", () => openPath(criteriaFile));
+
+/* ------------------------------------------------- criteria: about you */
+/*
+ * The other half of the Criteria tab: master.toml and letter.toml as cards,
+ * drawn from /api/about. The server decides which keys a card can change and
+ * checks the file still builds a resume before it keeps an edit, so a refusal
+ * here arrives as a sentence saying which rule the edit broke.
+ */
+
+let critPane = "scoring";
+let aboutFiles = {};
+
+function showCrit(pane) {
+  critPane = pane;
+  $("#crit-scoring").hidden = pane !== "scoring";
+  $("#crit-about").hidden = pane !== "about";
+  $$(".crit-switch .chip").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.crit === pane)));
+  if (pane === "about") loadAbout();
+}
+
+$$(".crit-switch .chip").forEach((b) =>
+  b.addEventListener("click", () => showCrit(b.dataset.crit)));
+
+async function loadAbout() {
+  const box = $("#about");
+  try {
+    drawAbout(await get("/api/about"));
+  } catch (err) {
+    box.textContent = "";
+    box.append(el("p", { class: "note", text: err.message }));
+  }
+}
+
+function aboutValue(field) {
+  if (field.kind === "tags") {
+    const names = field.names || field.value;
+    if (!names.length) return el("span", { class: "faint", text: "none" });
+    return el("span", { class: "about-tags" },
+      names.map((n) => el("span", { class: "pill", text: n })));
+  }
+  const text = String(field.value ?? "");
+  return text ? el("span", { text }) : el("span", { class: "faint", text: "blank" });
+}
+
+function aboutInput(field) {
+  const name = field.key;
+  if (field.kind === "long") {
+    return el("textarea", { name, value: field.value || "", spellcheck: true,
+                            rows: Math.min(10, Math.max(3, Math.ceil((field.value || "").length / 45) + 1)) });
+  }
+  if (field.kind === "int") {
+    return el("input", { type: "number", name, min: 0, max: 100, inputmode: "numeric",
+                         value: field.value ?? "" });
+  }
+  if (field.kind === "tags") {
+    return el("textarea", { name, value: (field.value || []).join(", "), rows: 2,
+                            spellcheck: false });
+  }
+  return el("input", { type: "text", name, value: field.value || "" });
+}
+
+function aboutCard(card) {
+  const node = el("div", { class: "about-card" });
+  const fields = el("dl", { class: "about-fields" });
+  card.fields.forEach((f) => fields.append(el("dt", { text: f.label }),
+                                          el("dd", {}, aboutValue(f))));
+  const edit = el("button", { type: "button", class: "ghost small", text: "Edit" });
+  node.append(
+    el("div", { class: "about-head" },
+      el("div", { class: "about-name" },
+        el("strong", { text: card.title }),
+        card.sub ? el("span", { class: "sub", text: card.sub }) : null,
+        card.badges.map((b) => el("span", { class: "pill warn", text: b }))),
+      edit),
+    fields);
+  edit.addEventListener("click", () => editCard(node, card, fields, edit));
+
+  const others = card.children.filter((c) => c.header === "bullet.variant");
+  const kids = card.children.filter((c) => c.header !== "bullet.variant");
+  if (others.length) {
+    const more = el("details", { class: "about-others" },
+      el("summary", { text: others.length === 1
+        ? "1 other way to say it" : `${others.length} other ways to say it` }));
+    others.forEach((c) => more.append(aboutCard(c)));
+    node.append(more);
+  }
+  if (kids.length) {
+    node.append(el("div", { class: "about-kids" }, kids.map(aboutCard)));
+  }
+  return node;
+}
+
+function editCard(node, card, fields, button) {
+  button.hidden = true;
+  const status = el("span", { class: "note" });
+  const form = el("form", { class: "about-form" });
+  card.fields.forEach((f) => form.append(el("label", { class: "crit-field" },
+    el("span", { class: "label", text: f.label }),
+    f.help ? el("span", { class: "help", text: f.help }) : null,
+    aboutInput(f))));
+  const save = el("button", { type: "submit", text: "Save" });
+  const cancel = el("button", { type: "button", class: "ghost", text: "Cancel" });
+  form.append(el("div", { class: "about-actions" }, save, cancel, status));
+  fields.replaceWith(form);
+  form.querySelector("[name]").focus();
+
+  cancel.addEventListener("click", () => {
+    form.replaceWith(fields);
+    button.hidden = false;
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const changes = {};
+    card.fields.forEach((f) => {
+      const input = form.querySelector(`[name="${f.key}"]`);
+      const before = f.kind === "tags" ? (f.value || []).join(", ") : String(f.value ?? "");
+      if (input.value !== before) changes[f.key] = input.value;
+    });
+    if (!Object.keys(changes).length) { cancel.click(); return; }
+    save.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      const data = await post("/api/about",
+        { file: card.file, header: card.header, id: card.id, changes });
+      drawAbout(data);
+      banner("Saved. The next resume or letter you build uses it.");
+    } catch (err) {
+      save.disabled = false;
+      status.textContent = err.message;
+      status.classList.add("bad");
+    }
+  });
+}
+
+function drawAbout(data) {
+  aboutFiles = data.files;
+  $("#about-file").textContent = data.files.master;
+  const box = $("#about");
+  const opened = new Set($$("#about > details[open]").map((d) => d.dataset.id));
+  const othersOpen = new Set($$("#about .about-others[open]").map((d) => d.dataset.id));
+  const first = !$("#about > details");
+  const nav = $("#about-jump");
+  box.textContent = "";
+  nav.textContent = "";
+
+  data.sections.forEach((s, i) => {
+    const groups = s.groups || [];
+    const count = s.cards.length + groups.reduce((n, g) => n + g.cards.length, 0);
+    const sec = el("details", { class: "crit-section about-section", id: "about-" + s.id,
+                                open: first ? i === 0 : opened.has(s.id) },
+      el("summary", {}, el("h3", { text: s.title }),
+        el("span", { class: "faint", text: plural(count, "entry", "entries") })),
+      s.intro ? el("p", { class: "note", text: s.intro }) : null);
+    sec.dataset.id = s.id;
+    s.cards.forEach((c) => sec.append(aboutCard(c)));
+    groups.forEach((g) => {
+      sec.append(el("h4", { class: "about-group", text: g.title }));
+      g.cards.forEach((c) => sec.append(aboutCard(c)));
+    });
+    box.append(sec);
+    nav.append(el("button", { type: "button", class: "chip", text: s.title, on: {
+      click: () => { sec.open = true; sec.scrollIntoView({ block: "start" }); } } }));
+  });
+  $$("#about .about-others").forEach((d) => {
+    const owner = d.closest(".about-card").querySelector(".sub");
+    d.dataset.id = owner ? owner.textContent : "";
+    if (othersOpen.has(d.dataset.id)) d.open = true;
+  });
+}
+
+$("#open-about-file").addEventListener("click", () => openPath(aboutFiles.master));
 
 async function openPath(path) {
   if (!path) return;

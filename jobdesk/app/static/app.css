@@ -455,11 +455,60 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
 .crit-field .label { font-weight: 600; }
 .crit-field .help { font-size: 12.5px; color: var(--ink-soft); }
 .crit-field textarea { resize: vertical; min-height: 68px; }
+.crit-search { margin-top: 12px; max-width: 70ch; font-size: 13px;
+               color: var(--ink-soft); }
+.crit-search .label { font-weight: 600; color: inherit; }
+.crit-search p { margin: 4px 0 0; }
 .crit-field .unit { display: flex; align-items: center; gap: 6px; }
 .crit-field .unit input { width: 9rem; text-align: right;
                           font-variant-numeric: tabular-nums; }
 .crit-field .unit span { color: var(--ink-soft); }
 .crit-section .outro { font-size: 12.5px; color: var(--ink-faint); margin-top: 10px; }
+/* About you: master.toml and letter.toml as cards. */
+.crit-switch { margin-bottom: 16px; }
+.about-jump { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.about-jump .chip { font-size: 12.5px; padding: 3px 10px; }
+.about-section > summary { display: flex; align-items: baseline; gap: 10px;
+                           cursor: pointer; list-style: none; }
+.about-section > summary::-webkit-details-marker { display: none; }
+.about-section > summary::before { content: "\25B8"; color: var(--ink-faint); }
+.about-section[open] > summary::before { content: "\25BE"; }
+.about-section > summary h3 { margin: 0; }
+.about-section > .note { margin: 8px 0 4px; }
+.about-group { margin: 16px 0 4px; font-size: 13px; color: var(--ink-soft);
+               text-transform: uppercase; letter-spacing: .04em; }
+.about-card { border: 1px solid var(--line-soft); border-radius: var(--radius);
+              padding: 10px 12px; margin-top: 10px; }
+.about-head { display: flex; align-items: flex-start; gap: 10px; }
+.about-name { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap;
+              align-items: baseline; gap: 4px 10px; overflow-wrap: anywhere; }
+.about-name .sub { font-size: 12.5px; color: var(--ink-soft); }
+.about-head button { flex: none; margin-left: 0; }
+.about-fields { display: grid; grid-template-columns: 9.5rem 1fr; gap: 4px 12px;
+                margin: 8px 0 0; }
+.about-fields dt { color: var(--ink-soft); font-size: 12.5px; padding-top: 1px; }
+.about-fields dd { margin: 0; overflow-wrap: anywhere; }
+.about-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill.warn { border-color: var(--warn, var(--accent)); color: var(--warn, var(--accent)); }
+.faint { color: var(--ink-faint); }
+.about-kids { margin-left: 14px; padding-left: 12px;
+              border-left: 2px solid var(--line-soft); }
+.about-others { margin-top: 8px; }
+.about-others > summary { cursor: pointer; font-size: 12.5px; color: var(--ink-soft); }
+.about-others .about-card { background: var(--ground); }
+.about-form { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
+.about-form textarea { resize: vertical; width: 100%; }
+.about-form input[type="text"] { width: 100%; }
+.about-form input[type="number"] { width: 6rem; }
+.about-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.about-actions .bad { color: var(--bad); }
+@media (max-width: 700px) {
+  .about-fields { grid-template-columns: 1fr; gap: 0; }
+  .about-fields dd { margin-bottom: 6px; }
+  .about-kids { margin-left: 4px; padding-left: 8px; }
+  .about-card { padding: 8px 10px; }
+}
+
 .panel-foot.sticky {
   position: sticky; bottom: 0; background: var(--ground);
   padding: 10px 0; margin-top: 10px; border-top: 1px solid var(--line);
@@ -497,7 +546,9 @@ textarea { font: inherit; }
 
 .picks { margin-top: 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { background: var(--card); border: 1px solid var(--line); color: var(--ink);
+/* button.chip, because `button:not(.tab)` outranks a bare class and would
+   paint every chip as pressed. */
+.chip, button.chip { background: var(--card); border: 1px solid var(--line); color: var(--ink);
         border-radius: 99px; padding: 4px 12px; cursor: pointer; }
 .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink);
                              border-color: var(--accent); }
