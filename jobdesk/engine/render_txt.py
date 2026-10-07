@@ -42,8 +42,7 @@ def render(plan: Plan, path: Path) -> Path:
     for section in plan.experience:
         entry = section.entry
         # Company line, then title line, as in the PDF and the .docx.
-        place = f", {entry.location}" if entry.location else ""
-        lines += ["", f"{entry.company}{place}", f"{entry.title} | {entry.dates}"]
+        lines += ["", entry.company, f"{entry.title} | {entry.dates}"]
         lines += [f"- {c.text}" for c in section.chosen]
 
     if plan.projects:

@@ -100,7 +100,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
 
     # -- the truthfulness gate -------------------------------------------
     report = ats.simulate(pdf_path, posting, vocab)
-    problems = verify.verify_plan(plan, args.include_draft)
+    problems = verify.verify_plan(plan, args.include_draft, vocab)
     problems += verify.verify_pdf(plan, report.text)
     if problems:
         print("VERIFICATION FAILED -- the generated resume was NOT delivered:\n")
@@ -111,7 +111,7 @@ def cmd_tailor(args: argparse.Namespace) -> int:
     cover = tailor.coverage(plan, vocab)
     (out_dir / "ats_report.md").write_text(ats.to_markdown(report), encoding="utf-8")
     (out_dir / "TAILORING.md").write_text(
-        _tailoring_report(plan, cover, report, fit, stored),
+        _tailoring_report(plan, cover, report, fit, stored, vocab),
         encoding="utf-8",
     )
 
@@ -218,7 +218,7 @@ def _squeeze_advice(plan: tailor.Plan, fit: render_pdf.Fit) -> list[str]:
 
 def _tailoring_report(plan: tailor.Plan, cover: tailor.Coverage,
                       report: ats.AtsReport, fit: render_pdf.Fit,
-                      stored: Path) -> str:
+                      stored: Path, vocab) -> str:
     posting = plan.jd
     dropped, slack = fit.dropped, fit.slack
     lines = [
@@ -254,6 +254,17 @@ def _tailoring_report(plan: tailor.Plan, cover: tailor.Coverage,
         lines += ["", "## Summary line used", "", f"> {plan.summary}", ""]
     else:
         lines.append("")
+
+    if plan.echo:
+        lines += [
+            "## The posting's own words, added", "",
+            "Phrases from this JD for skills your profile already backs up, "
+            "printed as the last SKILLS row so an ATS matching literal text "
+            "finds them. Each one is an `echo` phrase in vocabulary.toml; "
+            "take a phrase out of that list to stop it appearing.", "",
+        ]
+        lines += [f"- {phrase} (for {vocab.label(tid)})"
+                  for tid, phrase in plan.echo] + [""]
 
     lines += ["## Bullets selected", ""]
     for section in (*plan.experience, *plan.projects):

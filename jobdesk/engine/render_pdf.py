@@ -123,6 +123,9 @@ class ResumePDF(FPDF):
         self.set_auto_page_break(auto=True, margin=layout.pad)
         self.set_title("")
         self.set_author("")
+        # Windows-1252 instead of Latin-1, for one character: the bullet.
+        # Every other string still goes through ascii_safe.
+        self.core_fonts_encoding = "windows-1252"
 
     def section_header(self, title: str, sp: float = 2.5) -> None:
         lay = self.layout
@@ -141,7 +144,12 @@ class ResumePDF(FPDF):
         self.set_font("Helvetica", "", lay.pt(9))
         self.set_text_color(40, 40, 40)
         height = lay.lh(lh)
-        self.cell(self.get_string_width("-  "), height, "-", new_x="END")
+        # A real bullet, not a hyphen. Workday's autofill reads a job as
+        # everything up to the next dated line. A "-" line that wraps looks
+        # like ordinary text, so nothing marked where the bullets ended and
+        # the next employer's name landed in the last job's description.
+        self.cell(self.get_string_width("•  "), height, "•",
+                  new_x="END")
         self.multi_cell(self.w - self.r_margin - self.get_x() - 1, height,
                         " " + text)
         self.ln(lay.sp(0.6))
@@ -225,18 +233,14 @@ def render(plan: Plan, path: Path,
     pdf.section_header("Experience")
     for i, section in enumerate(plan.experience):
         entry = section.entry
-        # Company and location, then title and dates, each pair split by
-        # the right margin and never by a dash. Workday's autofill reads the
-        # first line of a job as the employer, and "Title / Company - Place"
-        # put a title with a dash in it ("Total Restaurant Foods - Subs")
-        # in the Company field and left Job Title empty.
+        # The company alone on its line, then title and dates split by the
+        # right margin, never by a dash. Workday's autofill reads the first
+        # line of a job as the employer: "Title / Company - Place" put the
+        # title in the Company field, and a location on the company line
+        # came back as part of the name ("Wegman's Virginia").
         pdf.set_font("Helvetica", "B", lay.pt(9.5))
         pdf.set_text_color(30, 30, 30)
-        company = ascii_safe(entry.company)
-        pdf.cell(pdf.get_string_width(company) + 2, lay.lh(4.5), company)
-        pdf.set_font("Helvetica", "", lay.pt(8.5))
-        pdf.set_text_color(100, 100, 100)
-        pdf.cell(0, lay.lh(4.5), ascii_safe(entry.location or ""), align="R",
+        pdf.cell(0, lay.lh(4.5), ascii_safe(entry.company),
                  new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "I", lay.pt(9))
         pdf.set_text_color(80, 80, 80)
@@ -253,6 +257,9 @@ def render(plan: Plan, path: Path,
             pdf.ln(lay.sp(3))
 
     # -- projects ---------------------------------------------------------
+    # Below Experience, where the user asked for them. Workday's autofill reads
+    # project bullets as job description text wherever the section sits, so
+    # moving it above Experience (tried 2026-10-03) bought nothing.
     if plan.projects:
         pdf.ln(lay.sp(4))
         pdf.section_header("Projects")
