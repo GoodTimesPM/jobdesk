@@ -25,8 +25,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import paths, profile
+from ..radar import searchplan
 from ..radar import config as radar_config
-from . import (actions, archive, criteria, jdstruct, market, prefs,
+from . import (about, actions, archive, criteria, jdstruct, market, prefs,
                resume_import, runner, setup, stars, tomlpatch)
 
 
@@ -555,6 +556,7 @@ def targeting(query, body) -> dict:
     return {
         "file": str(profile.path("targeting.toml")),
         "sections": criteria.form(data),
+        "search": searchplan.summary(data, profile.load("employers.toml")),
     }
 
 
@@ -603,6 +605,27 @@ def save_targeting(query, body) -> dict:
         profile.forget()
         raise
     result["saved"] = list(top) + list(tables)
+    return result
+
+
+def about_you(query, body) -> dict:
+    """The Criteria tab's "About you" cards: master.toml and letter.toml."""
+    if profile.is_example():
+        raise BadRequest("finish setup first; this shows your own resume content")
+    return about.view()
+
+
+def save_about(query, body) -> dict:
+    """Change one card's fields, check the file still builds, and redraw."""
+    if profile.is_example():
+        raise BadRequest("finish setup before editing your resume content")
+    try:
+        saved = about.edit(body.get("file", ""), body.get("header", ""),
+                           body.get("id"), body.get("changes"))
+    except about.Invalid as exc:
+        raise BadRequest(str(exc))
+    result = about.view()
+    result["saved"] = saved
     return result
 
 
@@ -661,6 +684,11 @@ def rescore(query, body) -> dict:
         full.update(score=job_obj.score, tier=job_obj.tier,
                     reasons=job_obj.reasons, flags=job_obj.flags,
                     job_family=job_obj.job_family,
+                    # The scorer reads pay off the body, and the pay column
+                    # and the market estimate read these. Leaving them out
+                    # showed an estimate beside a band the posting states.
+                    salary_min=job_obj.salary_min,
+                    salary_max=job_obj.salary_max,
                     required_years=score.required_years(job_obj))
         saved.append(full)
         out = {k: v for k, v in full.items() if k not in _LIST_DROP}
@@ -1041,6 +1069,8 @@ ROUTES = {
     ("POST", "/api/star"): set_star,
     ("GET", "/api/targeting"): targeting,
     ("POST", "/api/targeting"): save_targeting,
+    ("GET", "/api/about"): about_you,
+    ("POST", "/api/about"): save_about,
     ("POST", "/api/rescore"): rescore,
     ("GET", "/api/settings"): settings,
     ("POST", "/api/settings"): save_settings,

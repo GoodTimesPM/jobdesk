@@ -13,10 +13,11 @@ in place, leaving everything else in the file byte-for-byte identical --
 including the comment above it, the blank line after it, and the file's
 existing line endings.
 
-Deliberately narrow. It handles top-level scalars and arrays, which is every
-field the setup wizard writes. It does not handle `[[table]]` members, and it
-raises rather than guessing if a key is missing or ambiguous, because the
-failure mode of a silent no-op here is a wizard that says "saved" and did not.
+Deliberately narrow. `patch` handles top-level and `[section]` scalars and
+arrays, which is every field the setup wizard writes. `patch_entry` edits one
+`[[table]]` entry picked by its id, for the Criteria tab's "About you" cards.
+Both raise rather than guess if a key is missing or ambiguous, because the
+failure mode of a silent no-op here is a page that says "saved" and did not.
 """
 
 from __future__ import annotations
@@ -198,3 +199,147 @@ def patch_table(text: str, section: str, mapping: dict[str, object]) -> str:
         keep[last_key + 1:last_key + 1] = added
     lines[floor:limit] = keep
     return newline.join(lines)
+
+
+# -- [[table]] entries -------------------------------------------------------
+
+def _entries(data: dict, header: str) -> list[dict]:
+    """Every parsed entry an `[[a.b]]` header produces, in file order."""
+    nodes: list = [data]
+    for part in header.split("."):
+        found: list = []
+        for node in nodes:
+            value = node.get(part) if isinstance(node, dict) else None
+            if isinstance(value, list):
+                found += value
+            elif isinstance(value, dict):
+                found.append(value)
+        nodes = found
+    return [n for n in nodes if isinstance(n, dict)]
+
+
+def _key_end(lines: list[str], start: int) -> int:
+    """The last line of the value on `start`, triple-quoted strings included."""
+    rest = lines[start].split("=", 1)[1].lstrip()
+    for quote in ('"""', "'''"):
+        if rest.startswith(quote) and rest.count(quote) == 1:
+            for i in range(start + 1, len(lines)):
+                if quote in lines[i]:
+                    return i
+            raise PatchError("a multi-line string is never closed")
+    if rest.startswith(('"""', "'''")):
+        return start
+    return _value_end(lines, start)
+
+
+def _dump_long(value: str) -> str:
+    """A string as a one-line `\"\"\"...\"\"\"` literal, for a key that used one."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"""{escaped}"""'
+
+
+def patch_entry(text: str, header: str, ident: str, changes: dict[str, object],
+                id_key: str = "id") -> str:
+    """Return `text` with one `[[header]]` entry's keys set to new values.
+
+    The entry is the one whose `id_key` equals `ident`, so `[[bullet]]` with
+    id "spargo.ad" or the indented `[[bullet.variant]]` under it. Exactly one
+    entry has to match. A key the entry lacks is added after its last key,
+    which is how an optional field like a skill's `detail` gets filled in.
+
+    A value that was written as a `\"\"\"` string stays one, because letter
+    templates use that form so a sentence can hold a quotation. The result is
+    parsed again before it is returned, and anything that does not read back
+    as the requested values raises instead of being written.
+    """
+    import tomllib
+
+    if not changes:
+        return text
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.replace("\r\n", "\n").split("\n")
+    opener = re.compile(r"\s*\[\[\s*" + re.escape(header) + r"\s*\]\]\s*(#.*)?$")
+
+    blocks: list[tuple[int, int, list[int]]] = []
+    i = 0
+    while i < len(lines):
+        if not opener.match(lines[i]):
+            i += 1
+            continue
+        keys, j = [], i + 1
+        while j < len(lines):
+            line = lines[j]
+            if re.match(r"\s*\[", line):
+                break
+            if _TABLE_KEY.match(line) and not line.lstrip().startswith("#"):
+                keys.append(j)
+                j = _key_end(lines, j)
+            j += 1
+        blocks.append((i, j, keys))
+        i = j
+
+    def ident_of(keys: list[int]) -> object:
+        for k in keys:
+            hit = _TABLE_KEY.match(lines[k])
+            if hit.group(2).strip("\"'") == id_key:
+                try:
+                    return tomllib.loads(lines[k].strip()).get(id_key)
+                except tomllib.TOMLDecodeError:
+                    return None
+        return None
+
+    matches = [b for b in blocks if ident_of(b[2]) == ident]
+    if not matches:
+        raise PatchError(f"no [[{header}]] has {id_key} = {ident!r}")
+    if len(matches) > 1:
+        raise PatchError(f"{len(matches)} [[{header}]] entries have "
+                         f"{id_key} = {ident!r}; refusing to guess")
+    _, _, keys = matches[0]
+
+    # Work from the bottom of the entry up, so replacing a three-line list
+    # with a one-line one does not move the lines still to be edited.
+    where = {}
+    for k in keys:
+        name = _TABLE_KEY.match(lines[k]).group(2).strip("\"'")
+        where[name] = k
+    edits = sorted(((where.get(key, -1), key, value)
+                    for key, value in changes.items()), reverse=True)
+    last = max(_key_end(lines, k) for k in keys) if keys else matches[0][0]
+    indent = _TABLE_KEY.match(lines[keys[0]]).group(1) if keys else ""
+    added: list[str] = []
+    for start, key, value in edits:
+        if start < 0:
+            added.append(f"{indent}{key} = {dump_value(value)}")
+            continue
+        hit = _TABLE_KEY.match(lines[start])
+        old = hit.group(3)
+        if isinstance(value, str) and old.startswith(('"""', "'''")):
+            rendered = _dump_long(value)
+        else:
+            rendered = dump_value(value)
+        if isinstance(value, str) and "\n" in rendered:
+            raise PatchError(f"{key} has a line break; one line only")
+        end = _key_end(lines, start)
+        # A list that sat on one line stays on one line, the way every
+        # `tags = [...]` in master.toml is written, however long it is.
+        if isinstance(value, (list, tuple)) and end == start:
+            rendered = "[" + ", ".join(dump_value(v) for v in value) + "]"
+        block = [f"{hit.group(1)}{hit.group(2)} = " + rendered.split("\n")[0]]
+        block += rendered.split("\n")[1:]
+        if end < last:
+            last -= (end - start + 1) - len(block)
+        elif end == last:
+            last = start + len(block) - 1
+        lines[start:end + 1] = block
+    if added:
+        lines[last + 1:last + 1] = list(reversed(added))
+
+    result = newline.join(lines)
+    try:
+        parsed = tomllib.loads(result)
+    except tomllib.TOMLDecodeError as exc:
+        raise PatchError(f"the edit would break the file: {exc}") from exc
+    entry = [e for e in _entries(parsed, header) if e.get(id_key) == ident]
+    if len(entry) != 1 or any(entry[0].get(k) != v for k, v in changes.items()):
+        raise PatchError(f"[[{header}]] {ident!r} did not read back as edited")
+    return result

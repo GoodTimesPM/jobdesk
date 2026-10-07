@@ -317,6 +317,12 @@
 
 <!-- == criteria ======================================================= -->
 <main class="view" id="view-criteria" hidden>
+  <div class="chips crit-switch" role="group" aria-label="Which criteria to show">
+    <button type="button" class="chip" data-crit="scoring" aria-pressed="true">What counts as a good job</button>
+    <button type="button" class="chip" data-crit="about" aria-pressed="false">About you</button>
+  </div>
+
+  <div id="crit-scoring">
   <div class="panel-head">
     <h2>What counts as a good job</h2>
     <p class="note">
@@ -350,6 +356,27 @@
     <code id="criteria-file"></code>, with a note above each line.
     <button id="open-criteria-file" class="ghost small" type="button">Open its folder</button>
   </p>
+  </div>
+
+  <div id="crit-about" hidden>
+    <div class="panel-head">
+      <h2>About you</h2>
+      <p class="note">
+        Everything a resume or cover letter can be built from: your contact
+        details, transcript, skills, jobs, projects and letter paragraphs.
+        Press Edit on any card to change it. The next resume or letter you
+        build uses the change; packets already made stay as they were.
+      </p>
+    </div>
+    <nav class="about-jump" id="about-jump" aria-label="Sections"></nav>
+    <div id="about" class="criteria"></div>
+    <p class="note">
+      To add a job, a bullet or a paragraph, open
+      <code id="about-file"></code>. Each table there has a note above it
+      saying what goes in it.
+      <button id="open-about-file" class="ghost small" type="button">Open its folder</button>
+    </p>
+  </div>
 </main>
 
 <!-- == console ======================================================== -->
