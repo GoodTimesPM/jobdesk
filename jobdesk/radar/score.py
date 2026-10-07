@@ -69,6 +69,17 @@ _DASHY = r"(?:-|–|—|&[mn]dash;|\bto\b)"
 _FILLER = (r"(?:\s|<[^>]{0,120}>|&nbsp;|&amp;|USD|/\s*(?:yr|year|hr|hour)"
            r"|per\s+(?:year|hour|annum)|annually|hourly)*")
 _SALARY_RANGE = re.compile(_AMOUNT + _FILLER + _DASHY + _FILLER + _AMOUNT, re.I)
+
+# A band written as two labelled figures with no dash and often no dollar
+# sign: "Minimum Pay Range: 65000 Maximum Pay Range: 90000" (Ryder). Only read
+# inside a pay cue's window, and a figure with no $ has to clear the annual
+# band on its own, so "minimum 3 years ... maximum 40 hours" is not pay.
+_LABEL_AMOUNT = (r"((?:US)?\$)?\s?(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
+                 r"\s*(k\b)?")
+_LABELLED = re.compile(
+    r"\b(?:minimum|min\.?|low(?:est)?|starting)\b[^0-9$\n]{0,40}?" + _LABEL_AMOUNT
+    + r"[^0-9$]{0,60}?\b(?:maximum|max\.?|high(?:est)?|up\s+to)\b[^0-9$\n]{0,40}?"
+    + _LABEL_AMOUNT, re.I)
 _SINGLE = re.compile(_AMOUNT, re.I)
 _HOURLY = re.compile(
     _USD + r"\s?(\d{1,3}(?:\.\d{1,2})?)\s*(?:/|\s+per\s+|\s+an\s+)\s*(?:hr|hour)",
@@ -302,6 +313,23 @@ def _range_in(text: str) -> tuple[float, float] | None:
     return None
 
 
+def _labelled_in(text: str) -> tuple[float, float] | None:
+    """A "minimum ... maximum ..." band in a stretch of text."""
+    for m in _LABELLED.finditer(text):
+        ends = []
+        for dollar, raw, kilo in (m.group(1, 2, 3), m.group(4, 5, 6)):
+            value = _annualise(raw, kilo)
+            # Without a $ or a k, a figure small enough to be an hourly rate
+            # is more likely a count of years or hours.
+            if not dollar and not kilo and float(raw.replace(",", "")) < _YEAR_BAND[0]:
+                value = None
+            ends.append(value)
+        lo, hi = ends
+        if lo and hi and lo <= hi <= lo * 6:
+            return lo, hi
+    return None
+
+
 def parse_salary(job: Job) -> tuple[float | None, float | None]:
     """A salary range from the JD body when the API gave none, as (low, high).
 
@@ -315,7 +343,8 @@ def parse_salary(job: Job) -> tuple[float | None, float | None]:
         return None, None
 
     for cue in _PAY_CUE.finditer(text):
-        found = _range_in(text[cue.start():cue.start() + 300])
+        window = text[cue.start():cue.start() + 300]
+        found = _range_in(window) or _labelled_in(window)
         if found:
             return found
 

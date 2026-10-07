@@ -15,7 +15,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
-from .. import discover, http, profile as targeting, terms
+from .. import discover, http, profile as targeting, searchplan, terms
 from ..models import Job, clean_text, parse_date
 
 TIMEOUT = 30
@@ -243,7 +243,7 @@ def recruitee(entry: dict) -> list[Job]:
 # whole (CarMax has 1,190 reqs), and bodies fetched only for what survives.
 # --------------------------------------------------------------------------
 
-def workday_queries(limit: int = 8, widen: bool = True) -> list[str]:
+def workday_queries(limit: int | None = None, widen: bool = True) -> list[str]:
     """`searchText` values for the Workday feeds.
 
     The first term of each function family, plus the synonym table. Phrases are
@@ -252,7 +252,10 @@ def workday_queries(limit: int = 8, widen: bool = True) -> list[str]:
     phrase returns a different top twenty than the bare word. Each extra query
     is one HTTP call and at most twenty postings scored on title alone.
 
-    `workday_search_terms` in targeting.toml overrides the derivation.
+    `workday_search_terms` in targeting.toml overrides the derivation. With
+    no `limit`, every term in it is sent, plus this run's turn of the tier
+    titles from `searchplan`, so a title on the Criteria tab reaches Workday
+    within a few runs.
     """
     declared = [q for q in targeting.WORKDAY_SEARCH_TERMS if q]
     if not declared:
@@ -266,9 +269,14 @@ def workday_queries(limit: int = 8, widen: bool = True) -> list[str]:
                     declared.append(word)
                     break
         declared = declared or ["analyst"]
-    base = declared[:limit]
+    if limit is None:
+        base = declared + [t for t in searchplan.workday_titles()
+                           if t not in declared]
+    else:
+        base = declared[:limit]
     if not widen:
         return base
+    limit = 8 if limit is None else limit
     # Half the budget the keyword boards get. This list is sent to EVERY
     # Workday tenant on the employer list -- 27 of them on the live profile --
     # so one extra query here is 27 more calls, not one.
@@ -478,7 +486,9 @@ def sitemap(entry: dict) -> list[Job]:
         return []
     job_path = entry.get("job_path", "/job")
     keep_local = [t.lower() for t in entry.get("local_terms", [])]
-    keywords = [q.lower() for q in entry.get("queries", workday_queries())]
+    # A filter, not a search, so it costs nothing to use every title.
+    keywords = [q.lower() for q in entry.get(
+        "queries", workday_queries() + searchplan.all_titles())]
 
     out: list[Job] = []
     for block in _SITEMAP_ENTRY.findall(resp.text):

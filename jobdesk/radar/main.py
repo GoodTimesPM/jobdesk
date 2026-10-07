@@ -22,7 +22,7 @@ import traceback
 from datetime import datetime
 
 from . import (candidates, config, dedupe, learn, mysql_store, plugins,
-               render, score, sources)
+               render, score, searchplan, sources)
 from .models import Job
 
 _LOG_PATH = config.LOGS / "run.log"
@@ -51,6 +51,10 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
 
     config.load_env()
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    # The next turn of titles. A dry run repeats this one, so it changes
+    # nothing a real run would have searched.
+    if not dry_run:
+        log(f"search turn {searchplan.advance()}")
     log("collecting...")
     jobs, stats = sources.collect(log=log, only=only)
     log(f"collected {len(jobs)} raw postings")
