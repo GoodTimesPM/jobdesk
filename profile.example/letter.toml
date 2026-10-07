@@ -19,7 +19,9 @@
 # read as a claim about the number 1, and it silently cost every accounting
 # letter its opening paragraph until someone read the drop list.
 #
-# Slots available: {role} {company} {tools}. Nothing else is substituted.
+# Slots available: {role} {company} {tools} {methods}. Nothing else is substituted.
+# {methods} is up to two Core Competencies phrases the posting also uses in a
+# sentence; `requires_methods = true` keeps a paragraph for when there are some.
 # `families` are the target families from targeting.toml's [[summary_family]]
 # blocks, so the two files never drift: accounting, billing, payroll, audit,
 # analysis, operations. "*" matches all.
@@ -37,6 +39,9 @@ sign_off = "Sincerely,"
 # True skills worth listing on a resume for the keyword match and embarrassing
 # to name in a sentence. Nobody writes "my experience with Outlook".
 tool_stoplist = ["Outlook", "Google Workspace", "Microsoft Office"]
+# Core Competencies phrases {methods} skips: true, but they make a bad
+# sentence in the bridge paragraph.
+method_stoplist = ["Internal Controls", "Desk Procedures"]
 
 # ---------------------------------------------------------------------------
 # OPENING -- who is writing and what for. One per family. All are true; the
@@ -137,9 +142,17 @@ template = """Outside of work I spent two seasons as an IRS-certified VITA volun
 # has to raise it. Delete this section if there is nothing to explain.
 # ---------------------------------------------------------------------------
 [[bridge]]
+id = "bridge.experience.methods"
+families = ["*"]
+requires_tools = true
+requires_methods = true
+template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I closed 6 entities on my own this month, and most of that work was {methods}, done in {tools}."""
+
+[[bridge]]
 id = "bridge.experience.tools"
 families = ["*"]
 requires_tools = true
+requires_methods = false
 template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I closed 6 entities on my own this month, and I have worked in {tools} rather than around them."""
 
 [[bridge]]
