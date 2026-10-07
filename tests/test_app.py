@@ -908,6 +908,55 @@ def test_patch_table() -> None:
         check("a missing table is an error", True)
 
 
+def test_patch_entry() -> None:
+    section("one [[table]] entry is edited by its id")
+    master = (ROOT / "profile.example" / "master.toml").read_text(encoding="utf-8")
+    before = tomllib.loads(master)
+
+    edited = tomlpatch.patch_entry(master, "bullet.variant", "frpg.close.gl",
+                                   {"text": 'Kept the "GL" for 6 entities.'})
+    after = tomllib.loads(edited)
+    variant = next(v for b in after["bullet"] for v in b.get("variant", [])
+                   if v["id"] == "frpg.close.gl")
+    check("an indented variant is found and changed",
+          variant["text"] == 'Kept the "GL" for 6 entities.', variant["text"])
+    check("its bullet is untouched",
+          after["bullet"][0]["text"] == before["bullet"][0]["text"])
+    check("no comment is lost", comments(edited) == comments(master))
+    check("only one line changed", sum(
+        a != b for a, b in zip(master.splitlines(), edited.splitlines())) == 1)
+
+    job = before["experience"][0]
+    retitled = tomllib.loads(tomlpatch.patch_entry(
+        master, "experience", job["id"], {"title": "Senior Clerk", "order": 9}))
+    check("several keys at once", retitled["experience"][0]["title"] == "Senior Clerk"
+          and retitled["experience"][0]["order"] == 9)
+
+    skill = next(s for s in before["skill"] if "detail" not in s)
+    filled = tomllib.loads(tomlpatch.patch_entry(
+        master, "skill", skill["term"], {"detail": "pivot tables"}, id_key="term"))
+    check("a missing optional key is added to the right entry",
+          next(s for s in filled["skill"] if s["term"] == skill["term"])
+          .get("detail") == "pivot tables")
+
+    letter = (ROOT / "profile.example" / "letter.toml").read_text(encoding="utf-8")
+    first = tomllib.loads(letter)["opening"][0]["id"]
+    text = 'I want the {role} job at {company}, "as advertised".'
+    rewritten = tomlpatch.patch_entry(letter.replace("\n", "\r\n"), "opening", first,
+                                      {"template": text})
+    check("a triple-quoted template stays triple-quoted and CRLF stays CRLF",
+          '"""I want' in rewritten and "\n" not in rewritten.replace("\r\n", "")
+          and tomllib.loads(rewritten)["opening"][0]["template"] == text)
+
+    for args, why in (((master, "bullet", "no.such.id", {"text": "x"}), "a missing id"),
+                      ((master, "bullet", "frpg.close", {"text": "a\nb"}), "a line break")):
+        try:
+            tomlpatch.patch_entry(*args)
+            check(f"{why} is an error", False, "it patched something")
+        except tomlpatch.PatchError:
+            check(f"{why} is an error", True)
+
+
 def test_criteria() -> None:
     section("the criteria panel")
     from jobdesk.app import criteria
@@ -955,6 +1004,50 @@ def test_criteria() -> None:
           refused({"equivalency_ceiling": 3}, "targeting.toml"))
     check("a number that is not one is refused",
           refused({"years_comfortable": "lots"}, "whole number"))
+
+    # The tier lists are the search list. Tier 1 every run, the rest in turns.
+    from jobdesk.radar import searchplan
+    from jobdesk.radar import profile as targeting
+    from jobdesk.radar.sources import ats, boards
+    data = {"tier_1_titles": ["support analyst", "it support analyst", "data analyst"],
+            "tier_2_titles": [f"title {i}" for i in range(13)] + ["data analyst"],
+            "tier_3_titles": ["senior data analyst"], "search_queries": ["help desk"]}
+    plan = searchplan.plan(data)
+    check("tier 1 and extra searches go every run",
+          plan["every_run"] == ["support analyst", "data analyst", "help desk"],
+          str(plan["every_run"]))
+    check("a title inside another is covered, not searched twice",
+          plan["covered"] == {"it support analyst": "support analyst",
+                              "senior data analyst": "data analyst"}, str(plan["covered"]))
+    check("the rest take turns", len(plan["in_turn"]) == 13, str(plan["in_turn"]))
+    turns = [searchplan.window(plan["in_turn"], 10, n) for n in range(2)]
+    check("two turns reach every title",
+          set(turns[0] + turns[1]) == set(plan["in_turn"]) and len(turns[0]) == 10)
+    text = " ".join(searchplan.summary(data, {"employer": [
+        {"ats": "workday"}, {"ats": "greenhouse"}, {"ats": "lever"}]})["text"])
+    check("the panel says how often",
+          "every 2 runs" in text and "1 Workday" in text and "2 company" in text, text)
+    check("and names what covers what",
+          '"support analyst" also finds "it support analyst"' in text, text)
+    small = searchplan.summary({"tier_1_titles": ["a"], "tier_2_titles": ["b"]})
+    check("a list that fits in one run says so", "So are the other 1." in small["text"],
+          str(small["text"]))
+
+    try:
+        targeting.TIER_1_TITLES = [f"tier one {i}" for i in range(12)]
+        targeting.TIER_2_TITLES, targeting.TIER_3_TITLES = [], []
+        targeting.SEARCH_QUERIES = []
+        targeting.WORKDAY_SEARCH_TERMS = ["analyst"]
+        check("every tier-1 title goes to the boards",
+              boards.queries(widen=False) == targeting.TIER_1_TITLES)
+        check("a caller's limit still holds", len(boards.queries(limit=2, widen=False)) == 2)
+        wd = ats.workday_queries(widen=False)
+        check("Workday gets its broad terms plus a turn of titles",
+              wd[0] == "analyst" and len(wd) == 1 + searchplan.WORKDAY_TURNS, str(wd))
+    finally:
+        # Module attributes shadow the profile's lookup; drop them.
+        del (targeting.TIER_1_TITLES, targeting.TIER_2_TITLES, targeting.TIER_3_TITLES,
+             targeting.SEARCH_QUERIES, targeting.WORKDAY_SEARCH_TERMS)
 
     # The page quotes point values. If score.py changes one, these fail and
     # the sentence in criteria.py or index.html has to change with it.
@@ -1111,6 +1204,97 @@ def test_settings() -> None:
     finally:
         prefs.FILE = original
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_about() -> None:
+    section("the About you cards edit master.toml and letter.toml")
+    from jobdesk import profile
+    from jobdesk.app import about
+
+    tmp = Path(tempfile.mkdtemp())
+    real = profile.REAL
+    saved_env = os.environ.pop("JOBDESK_PROFILE", None)
+    try:
+        shutil.copytree(profile.EXAMPLE, tmp / "profile")
+        profile.REAL = tmp / "profile"
+        os.environ["JOBDESK_PROFILE"] = str(tmp / "profile")
+        profile.forget()
+        master = tmp / "profile" / "master.toml"
+        letter = tmp / "profile" / "letter.toml"
+
+        shown = about.view()
+        titles = [s["title"] for s in shown["sections"]]
+        check("every part of the two files has a section", titles == [
+            "Contact details", "Education and transcript", "Skills",
+            "Work experience", "Projects", "Resume summary", "Cover letter"],
+            str(titles))
+        jobs = next(s for s in shown["sections"] if s["id"] == "experience")["cards"]
+        check("a job carries its bullets, and a bullet its other wordings",
+              jobs[0]["children"] and jobs[0]["children"][0]["children"])
+        first = jobs[0]["children"][0]
+        tags = next(f for f in first["fields"] if f["key"] == "tags")
+        check("tags come with their readable names", len(tags["names"]) == len(tags["value"]))
+
+        raw = tomllib.loads(master.read_text(encoding="utf-8"))
+        bullet = raw["bullet"][0]
+        variant = bullet["variant"][0]
+        comments_before = comments(master.read_text(encoding="utf-8"))
+        about.edit("master", "bullet", bullet["id"],
+                   {"text": "  " + bullet["text"] + "   Twice.\n", "priority": "7"})
+        after = tomllib.loads(master.read_text(encoding="utf-8"))["bullet"][0]
+        check("a bullet's wording and priority are saved, spaces tidied",
+              after["text"] == bullet["text"] + " Twice." and after["priority"] == 7,
+              str(after))
+        check("no comment is lost", comments(master.read_text(encoding="utf-8"))
+              == comments_before)
+
+        def refused(call, word):
+            text = master.read_text(encoding="utf-8")
+            try:
+                call()
+                return False
+            except about.Invalid as exc:
+                return (word in str(exc).lower()
+                        and master.read_text(encoding="utf-8") == text)
+
+        check("a variant cannot add a number its bullet lacks", refused(
+            lambda: about.edit("master", "bullet.variant", variant["id"],
+                               {"text": "Did it 400 times."}), "number"))
+        check("a tag the vocabulary does not know is refused", refused(
+            lambda: about.edit("master", "bullet", bullet["id"],
+                               {"tags": "not-a-real-term"}), "vocabulary"))
+        check("a blank claim is refused", refused(
+            lambda: about.edit("master", "experience", raw["experience"][0]["id"],
+                               {"title": "   "}), "blank"))
+        check("a key the card does not own is refused", refused(
+            lambda: about.edit("master", "bullet", bullet["id"],
+                               {"parent": "elsewhere"}), "not editable"))
+
+        about.edit("master", "identity", None, {"phone": "555-0100"})
+        check("contact details are a [section], not an entry",
+              tomllib.loads(master.read_text(encoding="utf-8"))["identity"]["phone"]
+              == "555-0100")
+
+        opening = tomllib.loads(letter.read_text(encoding="utf-8"))["opening"][0]["id"]
+        about.edit("letter", "opening", opening,
+                   {"template": "I want the {role} job at {company}."})
+        check("a letter paragraph is saved",
+              tomllib.loads(letter.read_text(encoding="utf-8"))["opening"][0]["template"]
+              == "I want the {role} job at {company}.")
+        try:
+            about.edit("letter", "opening", opening, {"template": "Hi {manager}."})
+            check("a slot the builder cannot fill is refused", False, "it saved")
+        except about.Invalid:
+            check("a slot the builder cannot fill is refused", True)
+    finally:
+        profile.REAL = real
+        if saved_env is not None:
+            os.environ["JOBDESK_PROFILE"] = saved_env
+        profile.forget()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    check("the routes are registered", ("GET", "/api/about") in api.ROUTES
+          and ("POST", "/api/about") in api.ROUTES)
 
 
 def test_delivery_edit() -> None:
@@ -1521,6 +1705,7 @@ def test_read_posting() -> None:
 def main() -> int:
     test_tomlpatch()
     test_patch_table()
+    test_patch_entry()
     test_criteria()
     test_resume_import()
     test_validation()
@@ -1530,6 +1715,7 @@ def main() -> int:
     test_one_server()
     test_settings()
     test_delivery_edit()
+    test_about()
     test_jdstruct()
     test_runner()
     test_archive()

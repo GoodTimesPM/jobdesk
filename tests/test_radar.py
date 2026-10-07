@@ -1000,6 +1000,14 @@ def salary_check() -> int:
         return job
 
     pays = [
+        # Two labelled figures, no dollar sign and no dash (Ryder).
+        ("Compensation ranges for the position are below: **Pay Type** : "
+         "Salaried Minimum Pay Range: 65000 Maximum Pay Range: 90000",
+         (65_000, 90_000), "a labelled minimum and maximum with no $"),
+        ("Pay range: Minimum $18.50 per hour, maximum $24.00 per hour",
+         (38_480, 49_920), "a labelled hourly minimum and maximum"),
+        ("Compensation: starting at 55k, up to 70k depending on experience",
+         (55_000, 70_000), "starting at and up to"),
         # Greenhouse renders the band as markup with an entity for the dash.
         ('<div class="pay-range"><span>$72,000</span>'
          '<span class="divider">&mdash;</span><span>$115,000 USD</span></div>',
@@ -1029,6 +1037,9 @@ def salary_check() -> int:
     ]
 
     does_not_pay = [
+        ("Salary: minimum 3 years of experience, maximum 40 hours a week",
+         "a labelled count of years and hours is not pay"),
+        ("Pay Range: 0.00 - 0.00", "a zero band is a placeholder"),
         # Workday's unfilled template. It is a real string in real postings.
         ("The annual full time base salary range for this role is "
          "$1.00 - $1.00. Specific compensation is determined through "

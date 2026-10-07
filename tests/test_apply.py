@@ -310,6 +310,41 @@ def test_letter() -> None:
               company="Meadowlark Health", role="Staff Accountant",
               family="accounting", resume_text=RESUME, jd_text=office_jd).body)
 
+    # {methods}: Core Competencies phrases the posting also uses in a sentence.
+    comp_resume = RESUME.replace(
+        "Other: Google Workspace",
+        "Other: Google Workspace\nCore Competencies: Account Reconciliation, "
+        "Financial Statements, Variance Analysis")
+    comp_jd = (JD + "\nYou will own account reconciliation and variance "
+               "analysis.\nFinancial Statements\n")
+    check("the Core Competencies row is not read as tools",
+          "Account Reconciliation" not in letter_mod.resume_skills(comp_resume),
+          str(letter_mod.resume_skills(comp_resume)))
+    methods = letter_mod.pick_methods(comp_resume, comp_jd)
+    check("methods are the phrases the posting writes in prose, in its spelling",
+          methods == ["account reconciliation", "variance analysis"], str(methods))
+    with_methods = letter_mod.build(
+        company="Meadowlark Health", role="Staff Accountant", family="accounting",
+        resume_text=comp_resume, jd_text=comp_jd)
+    check("the methods bridge is used when there are methods",
+          any(p.id == "bridge.experience.methods" for p in with_methods.paragraphs)
+          and "account reconciliation and variance analysis" in with_methods.body,
+          str([p.id for p in with_methods.paragraphs]))
+    check("and the letter passes verification",
+          not letter_mod.verify(with_methods, comp_resume, comp_jd))
+    check("without a Core Competencies row the tools bridge is used instead",
+          not any(p.id == "bridge.experience.methods" for p in built.paragraphs))
+    check("a stoplisted method is never named",
+          letter_mod.pick_methods(comp_resume, comp_jd,
+                                  stoplist=["Account Reconciliation"])
+          == ["variance analysis"])
+    check("the example content carries a method stoplist",
+          "method_stoplist" in letter_mod.load_content()["meta"])
+    with_methods.methods.append("forensic accounting")
+    check("a method the resume does not list fails verification",
+          any("forensic accounting" in p for p in
+              letter_mod.verify(with_methods, comp_resume, comp_jd)))
+
     # The PDF is the copy that gets uploaded, so check the shipped artifact the
     # way the Resume Engine checks its own: read the text layer back out.
     with tempfile.TemporaryDirectory() as tmp:
