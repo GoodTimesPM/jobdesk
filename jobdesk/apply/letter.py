@@ -20,8 +20,9 @@ Three checks, in `verify`:
    because whether a claim is true does not change from posting to posting:
    the resume is one page of a much larger set of confirmed facts, and a
    paragraph about a project that did not make this page is still true.
-3. **No unsupported tools.** Every tool named must be on the resume's SKILLS
-   line and in the job description.
+3. **No unsupported tools or methods.** Every tool named must be on the
+   resume's SKILLS line and in the job description, and every method must be
+   on the resume's Core Competencies row and in the job description.
 
 The only text exempt from check 1 is a company note you type yourself,
 which is quoted back to you for review and recorded as your own words.
@@ -66,6 +67,7 @@ class Letter:
     sign_off: str
     name: str
     tools: list[str] = field(default_factory=list)
+    methods: list[str] = field(default_factory=list)
     dropped: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -165,8 +167,22 @@ def resume_contact(resume_text: str) -> tuple[str, list[str]]:
     return name, [name, contact]
 
 
-def resume_skills(resume_text: str) -> list[str]:
-    """Every skill named on the resume's SKILLS section."""
+# The SKILLS row the resume engine prints the posting's own wording into.
+# Those are methods, not tools, so `{tools}` never reads from it.
+COMPETENCIES = "Core Competencies"
+
+
+def _competencies(resume_text: str, label: str) -> list[str]:
+    for line in resume_text.splitlines():
+        head, sep, rest = line.strip().partition(":")
+        if sep and head.strip() == label:
+            return [i.strip() for i in rest.split(",") if i.strip()]
+    return []
+
+
+def resume_skills(resume_text: str,
+                  skip: tuple[str, ...] = (COMPETENCIES,)) -> list[str]:
+    """Every skill named on the resume's SKILLS section, bar the `skip` rows."""
     skills: list[str] = []
     in_section = False
     for line in resume_text.splitlines():
@@ -179,7 +195,9 @@ def resume_skills(resume_text: str) -> list[str]:
                 continue
             if stripped.isupper() and ":" not in stripped:
                 break
-            _, _, rest = stripped.partition(":")
+            head, _, rest = stripped.partition(":")
+            if head.strip() in skip:
+                continue
             for item in (rest or stripped).split(","):
                 item = item.strip()
                 # "Excel (Pivot Tables, VLOOKUP)" splits on the comma inside
@@ -217,6 +235,37 @@ def pick_tools(resume_text: str, jd_text: str, limit: int = 3,
         if len(picked) == limit:
             break
     return picked
+
+
+def pick_methods(resume_text: str, jd_text: str, limit: int = 2,
+                 label: str = COMPETENCIES,
+                 stoplist: list[str] | None = None) -> list[str]:
+    """Core Competencies phrases the posting writes in running prose.
+
+    The phrase has to occur in the JD in lower case (acronyms aside), and
+    that spelling is what the letter uses. "Data Analytics" in a heading
+    and "data analytics" in a sentence are the same phrase, but only the
+    second reads right mid-sentence, and a phrase the JD only ever
+    capitalises ("Amazon Web Services") is a name that does not belong in
+    "mostly for ...".
+
+    `stoplist` works as it does for tools: true phrases that make a bad
+    sentence. "SQL and Tableau, mostly for agile methodologies" is one.
+    """
+    blocked = {s.lower() for s in (stoplist or [])}
+    scored: list[tuple[int, int, str]] = []
+    for i, item in enumerate(_competencies(resume_text, label)):
+        if item.lower() in blocked:
+            continue
+        words = item.split()
+        pattern = r"\s+".join(
+            re.escape(w) if w.isupper() and len(w) > 1 else re.escape(w.lower())
+            for w in words)
+        found = re.findall(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", jd_text)
+        if found:
+            scored.append((-len(found), i, " ".join(found[0].split())))
+    scored.sort()
+    return [phrase for _, _, phrase in scored[:limit]]
 
 
 def join_tools(tools: list[str]) -> str:
@@ -315,7 +364,10 @@ def build(*, company: str, role: str, family: str, resume_text: str,
     approved = numbers_in(resume_text) | numbers_in(approved_text)
     tools = pick_tools(resume_text, jd_text,
                        stoplist=meta.get("tool_stoplist"))
-    slots = {"company": company, "role": role, "tools": join_tools(tools)}
+    methods = pick_methods(resume_text, jd_text,
+                           stoplist=meta.get("method_stoplist"))
+    slots = {"company": company, "role": role, "tools": join_tools(tools),
+             "methods": join_tools(methods)}
 
     dropped: list[tuple[str, str]] = []
     chosen: list[Paragraph] = []
@@ -346,6 +398,9 @@ def build(*, company: str, role: str, family: str, resume_text: str,
             if taken >= count or entry["id"] in seen:
                 return
             if "requires_tools" in entry and entry["requires_tools"] != bool(tools):
+                return
+            if ("requires_methods" in entry
+                    and entry["requires_methods"] != bool(methods)):
                 return
             if extra.get("skip_ids") and entry["id"] in extra["skip_ids"]:
                 return
@@ -384,7 +439,7 @@ def build(*, company: str, role: str, family: str, resume_text: str,
         company=company, role=role, header=header,
         greeting=meta.get("greeting", "Dear Hiring Team,"),
         paragraphs=chosen, sign_off=meta.get("sign_off", "Sincerely,"),
-        name=name, tools=tools, dropped=dropped,
+        name=name, tools=tools, methods=methods, dropped=dropped,
     )
 
 
@@ -425,6 +480,16 @@ def verify(letter: Letter, resume_text: str, jd_text: str,
         if tool.lower() not in low_jd:
             problems.append(f"tool '{tool}' is named in the letter but the job "
                             f"description never asked for it")
+
+    # 4. methods
+    on_resume = {m.lower() for m in _competencies(resume_text, COMPETENCIES)}
+    for method in letter.methods:
+        if method.lower() not in on_resume:
+            problems.append(f"'{method}' is named in the letter but is not in "
+                            f"the resume's {COMPETENCIES} row")
+        if method.lower() not in low_jd:
+            problems.append(f"'{method}' is named in the letter but the job "
+                            f"description never says it")
 
     if not any(p.id.startswith("open") for p in letter.paragraphs):
         problems.append("no opening paragraph survived selection")
