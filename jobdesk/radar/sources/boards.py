@@ -17,20 +17,19 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
-from .. import http, profile as targeting, terms
+from .. import http, profile as targeting, searchplan, terms
 from ..models import Job, parse_date
 
 TIMEOUT = 30
 
 # What to ask the keyword-driven boards for. Kept narrow on purpose -- these
 # boards are national, so a broad query buries the Richmond signal.
-def queries(limit: int = 8, widen: bool = True) -> list[str]:
+def queries(limit: int | None = None, widen: bool = True) -> list[str]:
     """The search phrases sent to the keyword boards.
 
     Adzuna and USAJOBS want a phrase, not a taxonomy, and the full target list
-    would be forty round trips per cycle for one metro. `search_queries` in
-    targeting.toml is the answer when the user has one; otherwise the top of
-    the tier-1 list stands in, which covers the work they said they want.
+    would be fifty round trips per run for one metro. `searchplan` decides:
+    every tier-1 title each run, the tier-2 and tier-3 titles in turns.
     Everything else is caught by the company feeds, which are not
     keyword-limited.
 
@@ -42,14 +41,15 @@ def queries(limit: int = 8, widen: bool = True) -> list[str]:
     make nine calls, and `search_synonym_limit` caps the whole thing.
 
     `widen=False` for a caller that needs exactly the declared phrases.
+
+    With no `limit`, this run's whole plan goes out. A caller that can only
+    afford one or two searches passes a limit and gets the top of tier 1.
     """
-    declared = [q for q in targeting.SEARCH_QUERIES if q]
-    if not declared:
-        declared = [t for t in targeting.TIER_1_TITLES if t] or ["analyst"]
-    base = declared[:limit]
+    declared = searchplan.board_titles() or ["analyst"]
+    base = declared if limit is None else declared[:limit]
     if not widen:
         return base
-    budget = min(limit, targeting.SEARCH_SYNONYM_LIMIT)
+    budget = min(8 if limit is None else limit, targeting.SEARCH_SYNONYM_LIMIT)
     return base + terms.widen(base, budget)
 
 
