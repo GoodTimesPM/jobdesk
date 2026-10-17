@@ -190,6 +190,10 @@ def reuse_bodies(jobs: list[Job], path=None,
     spent its detail budget re-reading the same top postings. On
     jobs.virginia.gov the WAF allows about 36 reads a run, and the same 17
     were read every time while 50 newer rows never got one.
+
+    An aggregator snippet is replaced too. Adzuna sends its 500 characters
+    every run, and skipping any job with a description meant `fill_partials`
+    re-read the same 60 top postings each run while 220 sat as snippets.
     """
     path = path or config.CANDIDATES
     try:
@@ -204,11 +208,12 @@ def reuse_bodies(jobs: list[Job], path=None,
               and "partial-description" not in (r.get("flags") or [])}
     reused = 0
     for job in jobs:
-        if job.description:
+        if job.description and not job.partial:
             continue
         body = bodies.get((job.uid, job.url))
-        if body:
+        if body and len(body) > len(job.description):
             job.description = body
+            job.partial = False
             reused += 1
     if reused:
         log(f"  reused {reused} job description(s) from the last run")

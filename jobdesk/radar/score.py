@@ -481,9 +481,14 @@ def _function_match(title: str) -> tuple[int, str]:
     wrong title on target.
     """
     t = f" {flatten_title(title)} "
+    # A clerical word the user put on a tier list is work they asked for.
+    # "data entry" went on tier 1 from the Criteria tab, was searched every
+    # run, and every posting it found scored 31 as clerical.
+    wanted = (*profile.TIER_1_TITLES, *profile.TIER_2_TITLES,
+              *profile.TIER_3_TITLES)
 
     for bad in profile.CLERICAL_MARKERS:
-        if bad in t:
+        if bad in t and not any(bad in w for w in wanted):
             return 0, f"clerical title ({bad})"
     for bad in profile.OFF_FIELD_MARKERS:
         if _word(bad).search(t):
@@ -571,8 +576,12 @@ def _synonym_title(flat: str) -> tuple[int, str]:
 
 
 def _says(hay: str, skill: str, alternates: list[str]) -> str | None:
-    """The wording this posting used for `skill`, if it used one at all."""
-    if skill in hay:
+    """The wording this posting used for `skill`, if it used one at all.
+
+    Whole words, the skill too. A plain substring test read "excellent" as
+    Excel and "laws" as AWS. A plural still counts: "KPIs" is KPI.
+    """
+    if _said(hay, skill) or _said(hay, skill + "s"):
         return skill
     # Substring first: a phrase the text never contains cannot be a word in
     # it. List order is kept, because the first alternate found is the label.
@@ -719,12 +728,52 @@ def non_us_location(location: str) -> str | None:
     return None
 
 
+_STATE_CODES = frozenset(
+    "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN "
+    "MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA "
+    "WV WI WY".split())
+# "St. Louis, MO" but not "Agile, MS Office".
+_CITY_STATE = re.compile(
+    r"\b([A-Z][A-Za-z.]+(?: [A-Z][A-Za-z.]+){0,2}),\s*([A-Z]{2})\b"
+    r"(?!\s*(?:Office|Teams|Excel|Word|Access|Project|SQL|Dynamics))")
+
+
+def stated_elsewhere(job: Job) -> str | None:
+    """An out-of-state US city the posting names for itself, if it names no
+    home-area place.
+
+    Adzuna files a nationwide posting under the area it was searched from.
+    CrowdStrike's "Analyst I, Falcon Complete GovCloud (Hybrid, St Louis)"
+    came back as "Capitol, Richmond" and scored 85 as local, while its own
+    first line said "USA - St. Louis, MO". The title and the opening of the
+    body are the employer's words; the board's location is a guess.
+    """
+    head = f"{job.title} | {(job.description or '')[:400]}"
+    if any(term in head.lower() for term in profile.LOCAL_TERMS):
+        return None
+    home = str(profile.HOME_METRO).rpartition(",")[2].strip().upper()
+    for city, state in _CITY_STATE.findall(head):
+        if state in _STATE_CODES and state != home:
+            return f"{city}, {state}"
+    return None
+
+
 def _geo_points(job: Job) -> tuple[int, list[str], list[str]]:
     points, reasons, flags = 0, [], []
     hay = f"{job.location} {job.title}".lower()
     body = job.haystack
 
     is_local = any(term in hay for term in profile.LOCAL_TERMS)
+    elsewhere = stated_elsewhere(job) if is_local else None
+    if elsewhere and not any(term in job.title.lower()
+                             for term in profile.LOCAL_TERMS):
+        # Only the board's location said home. Read the posting instead: its
+        # opening may offer remote ("USA - Remote USA - St. Louis, MO"), but
+        # a title that says hybrid or onsite wins over that.
+        is_local = False
+        hay = job.title.lower()
+        if not any(term in hay for term in profile.HYBRID_TERMS):
+            hay += " " + (job.description or "")[:200].lower()
     is_remote = job.remote or any(term in hay for term in profile.REMOTE_TERMS)
     is_hybrid = any(term in hay for term in profile.HYBRID_TERMS) or \
         any(term in body[:1500] for term in profile.HYBRID_TERMS)
@@ -778,6 +827,8 @@ def _geo_points(job: Job) -> tuple[int, list[str], list[str]]:
                   else "elsewhere in your state" if in_state
                   else "outside commute range")
         flags.append("out-of-area")
+        if elsewhere:
+            detail = f"in {elsewhere}, though the board filed it under {job.location}"
         return -100, [f"onsite, {detail}, not remote (no relocation planned)"], flags
     return points, reasons, flags
 
@@ -797,7 +848,10 @@ def _stack_points(job: Job) -> tuple[int, list[str], list[str]]:
                 raw += weight
                 hits.append(skill if said == skill else f"{skill} ({said})")
 
-    foreign = [s for s in profile.FOREIGN_SKILLS if s in hay]
+    # Whole words, or "scalable reporting" costs two points as Scala. A
+    # skill that starts with a dot is checked as text, so "asp.net" is .NET.
+    foreign = [s for s in profile.FOREIGN_SKILLS
+               if _said(hay, s) or (s[:1] == "." and s in hay)]
     raw -= 2 * len(foreign)
 
     points = max(-6, min(25, raw))
