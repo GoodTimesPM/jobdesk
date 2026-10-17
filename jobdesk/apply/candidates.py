@@ -38,6 +38,8 @@ class Candidate:
     last_seen: str = ""
     required_years: int | None = None
     job_family: str = ""
+    # The radar's own mark that the body is an aggregator snippet.
+    partial: bool = False
     flags: list[str] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
     also_on: list[str] = field(default_factory=list)
@@ -52,13 +54,18 @@ class Candidate:
     def partial_description(self) -> bool:
         """Is the cached body a snippet the aggregator cut, not the posting?
 
-        Read off the flag the radar wrote, so `apply/` learns this without
+        Read off what the radar wrote, so `apply/` learns this without
         importing `radar/`. It matters because the cutoff for a usable JD is
         400 characters and an aggregator snippet is 500: without this, the
         shortest possible read of a posting clears the bar for the longest
         piece of work in the app.
+
+        The `partial` field, not only the flag. The radar adds the flag only
+        when it caps a snippet's score, so on 2026-10-10 one of 220 snippets
+        carried it and the other 219 would have been tailored against an
+        About Us paragraph.
         """
-        return "partial-description" in self.flags
+        return self.partial or "partial-description" in self.flags
 
     @property
     def salary_text(self) -> str:
