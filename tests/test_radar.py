@@ -275,6 +275,51 @@ def rules_check() -> int:
          score.seniority_block("Manager, Associate Relations Investigator"),
          "manager")
 
+    # -- the posting's own city beats the board's ------------------------------
+    def geo(title: str, body: str, where: str = "Aurora, Arapahoe County"):
+        job = models.Job(title=title, company="X", url="u", source="adzuna",
+                         location=where, description=body)
+        return score._geo_points(job)
+    pts, why, _ = geo("Analyst I (Hybrid, St Louis)",
+                      "USA - Remote USA - St. Louis, MO Full time")
+    want("a title-stated hybrid city out of state is blocked",
+         (pts, "St. Louis, MO" in why[0]), (-100, True))
+    pts, why, _ = geo("Business Analyst", "USA - Remote USA - St. Louis, MO")
+    want("but a posting that also offers remote is remote", why[:1], ["remote"])
+    pts, why, _ = geo("Business Analyst", "Phoenix, AZ Denver, CO Irving, TX")
+    want("a list of cities that includes home stays local", pts, 25)
+    pts, _, _ = geo("Business Analyst", "Skills: Agile, MS Office, Excel.")
+    want("'Agile, MS Office' is not Mississippi", pts, 25)
+
+    # -- a clerical word on a tier list is wanted ------------------------------
+    try:
+        profile.TIER_1_TITLES = ["data entry"]
+        want("data entry on tier 1 is on target",
+             score._title_tier("Data Entry Clerk")[0] > 0, True)
+        want("other clerical titles stay buried",
+             score._title_tier("Mail Clerk")[0], 0)
+    finally:
+        del profile.TIER_1_TITLES
+
+    # -- skills are whole words ----------------------------------------------
+    def stack(body: str):
+        return score._stack_points(models.Job(
+            title="Analyst", company="X", url="u", source="t", description=body))[1]
+    try:
+        profile.CORE_SKILLS = {"excel": 6, "aws": 4}
+        profile.SUPPORTING_SKILLS = {}
+        profile.FOREIGN_SKILLS = ["scala", ".net"]
+        why = " ".join(stack("Excellent writing, scalable reporting, state laws."))
+        want("'excellent', 'scalable' and 'laws' are not skills",
+             ("excel" in why, "scala" in why, "aws" in why), (False, False, False))
+        why = " ".join(stack("Excel, AWS and Scala. ASP.NET a plus."))
+        want("the words themselves still are",
+             ("excel" in why, "aws" in why, "scala" in why, ".net" in why),
+             (True, True, True, True))
+    finally:
+        # Module attributes shadow the profile's lookup; drop them.
+        del profile.CORE_SKILLS, profile.SUPPORTING_SKILLS, profile.FOREIGN_SKILLS
+
     # -- a years range is a band ---------------------------------------------
     def band(text: str):
         return score.required_band(
@@ -1690,6 +1735,11 @@ def partials_check() -> int:
                      description=snippet, flags=["partial-description"])
     want("the candidate knows its body is a snippet",
          cand.partial_description, True)
+    # The flag is added only when the score is capped. Most snippets score
+    # under the cap and carry only `partial`.
+    cand = Candidate(title="BA", company="Lumen", url="https://x.test/1",
+                     description=snippet, partial=True)
+    want("and knows it from `partial` alone", cand.partial_description, True)
     text, how = jdtext.obtain(cached=snippet, url="", allow_fetch=False,
                               allow_paste=False, cached_partial=True,
                               echo=lambda m: None)
@@ -1789,6 +1839,23 @@ def bodies_check() -> int:
              "The body.")
         want("but not onto another agency's same-titled posting",
              (got, other.description), (1, ""))
+
+        # An Adzuna snippet arrives every run. The body an earlier run
+        # fetched replaces it, so the fetch budget moves on to other rows.
+        ad = Job(title="Customer Insights Analyst", company="Datavant",
+                 url="https://x.test/ad", source="adzuna")
+        path.write_text(json.dumps([
+            {"uid": ad.uid, "url": ad.url, "description": "The whole posting. " * 40},
+            {"uid": "x", "url": "https://x.test/cut", "partial": True,
+             "description": "Only the start..."},
+        ]), encoding="utf-8")
+        ad = Job(title="Customer Insights Analyst", company="Datavant",
+                 url="https://x.test/ad", source="adzuna",
+                 description="The whole...", partial=True)
+        candidates.reuse_bodies([ad], path, log=lambda _: None)
+        want("a stored full body replaces this run's snippet",
+             (ad.description.startswith("The whole posting."), ad.partial),
+             (True, False))
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
