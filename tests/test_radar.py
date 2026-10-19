@@ -1153,6 +1153,18 @@ def salary_check() -> int:
         if not ok:
             failures.append(f"{label}: got {got}, wanted nothing")
 
+    # A board's own figure too small to be a year's pay (Adzuna, Carvana,
+    # 2026-10-19) gives way to the body.
+    carvana = body("Starting Pay: $18.00 per hour\n"
+                   "In 12-Months: Earn $2.00+ per hour (+12% annual increase)")
+    carvana.salary_min = carvana.salary_max = 4160.0
+    got = score.parse_salary(carvana)
+    ok = near(got[0], 37_440) and near(got[1], 37_440)
+    print(f"  {'ok  ' if ok else 'FAIL'} a board's $4,160 gives way to the "
+          f"body's $18/hr: {got}")
+    if not ok:
+        failures.append(f"board figure under the annual band: got {got}")
+
     # schema.org baseSalary, which the sitemap lane reads off a posting page.
     schema = [
         ({"value": {"minValue": 48721, "maxValue": 79172, "unitText": "YEAR"}},
@@ -2050,6 +2062,128 @@ def mysql_check() -> int:
     return 1 if fails else 0
 
 
+def board_api_check() -> int:
+    """SmartRecruiters and Workday rows get their body through the board's API.
+
+    SmartRecruiters' list has no body and nothing fetched one, so three of
+    CapTech's four postings sat on the board empty. The page read in the sweep
+    cannot help: both boards draw the posting with script.
+    """
+    import tempfile
+    from pathlib import Path
+    from jobdesk.radar import candidates, companies
+    from jobdesk.radar import sources
+    from jobdesk.radar.sources import ats
+
+    print("Board API self-check")
+    print("=" * 72)
+    fails: list[str] = []
+
+    def want(label: str, got, expected):
+        ok = got == expected
+        print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
+        if not ok:
+            fails.append(f"{label}: got {got!r}, expected {expected!r}")
+
+    posting = {
+        "releasedDate": "2026-08-31T11:41:07.576Z",
+        "compensation": {"min": 84000, "max": 88000, "currency": "USD",
+                         "period": "YEARLY"},
+        "jobAd": {"sections": {
+            "companyDescription": {"title": "Company Description",
+                                   "text": "<p>Same on every posting.</p>"},
+            "jobDescription": {"title": "Job Description",
+                               "text": "<p>Build pipelines.</p>"},
+            "qualifications": {"title": "Qualifications",
+                               "text": "<ul><li>2+ years of SQL</li></ul>"},
+            "additionalInformation": {"title": "Additional Information",
+                                      "text": ""},
+        }},
+    }
+    entry = {"name": "Acme", "ats": "smartrecruiters", "slug": "acme"}
+
+    def sr_job():
+        return Job(title="Data Analyst", company="Acme",
+                   url="https://jobs.smartrecruiters.com/acme/7440001",
+                   source="smartrecruiters")
+
+    asked: list[str] = []
+    saved_get = ats.http.get_json
+
+    def fake_get(url, *a, **k):
+        asked.append(url)
+        return posting
+
+    ats.http.get_json = fake_get
+    try:
+        job = sr_job()
+        got = ats.smartrecruiters_detail(job, entry)
+    finally:
+        ats.http.get_json = saved_get
+    want("a SmartRecruiters posting gets its body", got, True)
+    want("from the posting's API address", asked,
+         ["https://api.smartrecruiters.com/v1/companies/acme/postings/7440001"])
+    want("its own sections, headings kept, no company blurb",
+         job.description,
+         "Job Description:\nBuild pipelines.\nQualifications:\n• 2+ years of SQL")
+    want("and the band it states", (job.salary_min, job.salary_max),
+         (84000, 88000))
+    want("SmartRecruiters is in the run's detail fetch",
+         "smartrecruiters" in sources.DETAIL_FETCHERS, True)
+
+    saved_active = companies.active
+    companies.active = lambda *a, **k: [
+        {"name": "Other", "ats": "smartrecruiters", "slug": "other"},
+        entry,
+        {"name": "Big", "ats": "workday", "host": "big.wd1.myworkdayjobs.com",
+         "tenant": "big", "site": "Big_Careers"}]
+    try:
+        want("a stored row finds its board again from the link",
+             (ats.detail_entry(sr_job()) or {}).get("name"), "Acme")
+        wd = Job(title="Analyst", company="Big", source="workday",
+                 url="https://big.wd1.myworkdayjobs.com/big_careers/job/x_R1")
+        want("Workday matches its site in any case",
+             (ats.detail_entry(wd) or {}).get("name"), "Big")
+
+        # The sweep: an empty row the latest run did not see.
+        rows = [{"uid": "sr", "title": "Data Analyst", "company": "Acme",
+                 "url": "https://jobs.smartrecruiters.com/acme/7440001",
+                 "source": "smartrecruiters", "description": "", "score": 65,
+                 "last_seen": "2026-10-01T21:00:00"},
+                {"uid": "new", "title": "Business Analyst", "company": "Acme",
+                 "url": "https://acme.test/2", "source": "greenhouse",
+                 "description": "Analyze things. " * 40, "score": 70,
+                 "last_seen": "2026-10-19T21:00:00"}]
+        page_reads: list[str] = []
+        saved_partial = ats.partial_detail
+        ats.partial_detail = lambda job: page_reads.append(job.company) or False
+        ats.http.get_json = fake_get
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "candidates.json"
+                path.write_text(json.dumps(rows), encoding="utf-8")
+                said: list[str] = []
+                candidates.repair_partials(path, log=said.append,
+                                           budget=20, wait=False)
+        finally:
+            ats.partial_detail = saved_partial
+            ats.http.get_json = saved_get
+        # Filled, then rescored; two lines of body may score it off the board,
+        # so the log is the witness.
+        want("the sweep fills it through the API",
+             any(line.startswith("  Acme | Data Analyst ->") for line in said),
+             True)
+        want("without reading the page", page_reads, [])
+    finally:
+        companies.active = saved_active
+
+    print()
+    for line in fails:
+        print("  FAILED: " + line)
+    print(f"{'PASS' if not fails else 'FAIL'}  {len(fails)} failure(s)")
+    return 1 if fails else 0
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:]]
     if "--plugins" in args:
@@ -2059,7 +2193,8 @@ if __name__ == "__main__":
                          or salary_check() or gates_check() or tool_years_check()
                          or dates_check()
                          or gather_check() or partials_check()
-                         or bodies_check() or mysql_check())
+                         or bodies_check() or board_api_check()
+                         or mysql_check())
     elif "--salary" in args:
         raise SystemExit(salary_check())
     elif "--discord" in args:
