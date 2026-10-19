@@ -11,6 +11,7 @@ Each function takes a company entry from `radar/companies.py` and returns
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -689,6 +690,35 @@ def _urls_to_try(url: str) -> list[str]:
     return urls
 
 
+_ADZUNA_DETAILS = re.compile(r"^https?://(?:www\.)?adzuna\.com/details/\d+", re.I)
+_ADZUNA_BODY = re.compile(
+    r"""<section[^>]*class=["']adp-body[^"']*["'][^>]*>(.*?)</section>""",
+    re.I | re.S)
+_ADZUNA_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.I | re.S)
+
+
+def _adzuna_page_posting(url: str, page: str) -> dict | None:
+    """The posting as Adzuna's own detail page prints it, for when the page
+    has no JobPosting markup.
+
+    Some ads lose the markup but keep the text. On 2026-10-17 Compass's BCBA
+    req had answered 404 at `/details/<id>` for days, with no JSON-LD, while
+    the same page showed all 3,800 characters in its `adp-body` section. The
+    outbound link went to ZipRecruiter, which refuses scripts, so this page
+    was the only copy we could read. Shaped like a JobPosting node so the
+    same checks apply to it.
+    """
+    if not _ADZUNA_DETAILS.match(url or ""):
+        return None
+    body = _ADZUNA_BODY.search(page or "")
+    if not body:
+        return None
+    text = re.sub(r"^(?:\s*Job Description)+\s*", "", body.group(1))
+    head = _ADZUNA_H1.search(page)
+    title = re.sub(r"<[^>]+>", " ", head.group(1)) if head else ""
+    return {"title": html.unescape(title).strip(), "description": text}
+
+
 def partial_detail(job: Job) -> bool:
     """Replace an aggregator's snippet with the posting it was cut from.
 
@@ -714,18 +744,22 @@ def partial_detail(job: Job) -> bool:
         # of us: a repair at 1.5s got four postings before it started
         # answering 202.
         resp = http.get(url, timeout=TIMEOUT, allow_redirects=True, spacing=5.0)
-        if resp is not None and resp.status_code in GONE_STATUSES:
+        page = (resp.text or "") if resp is not None else ""
+        adzuna = _adzuna_page_posting(url, page)
+        if resp is not None and resp.status_code in GONE_STATUSES and not adzuna:
             missing += 1
-        if resp is None or resp.status_code >= 400:
+        if resp is None or (resp.status_code >= 400 and not adzuna):
             continue
         # Same rule as `sitemap_detail`, and for the same reason: a bot check
         # is not a fact about this posting. Swallowing it here meant a repair
         # over 82 rows read four of them, met a WAF on the fifth, and reported
         # "the links have expired" about 78 postings that were all still live.
         reason = challenge_reason(resp)
-        if reason:
+        if reason and not adzuna:
             raise Challenged(f"{http._host(url)}: {reason}")
-        for node in job_postings_in(resp.text):
+        # JSON-LD first, since it is the employer's text; Adzuna's own
+        # printing of it is the fallback.
+        for node in job_postings_in(page) + ([adzuna] if adzuna else []):
             body = clean_text(node.get("description") or "")
             floor = MIN_FULL_BODY if job.description else MIN_ANY_BODY
             if len(body) <= len(job.description):

@@ -57,7 +57,7 @@ def _fresh(row: dict, cutoff: datetime) -> bool:
 
 
 def _rescore_carried(by_uid: dict[str, dict], touched: set[str],
-                     log: Callable[[str], None] = print) -> None:
+                     log: Callable[[str], None] = print, store=None) -> None:
     """Re-score the rows this run did not see, in place.
 
     A row stays in the cache for RETENTION_DAYS after the last run that found
@@ -79,6 +79,8 @@ def _rescore_carried(by_uid: dict[str, dict], touched: set[str],
     how a posting that today's rules would disqualify finally leaves.
 
     Costs no network: everything the scorer reads is already in the row.
+    The seen-store is the one input that is not, and without it every carried
+    row lost its "likely evergreen" -15 on the next run.
     """
     from . import score  # local import, same reason as in write()
 
@@ -90,9 +92,11 @@ def _rescore_carried(by_uid: dict[str, dict], touched: set[str],
             job = score.score_job(Job.from_dict(row))
         except Exception:
             continue    # a malformed row is dropped by the floor check below
+        if store is not None:
+            store.ghost_check(job)
         was = row.get("score")
-        for field in ("score", "tier", "reasons", "flags", "job_family",
-                      "salary_min", "salary_max"):
+        for field in ("score", "tier", "reasons", "flags", "points",
+                      "job_family", "salary_min", "salary_max"):
             row[field] = getattr(job, field)
         row["required_years"] = score.required_years(job)
         if row["score"] != was:
@@ -112,7 +116,8 @@ def save(rows: list[dict], path=None) -> None:
     os.replace(tmp, path)
 
 
-def write(jobs: list[Job], log: Callable[[str], None] = print) -> int:
+def write(jobs: list[Job], log: Callable[[str], None] = print,
+          store=None) -> int:
     """Rewrite the candidate cache from this run's scored postings.
 
     Best-effort in both directions: a broken cache file is replaced rather
@@ -156,7 +161,7 @@ def write(jobs: list[Job], log: Callable[[str], None] = print) -> int:
         touched.add(job.uid)
         by_uid[job.uid] = row
 
-    _rescore_carried(by_uid, touched, log)
+    _rescore_carried(by_uid, touched, log, store)
 
     cutoff = now - timedelta(days=RETENTION_DAYS)
     # The score floor is applied to every row, not just this run's. A carried
@@ -182,14 +187,57 @@ def write(jobs: list[Job], log: Callable[[str], None] = print) -> int:
     return len(rows)
 
 
+def _load_bodies(path=None) -> dict:
+    path = path or config.BODIES
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig") or "{}")
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def remember_bodies(jobs: list[Job], path=None) -> int:
+    """Keep the bodies `fill_partials` read, whatever the posting scored.
+
+    `reuse_bodies` could only give back what the candidate cache held, and it
+    holds rows at MIN_SCORE_TO_REPORT or more. A snippet that filled and then
+    scored 40 was read again next run, and the run after, at five seconds a
+    read out of a 60-read budget. Pass only the jobs that just filled.
+    Entries go after RETENTION_DAYS, the same life as a board row.
+    """
+    path = path or config.BODIES
+    data = _load_bodies(path)
+    now = datetime.now(timezone.utc)
+    added = 0
+    for job in jobs:
+        if job.url and job.description and not job.partial:
+            data[job.url] = {"body": job.description[:MAX_DESCRIPTION_CHARS],
+                             "at": now.isoformat()}
+            added += 1
+    cutoff = (now - timedelta(days=RETENTION_DAYS)).isoformat()
+    data = {u: v for u, v in data.items()
+            if isinstance(v, dict) and str(v.get("at") or "") >= cutoff}
+    try:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        return 0
+    return added
+
+
 def reuse_bodies(jobs: list[Job], path=None,
-                 log: Callable[[str], None] = print) -> int:
+                 log: Callable[[str], None] = print,
+                 bodies_path=None) -> int:
     """Give this run's postings the bodies earlier runs already read.
 
     A sitemap or Workday list carries no body, so without this every run
     spent its detail budget re-reading the same top postings. On
     jobs.virginia.gov the WAF allows about 36 reads a run, and the same 17
     were read every time while 50 newer rows never got one.
+
+    Snippets also look in `config.BODIES` (see `remember_bodies`), which
+    holds what was read for postings that scored too low to be kept here.
 
     An aggregator snippet is replaced too. Adzuna sends its 500 characters
     every run, and skipping any job with a description meant `fill_partials`
@@ -199,7 +247,10 @@ def reuse_bodies(jobs: list[Job], path=None,
     try:
         rows = json.loads(path.read_text(encoding="utf-8-sig") or "[]")
     except (OSError, ValueError):
-        return 0
+        rows = []
+    if not isinstance(rows, list):
+        rows = []
+    filled = _load_bodies(bodies_path)
     # Keyed by URL as well as uid, because the uid is company and title, and
     # two state agencies can both post an "Energy Analyst".
     bodies = {(r["uid"], r.get("url")): r["description"] for r in rows
@@ -211,6 +262,8 @@ def reuse_bodies(jobs: list[Job], path=None,
         if job.description and not job.partial:
             continue
         body = bodies.get((job.uid, job.url))
+        if not body and job.partial:
+            body = (filled.get(job.url) or {}).get("body")
         if body and len(body) > len(job.description):
             job.description = body
             job.partial = False

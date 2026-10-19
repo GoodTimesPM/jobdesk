@@ -17,6 +17,10 @@ SEEN_FILE = DATA / "seen.json"
 # doesn't re-fetch a posting this run already downloaded. Git-ignored and
 # rewritten every run -- the kept series is `snapshots_dir()`.
 CANDIDATES = DATA / "candidates.json"
+# Full bodies `fill_partials` read for aggregator snippets, keyed by URL, so
+# no posting is fetched twice. The candidate cache keeps only rows at 45 or
+# more, and every snippet scoring under that was read again on every run.
+BODIES = DATA / "bodies.json"
 SWITCH_FILE = ROOT / "SWITCH.radar.txt"
 
 

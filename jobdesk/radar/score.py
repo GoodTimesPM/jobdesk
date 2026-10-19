@@ -129,6 +129,27 @@ _TAIL_REQUIREMENT = re.compile(
 _TAIL_WINDOW = 60
 
 
+# Years figures that describe the company or the contract, not the hire.
+# Elephant's "in business for 15 years" read as a 15-year gate over its "0-2
+# years of experience" and sank a 92 to 66. A cue-word test was tried first
+# and dropped real gates like "3+ years in GTM systems", so this lists the
+# history and term phrasings instead.
+_HISTORY_BEFORE = re.compile(
+    r"(?i)(?:\bfor|\b(?:over|in|during)\s+the\s+(?:last|past)|\bthe\s+(?:last|past)"
+    r"|\bterm(?:\s+of)?\s*:?|\bafter|\bcelebrating|\bnearly|\bfounded\s+\w+)"
+    r"\s*(?:over\s+|more\s+than\s+|almost\s+)?$")
+_HISTORY_AFTER = re.compile(
+    r"(?i)^\W{0,3}(?:running|ago|in\s+business|contract|of\s+(?:service|history"
+    r"|excellence|serving|training)|old\b|history|strong)")
+
+
+def _not_a_requirement(text: str, m: re.Match) -> bool:
+    """True when the years figure at `m` is company history or a contract term."""
+    before = text[max(0, m.start() - 40):m.start()]
+    after = text[m.end():m.end() + 30]
+    return bool(_HISTORY_BEFORE.search(before) or _HISTORY_AFTER.search(after))
+
+
 def _binding_text(job: Job) -> str:
     """The part of the JD that states real requirements."""
     text = job.description or job.title
@@ -151,7 +172,8 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
     """Every years requirement in a stretch of text, as (floor, ceiling).
 
     "3-5 years" is (3, 5). A bare "5+ years" is (5, 5): the plus is open-ended
-    and inventing a ceiling for it would be worse than having none.
+    and inventing a ceiling for it would be worse than having none. "0-2
+    years" is (0, 2), an entry band; a bare "0 years" says nothing.
     """
     text = _numerals(text)
     bands: list[tuple[int, int]] = []
@@ -161,7 +183,7 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
                 low = int(m.group(1))
             except (TypeError, ValueError):
                 continue
-            if not 0 < low <= 20:
+            if not 0 <= low <= 20:
                 continue
             high = low
             if m.lastindex and m.lastindex >= 2 and m.group(2):
@@ -171,6 +193,8 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
                     top = low
                 if low <= top <= 20:
                     high = top
+            if high == 0:
+                continue
             bands.append((low, high))
     for m in _WORD_YEARS.finditer(text):
         n = _WORD_NUMBERS[m.group(1).lower()]
@@ -208,9 +232,16 @@ def required_band(job: Job) -> tuple[int, int] | None:
     """The years gate as (floor, ceiling), or None if the posting never said.
 
     The floor is the highest binding floor. The ceiling is the highest band top,
-    which may come from a different band.
+    which may come from a different band. Company history and contract terms
+    are skipped (see `_not_a_requirement`).
     """
-    bands = _bands_in(_binding_text(job)) + _tail_bands(job)
+    text = _numerals(_binding_text(job))
+    bands: list[tuple[int, int]] = []
+    for pat in _YEARS_PATTERNS:
+        for m in pat.finditer(text):
+            if not _not_a_requirement(text, m):
+                bands.extend(_bands_in(m.group(0)))
+    bands += _tail_bands(job)
     if not bands:
         return None
     return max(b[0] for b in bands), max(b[1] for b in bands)
@@ -259,7 +290,7 @@ def blocking_years(job: Job) -> int | None:
     for pat in _YEARS_PATTERNS:
         for m in pat.finditer(text):
             window = text[max(0, m.start() - _GATE_WINDOW): m.end() + _GATE_WINDOW]
-            if not _REQUIREMENT_CUE.search(window):
+            if not _REQUIREMENT_CUE.search(window) or _not_a_requirement(text, m):
                 continue
             # The FLOOR of the band, not its top. "5-8 years" blocks at five,
             # because five is what the posting says gets you considered.
@@ -738,6 +769,14 @@ _CITY_STATE = re.compile(
     r"(?!\s*(?:Office|Teams|Excel|Word|Access|Project|SQL|Dynamics))")
 
 
+# "Support Technician II, DC" is a data-center role in Ashland, not a city.
+# A "city" holding a job word or a grade is the title talking.
+_ROLE_WORD = re.compile(
+    r"\b(?:I{1,3}|IV|Analyst|Technician|Specialist|Engineer|Manager|Associate"
+    r"|Support|Coordinator|Developer|Consultant|Administrator|Director"
+    r"|Officer|Representative|Assistant|Lead|Senior|Sr|Jr|Intern)\b")
+
+
 def stated_elsewhere(job: Job) -> str | None:
     """An out-of-state US city the posting names for itself, if it names no
     home-area place.
@@ -752,8 +791,14 @@ def stated_elsewhere(job: Job) -> str | None:
     if any(term in head.lower() for term in profile.LOCAL_TERMS):
         return None
     home = str(profile.HOME_METRO).rpartition(",")[2].strip().upper()
-    for city, state in _CITY_STATE.findall(head):
-        if state in _STATE_CODES and state != home:
+    places = _CITY_STATE.findall(head)
+    # Old Dominion opens with 150 service centers and Richmond is number 60.
+    # A list that long runs past the head, so read all of it.
+    if len(places) >= 3 and any(term in (job.description or "").lower()
+                                for term in profile.LOCAL_TERMS):
+        return None
+    for city, state in places:
+        if state in _STATE_CODES and state != home and not _ROLE_WORD.search(city):
             return f"{city}, {state}"
     return None
 
@@ -1213,6 +1258,12 @@ def score_job(job: Job) -> Job:
     reasons: list[str] = []
     flags: list[str] = []
     total = 0
+    job.points = []
+    parts: list[list] = []
+
+    def part(label: str, pts: int, why: list[str]) -> None:
+        if pts or why:
+            parts.append([label, pts, list(why)])
 
     # Set before any early return: hard-blocked postings are still written to
     # the snapshots, and the market dashboard wants them categorised too --
@@ -1280,23 +1331,31 @@ def score_job(job: Job) -> Job:
         total -= 4
         reasons.append(f"{name.title()} preferred, not in your skills")
         flags.append("language-preferred")
+        part("Language", -4, [reasons[-1]])
 
     title_pts, why = _title_tier(job.title)
     total += title_pts
     reasons.append(why)
+    part("Title", title_pts, [why])
 
-    for fn in (_geo_points, _experience_points, _tool_years_points,
-               _education_points,
-               _no_experience_points, _freshness_points, _salary_points,
-               _agency_points, _dealbreaker_points, _syndication_points):
+    for label, fn in (("Location", _geo_points), ("Experience", _experience_points),
+                      ("Years of one product", _tool_years_points),
+                      ("Degree", _education_points),
+                      ("No experience needed", _no_experience_points),
+                      ("How new it is", _freshness_points), ("Pay", _salary_points),
+                      ("Staffing agency", _agency_points),
+                      ("Dealbreakers", _dealbreaker_points),
+                      ("Where it is posted", _syndication_points)):
         pts, why, fl = fn(job)
         total += pts
         reasons.extend(why)
         flags.extend(fl)
+        part(label, pts, why)
 
     pts, why, _hits = _stack_points(job)
     total += pts
     reasons.extend(why)
+    part("Skills", pts, why)
 
     # An explicit early-career signal in the title is the strongest fit signal
     # in your applied set. Small additive bonus, placed BEFORE the
@@ -1308,6 +1367,7 @@ def score_job(job: Job) -> Job:
         total += 6
         reasons.append(f"early-career signal ({entry})")
         flags.append("entry-level")
+        part("Early-career title", 6, [reasons[-1]])
 
     # The company's own ATS beats an aggregator repost: the real req, fresher,
     # no agency in the middle. Stacks with `_syndication_points` (a better path
@@ -1315,22 +1375,34 @@ def score_job(job: Job) -> Job:
     if job.source.startswith(_ATS_SOURCES):
         total += 6
         reasons.append("direct to company ATS")
+        part("Company's own site", 6, [reasons[-1]])
 
     # A title off the target list is capped below the reporting threshold: kept
     # for the market data, never surfaced. 55 was not low enough, since remote,
     # fresh and paid pushed off-field titles into C.
     if title_pts == 0:
+        part("Cap", min(total, 40) - total, ["capped at 40: title is off-target"])
         total = min(total, 40)
         reasons.append("capped: title is off-target")
 
     job.score = scale(total)
+    if total > SCORE_LINEAR_TO:
+        part("Top-end squeeze", job.score - total,
+             [f"{total} raw points; past {SCORE_LINEAR_TO} they are squeezed "
+              f"into the last ten"])
+    elif job.score != total:
+        part("Floor", job.score - total,
+             [f"{total} raw points; a score stops at 0"])
     if job.partial and job.score > PARTIAL_CEILING:
+        part("Cap", PARTIAL_CEILING - job.score,
+             [f"capped at {PARTIAL_CEILING}: only a snippet was published"])
         job.score = PARTIAL_CEILING
         reasons.append("capped: only a snippet of this posting was published")
         flags.append("partial-description")
     job.tier = tier_for(job.score)
     job.reasons = reasons
     job.flags = flags
+    job.points = parts
     return job
 
 

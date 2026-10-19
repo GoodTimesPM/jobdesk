@@ -344,6 +344,9 @@ class SeenStore:
             job.flags.append("ghost-suspect")
             job.reasons.append(
                 f"seen {rec['times_seen']}x over {span}d - likely evergreen")
+            if job.points:
+                job.points.append(["Evergreen", max(0, job.score - 15) - job.score,
+                                   [job.reasons[-1]]])
             job.score = max(0, job.score - 15)
 
     def __len__(self) -> int:
