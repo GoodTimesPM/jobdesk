@@ -290,6 +290,11 @@ def rules_check() -> int:
     want("a list of cities that includes home stays local", pts, 25)
     pts, _, _ = geo("Business Analyst", "Skills: Agile, MS Office, Excel.")
     want("'Agile, MS Office' is not Mississippi", pts, 25)
+    pts, _, _ = geo("Support Technician II, DC", "Data center support role.")
+    want("'Technician II, DC' in a title is a data center, not a city", pts, 25)
+    pts, _, _ = geo("Business Analyst", "Phoenix, AZ Mesa, AZ Irving, TX "
+                    + "Katy, TX " * 60 + "Denver, CO Reading, PA")
+    want("home far down a long list of cities stays local", pts, 25)
 
     # -- a clerical word on a tier list is wanted ------------------------------
     try:
@@ -319,6 +324,30 @@ def rules_check() -> int:
     finally:
         # Module attributes shadow the profile's lookup; drop them.
         del profile.CORE_SKILLS, profile.SUPPORTING_SKILLS, profile.FOREIGN_SKILLS
+
+    # -- the breakdown adds up to the score -----------------------------------
+    for label, j in (
+        ("a full posting", models.Job(
+            title="Business Analyst", company="X", url="u", source="greenhouse",
+            location="Denver, CO", description="Requirements: 1-2 years of "
+            "experience with SQL and Excel. Bachelor's degree. " * 20)),
+        ("a capped snippet", models.Job(
+            title="Data Analyst", company="X", url="u", source="adzuna",
+            location="Remote", remote=True, partial=True,
+            description="Excel, SQL and Tableau reporting. " * 10)),
+        ("an off-target title", models.Job(
+            title="Forklift Operator", company="X", url="u", source="t",
+            location="Denver, CO", description="Warehouse work. " * 30)),
+    ):
+        score.score_job(j)
+        want(f"{label}: the parts add to the score ({j.score})",
+             sum(p[1] for p in j.points), j.score)
+    seen = dedupe.SeenStore.__new__(dedupe.SeenStore)
+    seen._data = {j.uid: {"first_seen": "2026-01-01T00:00:00+00:00",
+                          "times_seen": 40}}
+    seen.ghost_check(j)
+    want("the evergreen penalty is a line too",
+         (j.points[-1][0], sum(p[1] for p in j.points)), ("Evergreen", j.score))
 
     # -- a years range is a band ---------------------------------------------
     def band(text: str):
@@ -1243,6 +1272,18 @@ def tool_years_check() -> int:
          None)
     want("'2-5 years' is still a band",
          score.required_band(job("2-5 years of experience.")), (2, 5))
+    want("company history is not a gate, and '0–2 years' is an entry band",
+         score.required_band(job("Despite being in business for 15 years, "
+                                 "we are a start-up at heart. • 0–2 years of "
+                                 "experience in business analysis.")),
+         (0, 2))
+    want("a contract term is not a gate",
+         score.required_band(job("Over the last 20+ years we have grown. "
+                                 "Term: 2 Years Contract. 1 year contract.")),
+         None)
+    want("'3+ years in X' still binds with no cue word nearby",
+         score.required_band(job("• 3+ years in GTM systems or revenue ops.")),
+         (3, 3))
     want("the Power BI posting's wording finds the product",
          score.tool_years(job("Four (4) or more years of professional "
                               "experience developing business intelligence "
@@ -1834,7 +1875,9 @@ def bodies_check() -> int:
                     url="https://x.test/energy", source="sitemap")
         other = Job(title="Energy Analyst", company="Commonwealth of Virginia",
                     url="https://x.test/energy-2", source="sitemap")
-        got = candidates.reuse_bodies([again, other], path, log=lambda _: None)
+        nowhere = tmp / "bodies.json"
+        got = candidates.reuse_bodies([again, other], path, log=lambda _: None,
+                                      bodies_path=nowhere)
         want("a body from the last run is reused", again.description,
              "The body.")
         want("but not onto another agency's same-titled posting",
@@ -1852,10 +1895,73 @@ def bodies_check() -> int:
         ad = Job(title="Customer Insights Analyst", company="Datavant",
                  url="https://x.test/ad", source="adzuna",
                  description="The whole...", partial=True)
-        candidates.reuse_bodies([ad], path, log=lambda _: None)
+        candidates.reuse_bodies([ad], path, log=lambda _: None,
+                                bodies_path=nowhere)
         want("a stored full body replaces this run's snippet",
              (ad.description.startswith("The whole posting."), ad.partial),
              (True, False))
+
+        # A snippet that filled and then scored under the board's cut is not
+        # in candidates.json, and used to be read again every run.
+        low = Job(title="Records Clerk", company="Acme",
+                  url="https://x.test/low", source="adzuna",
+                  description="Full text of the clerk posting. " * 20)
+        candidates.remember_bodies([low], nowhere)
+        low = Job(title="Records Clerk", company="Acme",
+                  url="https://x.test/low", source="adzuna",
+                  description="Full text...", partial=True)
+        candidates.reuse_bodies([low], tmp / "empty.json",
+                                log=lambda _: None, bodies_path=nowhere)
+        want("a body read for a low scorer is not read twice",
+             (low.description.startswith("Full text of"), low.partial),
+             (True, False))
+        stale = json.loads(nowhere.read_text(encoding="utf-8"))
+        stale["https://x.test/old"] = {"body": "x", "at": "2020-01-01T00:00:00+00:00"}
+        nowhere.write_text(json.dumps(stale), encoding="utf-8")
+        candidates.remember_bodies([], nowhere)
+        want("and old bodies age out",
+             sorted(json.loads(nowhere.read_text(encoding="utf-8"))),
+             ["https://x.test/low"])
+
+        # Compass's BCBA ad, 2026-10-17. The outbound link is a page that
+        # forwards to ZipRecruiter, which refuses scripts; Adzuna's own
+        # detail page answers 404 with no JSON-LD and the whole posting in
+        # its adp-body section.
+        bcba = ("Join Compass as a Board Certified Behavior Analyst. "
+                "Lower monthly requirement and supportive resources. ") * 12
+        pages = {
+            "https://www.adzuna.com/land/ad/77": (200,
+                '<meta http-equiv="refresh" content="5; url=https://www.'
+                'ziprecruiter.com/kn/x">You are now being redirected'),
+            "https://www.adzuna.com/details/77": (404,
+                "<h1>Board Certified Behavior Analyst (BCBA)</h1>"
+                '<section class="adp-body mx-4">Job DescriptionJob Description'
+                f"<p>{bcba}</p></section><a>Apply for this job</a>"),
+        }
+
+        def adzuna(pages):
+            job = Job(title="Board Certified Behavior Analyst (BCBA)",
+                      company="Compass", source="adzuna", partial=True,
+                      url="https://www.adzuna.com/land/ad/77",
+                      description=bcba[:500] + "...")
+            saved = ats.http.get
+            ats.http.get = lambda url, *a, **k: type(
+                "R", (), {"status_code": pages[url][0], "text": pages[url][1],
+                          "url": url, "headers": {}})()
+            try:
+                return ats.partial_detail(job), job
+            except ats.Gone:
+                return "gone", job
+            finally:
+                ats.http.get = saved
+
+        ok, job = adzuna(pages)
+        want("Adzuna's printed body fills a snippet when the page has no markup",
+             (ok, job.partial, job.description.startswith("Join Compass")),
+             (True, False, True))
+        pages["https://www.adzuna.com/details/77"] = (404, "<h1>Not found</h1>")
+        ok, _ = adzuna(pages)
+        want("a detail page with no body is still not a posting", ok, False)
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
