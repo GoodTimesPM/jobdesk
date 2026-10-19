@@ -28,6 +28,7 @@ data/apply/applications.corrupt.json
 # The working set radar rewrites every run, with JD bodies in it. The
 # committed dataset is the snapshots the dashboard reads.
 data/radar/candidates.json
+data/radar/bodies.json
 data/radar/seen.json
 data/radar/seen.json.bak
 data/radar/notion_queue.json
