@@ -390,6 +390,28 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
 .factor-pct { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .factor-why { color: var(--ink-soft); }
 .factor-share { color: var(--ink-faint); font-size: 11.5px; white-space: nowrap; }
+
+/* "How this scored": one line per part of the score. */
+.parts { margin: 0 0 10px; padding: 10px 12px;
+         border: 1px solid var(--line); border-radius: var(--radius);
+         background: var(--card); }
+.parts-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.parts-head .note { margin: 0; font-size: 12.5px; }
+.part { display: grid; grid-template-columns: 150px 64px 1fr; gap: 10px;
+        font-size: 12.5px; padding: 2px 0; }
+.part-name { color: var(--ink-soft); }
+.part-pts { text-align: right; font-variant-numeric: tabular-nums; }
+.part-pts.up { color: var(--good); }
+.part-pts.down { color: var(--bad); }
+.part-pts.flat { color: var(--ink-faint); }
+.part-why { color: var(--ink-soft); }
+.part.total { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line-soft);
+              font-weight: 600; }
+.part.total .part-name, .part.total .part-why { color: var(--ink); }
+@media (max-width: 780px) {
+  .part { grid-template-columns: 1fr auto; }
+  .part-why { grid-column: 1 / -1; padding-bottom: 4px; }
+}
 .market-est { margin-top: 8px; padding-top: 8px;
               border-top: 1px solid var(--line-soft); font-size: 12.5px;
               color: var(--accent); }

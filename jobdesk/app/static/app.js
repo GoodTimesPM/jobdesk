@@ -271,7 +271,7 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 // breaks the tie between two postings from the same day.
 const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
                 market: {}, marketIndex: null, starsGone: [],
-                lastRun: null, details: {}, pasted: {} };
+                lastRun: null, details: {}, pasted: {}, partMax: {} };
 
 // The two orders the "Order" menu and Settings offer, as a column and a
 // direction. Clicking a column header picks a third, and the menu says so.
@@ -784,6 +784,7 @@ function detailRow(job) {
     cached.fetch.catch(() => { delete state.details[job.uid]; });
   }
   cached.fetch.then((full) => {
+    if (full.points && full.points.length) why.replaceWith(scoreParts(full));
     if (full.blocks && full.blocks.length) jd.replaceWith(jdBlocks(full.blocks));
     else if (webUrl(job.url) && !cached.tried) readPosting(job, cached, jd);
     else {
@@ -804,13 +805,40 @@ function detailRow(job) {
   return tr;
 }
 
+// How the number was reached, one line per part, in the order the scorer
+// adds them. The caps, the squeeze into 90-100 and the evergreen penalty are
+// lines too, so the column sums to the score in the table.
+function scoreParts(job) {
+  const box = el("div", { class: "parts" });
+  box.append(el("div", { class: "parts-head" },
+    el("b", {}, "How this scored"),
+    el("span", { class: "note", text: "points per part, out of the most it can add" })));
+  let sum = 0;
+  job.points.forEach(([label, pts, why]) => {
+    sum += pts;
+    const max = state.partMax[label];
+    const sign = pts > 0 ? "up" : pts < 0 ? "down" : "flat";
+    box.append(el("div", { class: "part" },
+      el("span", { class: "part-name", text: label }),
+      el("span", { class: "part-pts " + sign,
+        text: (pts > 0 ? "+" : "") + pts + (max && pts >= 0 ? ` / ${max}` : "") }),
+      el("span", { class: "part-why", text: why.join("; ") })));
+  });
+  box.append(el("div", { class: "part total" },
+    el("span", { class: "part-name", text: "Score" }),
+    el("span", { class: "part-pts", text: String(job.score) }),
+    el("span", { class: "part-why",
+      text: `tier ${job.tier}` + (sum !== job.score ? ` (the parts add to ${sum})` : "") })));
+  return box;
+}
+
 // A row the radar never got a body for. One read of the posting page, once
 // per load of the list; on success the row takes the new score and pay.
 function readPosting(job, cached, jd) {
   cached.tried = true;
   jd.textContent = "Reading the posting…";
   post("/api/job/read", { uid: job.uid }).then((full) => {
-    ["score", "tier", "reasons", "flags", "salary_min", "salary_max",
+    ["score", "tier", "reasons", "flags", "points", "salary_min", "salary_max",
      "jd_chars"].forEach((k) => { if (k in full) job[k] = full[k]; });
     const market = state.market[job.uid];
     if (market) market.salary_estimate = full.salary_estimate || null;
@@ -2534,6 +2562,7 @@ const TIER_WORDS = { A: "is worth applying to today", B: "is a good fit",
 function drawScoring(scoring) {
   const parts = $("#score-parts");
   parts.textContent = "";
+  state.partMax = Object.fromEntries(scoring.parts.map((p) => [p.label, p.max]));
   scoring.parts.forEach((p) => parts.append(el("li", {},
     el("b", {}, p.label), ` up to ${p.max}${p.label === "Pay" ? ", when listed" : ""}`)));
 

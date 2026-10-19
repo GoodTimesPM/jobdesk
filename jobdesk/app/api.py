@@ -260,7 +260,7 @@ def check_setup(query, body) -> dict:
 # never shows it, so the list endpoint drops it and `/api/job` fetches one on
 # demand. 300 postings with bodies is several MB of JSON for a table that
 # renders 300 rows of text.
-_LIST_DROP = ("description",)
+_LIST_DROP = ("description", "points")
 
 
 def jobs(query, body) -> dict:
@@ -391,6 +391,7 @@ def read_posting(query, body) -> dict:
     if not profile.is_example():
         update.update(score=found.score, tier=found.tier,
                       reasons=found.reasons, flags=found.flags,
+                      points=found.points,
                       job_family=found.job_family,
                       required_years=score.required_years(found))
 
@@ -667,11 +668,14 @@ def rescore(query, body) -> dict:
     because that time is what the page calls the radar's last run. If the
     radar rewrote the file while this was scoring, its version wins.
     """
-    from ..radar import candidates, score
+    from ..radar import candidates, dedupe, score
     from ..radar.models import Job
 
     path = radar_config.CANDIDATES
     rows, stamp = _candidates()
+    # Read only. The radar's evergreen penalty lives in the seen-store, and a
+    # rescore without it handed every evergreen row its 15 points back.
+    store = dedupe.SeenStore()
     try:
         read_at = path.stat()
     except OSError:
@@ -680,9 +684,11 @@ def rescore(query, body) -> dict:
     saved, scored = [], []
     for row in rows:
         job_obj = score.score_job(Job.from_dict(row))
+        store.ghost_check(job_obj)
         full = dict(row)
         full.update(score=job_obj.score, tier=job_obj.tier,
                     reasons=job_obj.reasons, flags=job_obj.flags,
+                    points=job_obj.points,
                     job_family=job_obj.job_family,
                     # The scorer reads pay off the body, and the pay column
                     # and the market estimate read these. Leaving them out
