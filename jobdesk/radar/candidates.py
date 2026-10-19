@@ -285,6 +285,26 @@ MAX_COOLDOWNS = 4
 SWEEP_BUDGET = 20
 
 
+def _from_api(job: Job) -> bool:
+    """Fill a Workday or SmartRecruiters row through its board's API.
+
+    Their pages draw the posting with script, so the page read in
+    `partial_detail` finds nothing there. A row that missed the run's detail
+    budget used to stay empty until it aged off.
+    """
+    from .sources import DETAIL_FETCHERS, ats
+    if job.source not in ("workday", "smartrecruiters"):
+        return False
+    entry = ats.detail_entry(job)
+    try:
+        got = bool(entry) and DETAIL_FETCHERS[job.source](job, entry)
+    except Exception:
+        return False
+    if got:
+        job.partial = False
+    return got
+
+
 def repair_partials(path=None, log: Callable[[str], None] = print,
                     budget: int | None = None, wait: bool = True) -> int:
     """Fetch the real posting for every row here whose body never arrived.
@@ -373,7 +393,7 @@ def repair_partials(path=None, log: Callable[[str], None] = print,
         job.partial = bool(row.get("partial")
                            or "partial-description" in (row.get("flags") or []))
         try:
-            got = ats.partial_detail(job)
+            got = _from_api(job) or ats.partial_detail(job)
         except ats.Challenged as why:
             # Not a dead link, and on this host not permanent either. Measured
             # on 2026-09-19: jobs.virginia.gov's WAF held for about seven

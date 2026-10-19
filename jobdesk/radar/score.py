@@ -367,6 +367,13 @@ def parse_salary(job: Job) -> tuple[float | None, float | None]:
     Passes, widening: a range near a pay cue, any range that clears the bands,
     a lone hourly rate, then one figure near a cue as a floor (high is None).
     """
+    # A board's own figure under the annual band is not a salary. Adzuna sent
+    # Carvana's "In 12-Months: Earn $2.00+ per hour" raise as $4,160-$4,160,
+    # unflagged, over a body that says "Starting Pay: $18.00 per hour", and
+    # the row lost 7 points as below the floor. The body is read instead.
+    stated_top = job.salary_max or job.salary_min
+    if stated_top and stated_top < _YEAR_BAND[0]:
+        job.salary_min = job.salary_max = None
     if job.salary_min or job.salary_max:
         return job.salary_min, job.salary_max
     text = job.description
@@ -1154,8 +1161,9 @@ def _band_floor(job: Job) -> tuple[float | None, bool]:
     figure read off the body can be a sign-on bonus or a budget, so it only
     costs points.
     """
-    stated = bool(job.salary_min or job.salary_max)
+    # After the parse, which drops a board figure too small to be a salary.
     lo, hi = parse_salary(job)
+    stated = bool(job.salary_min or job.salary_max)
     low = lo or hi
     return low, stated or bool(lo and hi)
 
