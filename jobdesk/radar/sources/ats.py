@@ -149,9 +149,8 @@ def _ashby_salary(comp) -> dict:
 
 # --------------------------------------------------------------------------
 # SmartRecruiters -- api.smartrecruiters.com
-# The list endpoint has no description, so the body is fetched per posting.
-# That is one extra call each; only done for postings that pass a title
-# pre-filter, to keep the request count sane.
+# The list endpoint has no description, so `smartrecruiters_detail` fetches
+# the body per posting, through `fetch_details` and its budget like Workday.
 # --------------------------------------------------------------------------
 
 def smartrecruiters(entry: dict) -> list[Job]:
@@ -372,6 +371,65 @@ def workday_detail(job: Job, entry: dict) -> bool:
     if info.get("remoteType"):
         job.remote = "remote" in str(info["remoteType"]).lower()
     return bool(info.get("jobDescription"))
+
+
+# The posting's own sections, in the order its page shows them. The company
+# blurb and the video links are the same on every posting.
+_SR_SECTIONS = ("jobDescription", "qualifications", "additionalInformation")
+
+
+def smartrecruiters_detail(job: Job, entry: dict) -> bool:
+    """Fetch the JD body for one SmartRecruiters posting, in place.
+
+    The list endpoint carries no body, and nothing fetched one until
+    2026-10-19, so these rows reached the board empty and the page sweep could
+    not fill them either: three of CapTech's four sat there for weeks.
+    """
+    posting_id = job.external_id or job.url.rstrip("/").rsplit("/", 1)[-1]
+    if not posting_id:
+        return False
+    data = http.get_json(
+        f"https://api.smartrecruiters.com/v1/companies/{entry['slug']}"
+        f"/postings/{posting_id}", timeout=TIMEOUT)
+    if not isinstance(data, dict):
+        return False
+    sections = (data.get("jobAd") or {}).get("sections") or {}
+    parts = []
+    for key in _SR_SECTIONS:
+        section = sections.get(key) or {}
+        if (section.get("text") or "").strip():
+            parts.append(f"<h3>{section.get('title') or ''}</h3>{section['text']}")
+    if not parts:
+        return False
+    job.description = clean_text("".join(parts))
+    job.posted_at = parse_date(data.get("releasedDate")) or job.posted_at
+    pay = data.get("compensation") or {}
+    if (not (job.salary_min or job.salary_max) and pay.get("period") == "YEARLY"
+            and pay.get("currency") == "USD"):
+        job.salary_min, job.salary_max = pay.get("min"), pay.get("max")
+    return True
+
+
+def detail_entry(job: Job) -> dict | None:
+    """The watched employer a stored row came from, for a detail fetch.
+
+    A row read back from the cache has lost the `_company_entry` the run gave
+    it, so the board is matched again from the row's own link.
+    """
+    from .. import companies
+    url = (job.url or "").lower()
+    for entry in companies.active():
+        if entry.get("ats") != job.source:
+            continue
+        if job.source == "workday":
+            prefix = f"https://{entry['host']}/{entry['site']}/".lower()
+        elif job.source == "smartrecruiters":
+            prefix = f"https://jobs.smartrecruiters.com/{entry['slug']}/".lower()
+        else:
+            continue
+        if url.startswith(prefix):
+            return entry
+    return None
 
 
 # --------------------------------------------------------------------------

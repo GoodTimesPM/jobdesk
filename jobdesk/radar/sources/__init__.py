@@ -104,6 +104,7 @@ def collect(log: Callable[[str], None] = print,
 DETAIL_FETCHERS = {
     "workday": ats.workday_detail,
     "sitemap": ats.sitemap_detail,
+    "smartrecruiters": ats.smartrecruiters_detail,
 }
 
 
