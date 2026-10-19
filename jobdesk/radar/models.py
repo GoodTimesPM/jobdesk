@@ -251,6 +251,9 @@ class Job:
     job_family: str = ""             # coarse function category, see score.job_family
     reasons: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
+    # The same score, part by part: [label, points, [reasons]]. The page's
+    # "How this scored" table reads it. Empty when a block set the score to 0.
+    points: list = field(default_factory=list)
     first_seen: datetime | None = None
 
     def __post_init__(self) -> None:

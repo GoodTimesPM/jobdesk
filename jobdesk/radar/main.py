@@ -87,7 +87,10 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
 
     # Only the survivors, so one HTTP call is spent per requisition rather
     # than per copy of it.
+    snippets = [job for job in jobs if job.partial]
     sources.fill_partials(jobs, log=log)
+    if not dry_run:
+        candidates.remember_bodies([job for job in snippets if not job.partial])
 
     # Before scoring, not after: freshness is worth points, and a posting
     # whose date came from a sitemap `<lastmod>` can claim to be newer than
@@ -160,6 +163,7 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
         # lives in the digest and the Notion row. Neither is analysis input.
         record.pop("description", None)
         record.pop("reasons", None)
+        record.pop("points", None)
         record["required_years"] = score.required_years(job)
         slim.append(record)
     if slim and dry_run:
@@ -178,7 +182,7 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     # the threshold right now, JD bodies included. Deliberately not limited to
     # `new_jobs` -- a posting found yesterday and not applied to yet is still a
     # candidate today, and this is the file that answers "what can I apply to".
-    candidates.write(jobs, log=log)
+    candidates.write(jobs, log=log, store=store)
     # Rows this run did not see keep their snippet for up to a month unless
     # something rechecks them, and a closed ad never fills. See SWEEP_BUDGET.
     try:
