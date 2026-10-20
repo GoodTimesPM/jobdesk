@@ -267,6 +267,11 @@ The other lever is `total_bullet_ceiling`. Lowering it moves the cut back to
 the tailorer, where it is made on how well a bullet answers this posting and
 reported as a coverage number, instead of being made by the page at the end.
 
+The cover letter is held to one page the same way. Spacing tightens first,
+then type, down to 90%. Only after that does it lose a paragraph: the weakest
+evidence first, then the bridge. The opening, the close and your own note
+always stay. Anything it cuts is listed in `APPLY.md`.
+
 ## Before it builds a packet
 
 A handful of rules run before the folder is written, and they are about being
