@@ -56,6 +56,7 @@ class Result:
     steps: list[str] = field(default_factory=list)
     tailor: engine.TailorResult | None = None
     letter_dropped: list[tuple[str, str]] = field(default_factory=list)
+    letter_cut: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -173,15 +174,21 @@ def build(candidate: Candidate, jd_text: str, *, log: Log,
                                "NOT written:")
         result.problems += [f"  - {p}" for p in problems]
     else:
+        # One page, before any copy is written, so all four say the same.
+        rung = letter_mod.fit(letter)
         (folder / "COVER_LETTER.txt").write_text(letter.to_text(), encoding="utf-8")
         (folder / "COVER_LETTER.md").write_text(letter.to_markdown(), encoding="utf-8")
-        letter_mod.write_pdf(letter, folder / "COVER_LETTER.pdf")
-        letter_mod.write_docx(letter, folder / "COVER_LETTER.docx")
+        letter_mod.write_pdf(letter, folder / "COVER_LETTER.pdf", rung)
+        letter_mod.write_docx(letter, folder / "COVER_LETTER.docx", rung)
         result.letter_dropped = letter.dropped
+        result.letter_cut = letter.cut
+        type_pct = round(100 * rung[0] / letter_mod.LADDER[0][0])
         result.steps.append(
             f"cover letter: {len(letter.paragraphs)} paragraph(s), family "
             f"'{family}', tools {', '.join(letter.tools) or 'none named'}"
-            + (f", {len(letter.dropped)} dropped by the gate" if letter.dropped else ""))
+            + (f", {len(letter.dropped)} dropped by the gate" if letter.dropped else "")
+            + (f", type at {type_pct}% to hold one page" if type_pct < 100 else "")
+            + (f", cut {', '.join(letter.cut)} to hold one page" if letter.cut else ""))
 
     # -- 3. the answer bank -------------------------------------------------
     bank = answers_mod.load()
@@ -327,6 +334,12 @@ def _apply_md(candidate: Candidate, tailored: engine.TailorResult,
                 "Held back because a number in them appears nowhere in your "
                 "confirmed content:", ""]
         out += [f"- `{pid}` -- {why}" for pid, why in letter.dropped] + [""]
+
+    if letter is not None and letter.cut:
+        out += ["## Cover letter paragraphs cut to keep one page", "",
+                "True and approved, and the weakest fit for this posting. "
+                "Swap one in by hand if it matters more here:", ""]
+        out += [f"- `{pid}`" for pid in letter.cut] + [""]
 
     if pending:
         out += ["## Answers that need you", ""]

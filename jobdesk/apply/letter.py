@@ -55,6 +55,7 @@ class Paragraph:
     text: str
     slots: dict[str, str] = field(default_factory=dict)
     user_written: bool = False
+    section: str = ""          # opening, evidence, bridge, close; "" for a note
 
 
 @dataclass
@@ -69,6 +70,7 @@ class Letter:
     tools: list[str] = field(default_factory=list)
     methods: list[str] = field(default_factory=list)
     dropped: list[tuple[str, str]] = field(default_factory=list)
+    cut: list[str] = field(default_factory=list)   # ids `fit` took for the page
 
     @property
     def body(self) -> str:
@@ -97,6 +99,11 @@ class Letter:
                     "the claim is true, the fix is to put it in master.toml "
                     "rather than to type it here.", ""]
             out += [f"- `{pid}` -- {why}" for pid, why in self.dropped]
+        if self.cut:
+            out += ["", "## Paragraphs cut to keep one page", "",
+                    "True and approved, and the weakest fit for this posting. "
+                    "The page ran out before they did.", ""]
+            out += [f"- `{pid}`" for pid in self.cut]
         return "\n".join(out) + "\n"
 
 
@@ -409,6 +416,7 @@ def build(*, company: str, role: str, family: str, resume_text: str,
                 deferred.append(entry)
                 return
             paragraph = _render(entry, slots)
+            paragraph.section = section
             seen.add(entry["id"])
             reason = _supported(paragraph, approved)
             if reason:
@@ -562,57 +570,28 @@ def scrub_docx(doc, name: str) -> None:
         pass
 
 
-def write_docx(letter: Letter, path: Path) -> Path | None:
-    """A .docx copy for the portals that parse Word more reliably.
+# One page, the same rule as the resume, spent the same way: air first, then
+# type down to 90%, then content. Each rung is (type size, line height in mm,
+# gap between paragraphs in mm). The first is the layout every letter used
+# before the rule, so a letter that already fit looks exactly as it did.
+LADDER = (
+    (10.5, 5.2, 4.0),
+    (10.5, 4.9, 3.0),
+    (10.0, 4.7, 2.6),
+    (9.5, 4.5, 2.2),
+)
 
-    Both formats ship for the same reason the resume ships both: Workday and
-    Taleo read .docx better, most other systems are happy with the PDF, and
-    generating both removes the guess. The PDF is the one to attach when the
-    portal doesn't care.
-
-    No tables and no header/footer, for the same reason the Resume Engine
-    avoids them: they are the classic ATS parse trap.
-    """
-    try:
-        from docx import Document
-        from docx.shared import Pt
-    except ImportError:
-        return None
-    doc = Document()
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(11)
-    for line in letter.header:
-        doc.add_paragraph(line)
-    doc.add_paragraph("")
-    doc.add_paragraph(date.today().strftime("%B %d, %Y"))
-    doc.add_paragraph(letter.company)
-    doc.add_paragraph("")
-    doc.add_paragraph(letter.greeting)
-    for paragraph in letter.paragraphs:
-        doc.add_paragraph("")
-        doc.add_paragraph(paragraph.text)
-    doc.add_paragraph("")
-    doc.add_paragraph(letter.sign_off)
-    doc.add_paragraph(letter.name)
-    scrub_docx(doc, letter.name)
-    doc.save(str(path))
-    return path
+# Cut the weakest evidence first (the list is in fit order, best first), then
+# the bridge. The opening, the close and your own note are what make it a
+# letter to this employer, so the page never takes them.
+_CUTTABLE = ("evidence", "bridge")
 
 
-def write_pdf(letter: Letter, path: Path) -> Path | None:
-    """The letter as a PDF -- the copy that gets uploaded. Best-effort.
+def _draw(letter: Letter, rung: tuple[float, float, float]):
+    """The letter laid out at one rung of LADDER, as an unsaved FPDF."""
+    from fpdf import FPDF
 
-    Same layout rules as the resume: one column, one text flow, a core
-    PostScript font, and no tables, text boxes, headers or footers. A cover
-    letter is read by a person more often than by a parser, but it goes up the
-    same pipe as the resume and gets read by the same machine first.
-    """
-    try:
-        from fpdf import FPDF
-    except ImportError:
-        return None
-
+    size, lh, gap = rung
     pdf = FPDF("P", "mm", "Letter")
     pdf.set_auto_page_break(auto=True, margin=18)
     # Same document properties the Resume Engine ships: empty rather than
@@ -628,9 +607,10 @@ def write_pdf(letter: Letter, path: Path) -> Path | None:
     pdf.set_y(20)
 
     width = pdf.w - pdf.l_margin - pdf.r_margin
+    line = lh * 5.0 / 5.2          # the short lines: date, company, sign-off
 
-    def block(text: str, *, size: float = 10.5, bold: bool = False,
-              gray: int = 40, lh: float = 5.0) -> None:
+    def block(text: str, *, size: float = size, bold: bool = False,
+              gray: int = 40, lh: float = line) -> None:
         pdf.set_font("Helvetica", "B" if bold else "", size)
         pdf.set_text_color(gray, gray, gray)
         pdf.set_x(pdf.l_margin)
@@ -638,22 +618,115 @@ def write_pdf(letter: Letter, path: Path) -> Path | None:
 
     if letter.header:
         block(letter.header[0], size=15, bold=True, gray=20, lh=7)
-        for line in letter.header[1:]:
-            block(line, size=9, gray=80, lh=4.5)
-    pdf.ln(6)
+        for row in letter.header[1:]:
+            block(row, size=9, gray=80, lh=4.5)
+    pdf.ln(gap + 2)
 
     block(date.today().strftime("%B %d, %Y"), gray=80)
     block(letter.company)
-    pdf.ln(5)
+    pdf.ln(gap + 1)
     block(letter.greeting)
 
     for paragraph in letter.paragraphs:
-        pdf.ln(4)
-        block(paragraph.text, lh=5.2)
+        pdf.ln(gap)
+        block(paragraph.text, lh=lh)
 
-    pdf.ln(6)
+    pdf.ln(gap + 2)
     block(letter.sign_off)
     block(letter.name)
+    return pdf
 
+
+def fit(letter: Letter) -> tuple[float, float, float]:
+    """Make the letter one page, and return the rung of LADDER that does it.
+
+    Content goes only when the tightest rung still runs over, weakest
+    evidence first. A cut paragraph goes on `letter.cut`, which APPLY.md and
+    COVER_LETTER.md both list, so the page never takes something quietly.
+    Without fpdf there is nothing to measure and the letter is left alone.
+    """
+    try:
+        import fpdf  # noqa: F401
+    except ImportError:
+        return LADDER[0]
+    while True:
+        for rung in LADDER:
+            if _draw(letter, rung).page_no() == 1:
+                return rung
+        weakest = next((p for section in _CUTTABLE
+                        for p in reversed(letter.paragraphs)
+                        if p.section == section), None)
+        if weakest is None:
+            # Only the opening, the close and your note are left. The note is
+            # the likely cause, and it is yours to shorten.
+            return LADDER[-1]
+        letter.paragraphs.remove(weakest)
+        letter.cut.append(weakest.id)
+
+
+def write_docx(letter: Letter, path: Path,
+               rung: tuple[float, float, float] = LADDER[0]) -> Path | None:
+    """A .docx copy for the portals that parse Word more reliably.
+
+    Both formats ship for the same reason the resume ships both: Workday and
+    Taleo read .docx better, most other systems are happy with the PDF, and
+    generating both removes the guess. The PDF is the one to attach when the
+    portal doesn't care.
+
+    No tables and no header/footer, for the same reason the Resume Engine
+    avoids them: they are the classic ATS parse trap.
+
+    Nothing here can count Word's pages, so this copy follows the PDF that
+    `fit` measured: the same margins, type scaled by the same rung, and space
+    after each paragraph instead of empty paragraphs. Calibri at 11pt sets
+    narrower and tighter than Helvetica at 10.5, so it runs shorter.
+    """
+    try:
+        from docx import Document
+        from docx.shared import Mm, Pt
+    except ImportError:
+        return None
+    size, _lh, gap = rung
+    doc = Document()
+    for section in doc.sections:
+        section.left_margin = section.right_margin = Mm(22)
+        section.top_margin, section.bottom_margin = Mm(20), Mm(18)
+    style = doc.styles["Normal"]
+    style.font.name = "Calibri"
+    # Word keeps half points and truncates the rest; round instead.
+    style.font.size = Pt(round(22 * size / LADDER[0][0]) / 2)
+    style.paragraph_format.space_before = Pt(0)
+    style.paragraph_format.space_after = Pt(0)
+
+    def add(text: str, after_mm: float = 0) -> None:
+        doc.add_paragraph(text).paragraph_format.space_after = Mm(after_mm)
+
+    for i, row in enumerate(letter.header):
+        add(row, gap + 2 if i == len(letter.header) - 1 else 0)
+    add(date.today().strftime("%B %d, %Y"))
+    add(letter.company, gap + 1)
+    add(letter.greeting, gap)
+    for paragraph in letter.paragraphs:
+        add(paragraph.text, gap)
+    add(letter.sign_off)
+    add(letter.name)
+    scrub_docx(doc, letter.name)
+    doc.save(str(path))
+    return path
+
+
+def write_pdf(letter: Letter, path: Path,
+              rung: tuple[float, float, float] = LADDER[0]) -> Path | None:
+    """The letter as a PDF -- the copy that gets uploaded. Best-effort.
+
+    Same layout rules as the resume: one column, one text flow, a core
+    PostScript font, and no tables, text boxes, headers or footers. A cover
+    letter is read by a person more often than by a parser, but it goes up the
+    same pipe as the resume and gets read by the same machine first.
+    """
+    try:
+        pdf = _draw(letter, rung)
+    except ImportError:
+        return None
     pdf.output(str(path))
     return path
