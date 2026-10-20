@@ -1124,10 +1124,73 @@ def test_wiring() -> None:
           not offenders, ", ".join(offenders))
 
 
+def test_letter_page() -> None:
+    section("cover letter: one page")
+    built = letter_mod.build(company="Meadowlark Health", role="Staff Accountant",
+                             family="accounting", resume_text=RESUME, jd_text=JD)
+    before = [p.id for p in built.paragraphs]
+    rung = letter_mod.fit(built)
+    check("a letter that fits keeps the old layout", rung == letter_mod.LADDER[0],
+          str(rung))
+    check("and loses nothing", [p.id for p in built.paragraphs] == before
+          and not built.cut, str(built.cut))
+    check("every chosen paragraph knows its section",
+          all(p.section for p in built.paragraphs),
+          str([(p.id, p.section) for p in built.paragraphs]))
+
+    # Six more evidence paragraphs, each worse than the last, and a note.
+    long = letter_mod.build(company="Meadowlark Health", role="Staff Accountant",
+                            family="accounting", resume_text=RESUME, jd_text=JD,
+                            note="I closed the books for a clinic group before.")
+    filler = ("Reconciled the subledgers to the general ledger every month and "
+              "wrote up each variance for the controller. ") * 4
+    at = next(i for i, p in enumerate(long.paragraphs) if p.section == "bridge")
+    for n in range(6):
+        long.paragraphs.insert(at + n, letter_mod.Paragraph(
+            id=f"ev.extra{n}", template=filler, text=filler, section="evidence"))
+    sections = {p.id: p.section for p in long.paragraphs}
+    rung = letter_mod.fit(long)
+    check("an overlong letter comes out at one page",
+          letter_mod._draw(long, rung).page_no() == 1)
+    check("air and type go before any paragraph does",
+          rung == letter_mod.LADDER[-1], str(rung))
+    check("the weakest evidence is cut first",
+          long.cut[:1] == ["ev.extra5"], str(long.cut))
+    check("only evidence or the bridge is ever cut",
+          all(sections[pid] in ("evidence", "bridge") for pid in long.cut),
+          str(long.cut))
+    kept = {p.section or "note" for p in long.paragraphs}
+    check("the opening, the close and your note stay",
+          {"opening", "close", "note"} <= kept, str(kept))
+    check("COVER_LETTER.md names what the page cut",
+          all(f"`{pid}`" in long.to_markdown() for pid in long.cut))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = letter_mod.write_pdf(long, Path(tmp) / "letter.pdf", rung)
+        pages = len(re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
+        check("the written PDF is one page", pages == 1, f"{pages} pages")
+        docx = letter_mod.write_docx(long, Path(tmp) / "letter.docx", rung)
+        if docx is not None:
+            from docx import Document
+            size = Document(str(docx)).styles["Normal"].font.size.pt
+            check("the Word copy shrinks its type by the same rung",
+                  size == round(22 * rung[0] / letter_mod.LADDER[0][0]) / 2,
+                  str(size))
+
+    # A note too long for any page is yours: it is never cut, and fit stops.
+    wordy = letter_mod.build(company="Meadowlark Health", role="Staff Accountant",
+                             family="accounting", resume_text=RESUME, jd_text=JD,
+                             note="I want to work here. " * 220)
+    letter_mod.fit(wordy)
+    check("an endless note is kept, and fit still returns",
+          any(p.user_written for p in wordy.paragraphs))
+
+
 def main() -> int:
     which = sys.argv[1].lstrip("-") if len(sys.argv) > 1 else "all"
     tests = {
-        "letter": test_letter, "guard": test_guard,
+        "letter": test_letter, "letter_page": test_letter_page,
+        "guard": test_guard,
         "divisions": test_board_divisions, "applog": test_applog,
         "auto": test_auto, "weekly": test_weekly, "discord": test_discord,
         "answers": test_answers, "candidates": test_candidates_and_jd,
