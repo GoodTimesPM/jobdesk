@@ -43,7 +43,7 @@ import jobdesk
 from jobdesk import paths, profile
 from jobdesk.app import (access, actions, api, archive, desktop, jdstruct,
                          market, net, phone, resume_import, runner, server,
-                         setup, stars, tomlpatch)
+                         setup, shortcut, stars, tomlpatch)
 
 PASS, FAIL = 0, 0
 
@@ -1545,6 +1545,52 @@ def test_one_server() -> None:
             desktop.__version__ = original
 
 
+def test_taskbar_id() -> None:
+    """A pinned JobDesk and its open window share one taskbar button.
+
+    Windows groups a button by AppUserModelID. The window declared one and the
+    link did not, so the pin was grouped as pythonw.exe and the window as
+    JobDesk, and clicking the pin put a second icon beside it.
+    """
+    section("one taskbar button")
+    check("the link and the window declare the same ID",
+          desktop.APP_ID == shortcut.APP_ID)
+    if sys.platform != "win32":
+        print("  (skipped the .lnk checks: not Windows)")
+        return
+
+    tmp = Path(tempfile.mkdtemp(prefix="jobdesk-lnk-"))
+    desk, pins = tmp / "Desktop", tmp / "TaskBar"
+    pins.mkdir(parents=True)
+    was = shortcut.desktop_dir, shortcut.pinned_dir
+    shortcut.desktop_dir, shortcut.pinned_dir = (lambda: desk), (lambda: pins)
+    try:
+        link = shortcut.create()
+        check("a new link carries the ID", shortcut.has_app_id(link))
+
+        # A pin as Explorer copied it before links carried the ID, and some
+        # other program's pin, which is none of our business.
+        def plain(path: Path, args: str) -> None:
+            shortcut._powershell(
+                "$sc = (New-Object -ComObject WScript.Shell).CreateShortcut("
+                f"{shortcut._quote(path)}); $sc.TargetPath = "
+                f"{shortcut._quote(shortcut.pythonw())}; $sc.Arguments = "
+                f"{shortcut._quote(args)}; $sc.Save()")
+        plain(pins / "JobDesk.lnk", "-m jobdesk.app")
+        plain(pins / "Other.lnk", "-m colony dash")
+        stale = shortcut.stale_links()
+        check("an old pin is found", stale == [pins / "JobDesk.lnk"], str(stale))
+
+        fixed = shortcut.repair_links()
+        check("and stamped", fixed == [pins / "JobDesk.lnk"], str(fixed))
+        check("nothing is left to stamp", shortcut.stale_links() == [])
+        check("another program's pin is left alone",
+              not shortcut.has_app_id(pins / "Other.lnk"))
+    finally:
+        shortcut.desktop_dir, shortcut.pinned_dir = was
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # -- the star ---------------------------------------------------------------
 
 def test_stars() -> None:
@@ -1713,6 +1759,7 @@ def main() -> int:
     test_api()
     test_stars()
     test_one_server()
+    test_taskbar_id()
     test_settings()
     test_delivery_edit()
     test_about()
