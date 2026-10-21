@@ -43,8 +43,9 @@ def log(message: str) -> None:
 # sets one is grouped by its executable. Every pywebview app on this machine
 # runs under the same pythonw.exe, so without this JobDesk shares a taskbar
 # button -- and an icon -- with whatever else is open. Must run before the
-# first window exists, which is why launch() calls it first.
-APP_ID = "GoodTimesPM.JobDesk"
+# first window exists, which is why launch() calls it first. The links carry
+# the same ID (see shortcut.py), or a pin and its window get two buttons.
+APP_ID = shortcut.APP_ID
 
 
 def _set_app_id() -> None:
@@ -53,6 +54,20 @@ def _set_app_id() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     except Exception:
         pass
+
+
+def _repair_links() -> None:
+    """Give older Desktop and taskbar links the AppUserModelID.
+
+    A pin is Explorer's own copy of the link, so rewriting the Desktop one
+    never reached it. Checking costs a few file reads; PowerShell only starts
+    when a link actually needs the stamp.
+    """
+    try:
+        for link in shortcut.repair_links():
+            log(f"gave {link.name} in {link.parent} the taskbar ID")
+    except Exception as exc:
+        log(f"could not stamp the taskbar ID on old links: {exc}")
 
 
 def _app_window(title: str):
@@ -285,6 +300,7 @@ def launch(port: int = server.DEFAULT_PORT, *, window: bool = True) -> int:
         text_select=True,
     )
     threading.Thread(target=_set_window_icon, args=(TITLE,), daemon=True).start()
+    threading.Thread(target=_repair_links, daemon=True).start()
     try:
         # `private_mode=True` is pywebview's default and hands WebView2 an
         # incognito profile, so every localStorage key the page wrote is thrown
