@@ -77,6 +77,12 @@ Scan it and JobDesk opens on the phone, full queue, full packets.
 
 Add it to the home screen and it gets its own icon and its own window.
 
+On a phone, Jobs, Applied and Archive show each row as a tile, a card with
+every field labelled, so a posting reads top to bottom without scrolling
+sideways. The column headers become sort buttons above the tiles. The
+Rows/Tiles button on each of those tabs switches between the two, and each
+device remembers its own choice. A desktop starts in rows.
+
 The server the phone talks to stays up for weeks. It checks its own code once
 a minute and starts a fresh copy of itself after an update, so the phone is
 never answered by last month's version.
