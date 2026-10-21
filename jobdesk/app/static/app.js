@@ -642,7 +642,61 @@ function orderJobsHead() {
   });
 }
 
-PHONE.addEventListener("change", () => { orderJobsHead(); draw(); });
+PHONE.addEventListener("change", () => { orderJobsHead(); draw(); applyLayout(); });
+
+/* -- rows or tiles -- */
+
+/* Held upright, a phone shows two or three columns of a row and the rest is
+   a sideways scroll per row. Tiles stack each row into a card, every field
+   labelled, so a posting reads top to bottom. The table markup stays the
+   same and the stylesheet does the stacking, which keeps sorting, the star
+   and the expanded posting working without a second renderer.
+
+   The choice is per device, so it lives in localStorage and not in the
+   settings file the phone and the desktop share. A phone starts in tiles and
+   a desktop in rows; the button overrides either. `layoutChoice` covers a
+   browser that refuses localStorage, so the button still works for the
+   visit. */
+const LAYOUT_KEY = "jobdesk.layout";
+let layoutChoice = null;
+try { layoutChoice = localStorage.getItem(LAYOUT_KEY); } catch { /* private mode */ }
+
+function layout() {
+  if (layoutChoice === "rows" || layoutChoice === "tiles") return layoutChoice;
+  return narrow() ? "tiles" : "rows";
+}
+
+function applyLayout() {
+  const now = layout();
+  document.documentElement.dataset.layout = now;
+  $$(".layout-toggle").forEach((b) => {
+    b.textContent = now === "tiles" ? "Rows" : "Tiles";
+    b.title = now === "tiles" ? "Show these as a table" : "Show each row as a card";
+  });
+}
+
+$$(".layout-toggle").forEach((b) => b.addEventListener("click", () => {
+  layoutChoice = layout() === "tiles" ? "rows" : "tiles";
+  try { localStorage.setItem(LAYOUT_KEY, layoutChoice); } catch { /* private mode */ }
+  applyLayout();
+}));
+
+applyLayout();
+
+/* A tile has no header row above it, so every cell carries its column's
+   name for the stylesheet to print. The star, the score and the lead line
+   explain themselves. Hidden columns have no cell, so only the shown
+   headers are counted. */
+function labelCells(tableSel) {
+  const names = $$(tableSel + " thead th").filter((th) => !th.hidden)
+    .map((th) => th.textContent.trim());
+  $$(tableSel + " tbody > tr:not(.detail)").forEach((tr) => {
+    Array.from(tr.children).forEach((td, i) => {
+      if (td.matches(".star, .score, .lead") || !names[i]) return;
+      td.dataset.label = names[i];
+    });
+  });
+}
 
 
 /* The search box redraws after typing stops, not on every key. A queue of
@@ -672,7 +726,7 @@ function draw() {
         text: (up ? "▲" : "▼") + Math.abs(job.score - job.was) }));
     }
 
-    const title = el("td", {}, job.title);
+    const title = el("td", { class: "lead" }, job.title);
     if (job.applied) title.append(el("span", { class: "pill", text: job.app_status }));
     else if (job.prepared) title.append(el("span", { class: "pill", text: "packet ready" }));
 
@@ -689,6 +743,7 @@ function draw() {
 
     if (state.open === job.uid) body.append(detailRow(job));
   });
+  labelCells("#jobs");
 
   drawMoreCount();
   $("#jobs-empty").hidden = rows.length > 0;
@@ -1229,7 +1284,7 @@ function drawApps() {
     const tr = el("tr", { class: "row" + (row.follow_up_overdue ? " overdue" : "") });
     tr.dataset.id = row.id;
 
-    const company = el("td", {}, row.company);
+    const company = el("td", { class: "lead" }, row.company);
 
     // The colour used to be a badge in this cell, next to the company name,
     // which meant the row said "rejected" twice: once in a red bubble and
@@ -1258,6 +1313,7 @@ function drawApps() {
 
     if (apps.open === row.id) body.append(appDetail(row));
   });
+  labelCells("#apps");
 
   $("#app-counts").textContent =
     `${rows.length} of ${plural(apps.rows.length, "application")}`;
@@ -1663,7 +1719,7 @@ function drawArchive(data) {
   const body = $("#arc-rows");
   body.textContent = "";
   data.rows.forEach((row) => {
-    const title = el("td", {},
+    const title = el("td", { class: "lead" },
       webUrl(row.url) ? el("a", { href: row.url, target: "_blank",
         rel: "noopener noreferrer", text: row.title || "(untitled)" })
               : (row.title || "(untitled)"));
@@ -1672,6 +1728,7 @@ function drawArchive(data) {
       cell(when(row.first_seen), "when"), cell(when(row.last_seen), "when"),
       cell(row.live_days === null ? "—" : row.live_days + "d", "num")));
   });
+  labelCells("#arc");
 
   const from = data.matched ? archive.offset + 1 : 0;
   const to = Math.min(archive.offset + archive.limit, data.matched);

@@ -12,6 +12,15 @@
 "use strict";
 
 (function () {
+  // Rows or tiles, per device. app.js owns the switch; this only keeps a
+  // phone from drawing a table and then snapping into cards.
+  var layout = null;
+  try { layout = localStorage.getItem("jobdesk.layout"); } catch (e) { layout = null; }
+  if (layout !== "rows" && layout !== "tiles") {
+    layout = window.matchMedia("(max-width: 700px)").matches ? "tiles" : "rows";
+  }
+  document.documentElement.dataset.layout = layout;
+
   var look = null;
   try { look = JSON.parse(localStorage.getItem("jobdesk.look") || "null"); } catch (e) { look = null; }
   if (!look) return;

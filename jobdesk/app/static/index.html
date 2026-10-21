@@ -75,6 +75,7 @@
         <option value="">none saved</option>
       </select>
     </label>
+    <button class="ghost layout-toggle" type="button">Tiles</button>
     <button id="sweep" class="ghost">Run the radar</button>
     <details class="more" id="jobs-more">
       <summary>More<span class="more-count" id="more-count"></span></summary>
@@ -123,7 +124,7 @@
     </div>
   </form>
 
-  <div class="scroller">
+  <div class="scroller can-tile">
     <table class="grid" id="jobs">
       <thead>
         <tr>
@@ -166,6 +167,7 @@
     </label>
     <label class="check"><input type="checkbox" id="sent-only"> Actually sent only</label>
     <button id="log-manual" class="ghost">Log one from elsewhere</button>
+    <button class="ghost layout-toggle" type="button">Tiles</button>
     <div class="spacer"></div>
     <div class="counts" id="app-counts"></div>
   </section>
@@ -192,7 +194,7 @@
     </div>
   </form>
 
-  <div class="scroller">
+  <div class="scroller can-tile">
     <table class="grid" id="apps">
       <thead>
         <tr>
@@ -275,13 +277,14 @@
       <input type="date" id="arc-since">
     </label>
     <button id="arc-go">Search</button>
+    <button class="ghost layout-toggle" type="button">Tiles</button>
     <div class="spacer"></div>
     <div class="counts" id="arc-counts"></div>
   </section>
 
   <div class="split">
     <div>
-      <div class="scroller">
+      <div class="scroller can-tile">
         <table class="grid" id="arc">
           <thead>
             <tr>

@@ -347,7 +347,9 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
    press. It stays visible on touch, where there is no hover to wait for. */
 .grid th.star, .grid td.star { width: 1%; padding-left: 12px; padding-right: 2px; }
 .grid th.star { color: var(--ink-faint); }
-.starbtn {
+/* button.starbtn for the reason button.chip has it: `button:not(.tab)`
+   outranks a bare class, and painted every star as a filled accent button. */
+.starbtn, button.starbtn {
   background: none; border: 0; padding: 0 2px; cursor: pointer; line-height: 1;
   font-size: 16px; color: var(--ink-faint); opacity: 0;
   transition: opacity .12s, color .12s;
@@ -804,6 +806,10 @@ option.dead     { color: var(--bad); }
  * per row was the other candidate, and it loses the thing a table is for,
  * which is scanning down one column with your eye. So the table stays a
  * table and the page lets it be wider than the phone. See `.scroller`.
+ *
+ * Reading one posting at a time is the other use, and a sideways scroll per
+ * row is the wrong shape for it. So cards came back as an option and not a
+ * replacement: the Tiles button, below under "rows or tiles".
  */
 @media (max-width: 700px) {
   .bar { height: auto; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
@@ -850,6 +856,82 @@ option.dead     { color: var(--bad); }
 
   .panel { padding: 13px; }
   .manual .fields, .fields { grid-template-columns: 1fr; }
+}
+
+/* ── rows or tiles ──────────────────────────────────────────────────────── */
+/*
+ * The same table, restyled. Each row turns into a card, each cell into a
+ * labelled line (app.js copies the column name onto the cell as
+ * `data-label`), and the header row turns into a strip of sort buttons. A
+ * phone starts here; the toggle on Jobs, Applied and Archive switches either
+ * way, per device. Everything is under `:root[data-layout="tiles"]
+ * .can-tile` so the phone rules above, which stop cells wrapping and pin the
+ * expanded row for a sideways scroll, lose to these.
+ */
+:root[data-layout="tiles"] .can-tile {
+  overflow: visible; border: 0; background: none; box-shadow: none;
+}
+:root[data-layout="tiles"] .can-tile .grid,
+:root[data-layout="tiles"] .can-tile .grid > thead,
+:root[data-layout="tiles"] .can-tile .grid > tbody {
+  display: block; background: none; overflow: visible;
+}
+:root[data-layout="tiles"] .can-tile .grid > thead > tr {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+}
+:root[data-layout="tiles"] .can-tile .grid th {
+  border: 1px solid var(--line); border-radius: 99px; padding: 5px 11px;
+  background: var(--card); width: auto;
+}
+/* A header that does not sort has nothing to do once the column is gone, and
+   a chip that looks pressable and is not is worse than no chip. */
+:root[data-layout="tiles"] .can-tile .grid th[hidden],
+:root[data-layout="tiles"] .can-tile .grid th:not(.sortable) { display: none; }
+:root[data-layout="tiles"] .can-tile .grid > tbody {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
+}
+:root[data-layout="tiles"] .can-tile .grid > tbody > tr {
+  display: grid; grid-template-columns: 1fr auto; align-content: start;
+  column-gap: 8px; padding: 10px 12px; min-width: 0;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+:root[data-layout="tiles"] .can-tile .grid > tbody > tr.row:hover { border-color: var(--accent); }
+:root[data-layout="tiles"] .can-tile .grid tr.row:hover td { background: none; }
+:root[data-layout="tiles"] .can-tile .grid td {
+  grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline;
+  padding: 2px 0; border: 0; min-width: 0; max-width: none; text-align: left;
+  white-space: normal; overflow: visible; overflow-wrap: anywhere;
+}
+:root[data-layout="tiles"] .can-tile .grid td:empty { display: none; }
+:root[data-layout="tiles"] .can-tile .grid td[data-label]::before {
+  content: attr(data-label); flex: 0 0 82px; font-size: 11px;
+  letter-spacing: .3px; text-transform: uppercase; color: var(--ink-faint);
+}
+/* Score on the left of the top line and the star on the right of it, then
+   the title (or the company, on Applied) on a line of its own. */
+:root[data-layout="tiles"] .can-tile .grid td.score { grid-column: 1; grid-row: 1; }
+:root[data-layout="tiles"] .can-tile .grid td.star {
+  grid-column: 2; grid-row: 1; width: auto; padding: 0; justify-content: flex-end;
+}
+:root[data-layout="tiles"] .can-tile .grid td.lead {
+  display: block; font-weight: 600; font-size: 15px; padding: 3px 0 6px;
+}
+:root[data-layout="tiles"] .can-tile .grid tr.overdue td:first-child { box-shadow: none; }
+:root[data-layout="tiles"] .can-tile .grid > tbody > tr.overdue {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+/* The expanded posting takes the full width under its card. */
+:root[data-layout="tiles"] .can-tile .grid > tbody > tr.detail {
+  grid-column: 1 / -1; display: block; padding: 0; background: var(--ground);
+}
+:root[data-layout="tiles"] .can-tile .grid tr.detail > td {
+  display: block; width: auto; padding: 12px;
+}
+:root[data-layout="tiles"] .can-tile .detail td > *,
+:root[data-layout="tiles"] .can-tile .detail .jd {
+  max-width: 100%; position: static;
 }
 
 /* ── the packet, in the page ────────────────────────────────────────────── */
