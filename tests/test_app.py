@@ -775,6 +775,35 @@ def test_home_screen() -> None:
         check(f"the page asks for {tag}", tag in page)
 
 
+def test_tiles() -> None:
+    """Jobs, Applied and Archive can each be read as cards on a phone.
+
+    The tiles are the same table restyled, so the wiring is three things per
+    table: the switch on its tab, the marker the stylesheet keys on, and the
+    labels app.js copies onto its cells. Any one missing and that tab
+    silently stays a sideways scroll, or shows cards with no field names.
+    """
+    section("rows or tiles")
+    static = ROOT / "jobdesk" / "app" / "static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    script = (static / "app.js").read_text(encoding="utf-8")
+    style = (static / "app.css").read_text(encoding="utf-8")
+    for view, table in (("jobs", "jobs"), ("applied", "apps"), ("archive", "arc")):
+        start = page.index(f'id="view-{view}"')
+        body = page[start:page.index("</main>", start)]
+        check(f"{view} has the Rows/Tiles switch", 'class="ghost layout-toggle"' in body)
+        check(f"{view}'s table can tile",
+              re.search(r'class="scroller can-tile">\s*<table class="grid" '
+                        rf'id="{table}"', body) is not None)
+        check(f"{view}'s cells are labelled", f'labelCells("#{table}")' in script)
+    check("the layout is set before the first paint",
+          "dataset.layout" in (static / "theme.js").read_text(encoding="utf-8"))
+    check("the label is printed on each tile line", "attr(data-label)" in style)
+    # `button:not(.tab)` carries a class's weight, so a bare `.starbtn` lost
+    # to it and every star was a filled accent button.
+    check("the star outranks the generic button rule", "button.starbtn" in style)
+
+
 def test_phone() -> None:
     """The panel is drawn from one payload, so the payload has to be complete.
 
@@ -1769,6 +1798,7 @@ def main() -> int:
     test_access()
     test_phone()
     test_home_screen()
+    test_tiles()
     test_pasted_jd()
     test_no_writes()
     test_override()
