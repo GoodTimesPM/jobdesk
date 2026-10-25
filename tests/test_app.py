@@ -791,7 +791,13 @@ def test_tiles() -> None:
     for view, table in (("jobs", "jobs"), ("applied", "apps"), ("archive", "arc")):
         start = page.index(f'id="view-{view}"')
         body = page[start:page.index("</main>", start)]
-        check(f"{view} has the Rows/Tiles switch", 'class="ghost layout-toggle"' in body)
+        # Jobs has four ways to draw its list, Tiles among them, so it has
+        # its own switch in place of the two-way one.
+        if view == "jobs":
+            check("jobs has the List/Compact/Tiles/Timeline switch",
+                  'data-style="tiles"' in body)
+        else:
+            check(f"{view} has the Rows/Tiles switch", 'class="ghost layout-toggle"' in body)
         check(f"{view}'s table can tile",
               re.search(r'class="scroller can-tile">\s*<table class="grid" '
                         rf'id="{table}"', body) is not None)
@@ -802,6 +808,387 @@ def test_tiles() -> None:
     # `button:not(.tab)` carries a class's weight, so a bare `.starbtn` lost
     # to it and every star was a filled accent button.
     check("the star outranks the generic button rule", "button.starbtn" in style)
+
+
+def test_jobs_shell() -> None:
+    """The sidebar, the four list styles, the reader and the extra filters.
+
+    Each is wired in three or four places: a control in the page, a list in
+    app.js, the same list in theme.js (so the first paint is already right)
+    and, for the filters, a key prefs.py will accept inside a saved view. A
+    key missing from any one is a filter that works until it is saved, or a
+    style that flashes the wrong layout on every launch.
+    """
+    section("the Jobs shell")
+    from jobdesk.app import prefs
+    static = ROOT / "jobdesk" / "app" / "static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    script = (static / "app.js").read_text(encoding="utf-8")
+    early = (static / "theme.js").read_text(encoding="utf-8")
+    style = (static / "app.css").read_text(encoding="utf-8")
+
+    check("the menu is a sidebar", 'class="side-nav"' in page and 'id="side-fold"' in page)
+    check("the menu folds, and the fold is set before the first paint",
+          'dataset.side' in script and '"jobdesk.side"' in early)
+    for name in ("list", "compact", "tiles", "timeline"):
+        check(f"the {name} style has a button", f'data-style="{name}"' in page)
+        check(f"the {name} style is known before the first paint", f'"{name}"' in early)
+        check(f"the {name} style is styled", f'data-jobs="{name}"' in style)
+    check("a phone starts on the timeline",
+          'narrow() ? "timeline" : "list"' in script and 'phone ? "timeline" : "list"' in early)
+    check("there is a reader pane", 'id="reader"' in page and "function drawReader" in script)
+
+    # Every filter a saved view keeps has a control on the page, a place in
+    # currentFilters(), and a default the server validates against.
+    controls = {"search": "search", "score_min": "score-min", "score_max": "score-max",
+                "hide_applied": "hide-applied", "hide_prepared": "hide-prepared",
+                "remote_only": "remote-only", "starred_only": "starred-only",
+                "jobs_sort": "order", "has_pay": "has-pay", "market_up": "market-up",
+                "posted_within": "posted-within", "source": "source"}
+    for key in prefs.VIEW_FILTERS:
+        # The search text is only ever part of a view, never a setting.
+        check(f"{key} is a default", key == "search" or key in prefs.DEFAULTS)
+        if key == "tier":
+            check("the tier chips are on the page", 'data-tier="A"' in page)
+        else:
+            check(f"{key} has a control", f'id="{controls.get(key, key)}"' in page)
+    view = {"name": "Fresh A", "filters": {"tier": "A", "posted_within": "3",
+            "source": "greenhouse", "has_pay": True, "market_up": False}}
+    check("a view with the new filters saves", prefs._valid("views", [view]))
+    view["filters"]["tier"] = "Z"
+    check("a made-up tier does not", not prefs._valid("views", [view]))
+    view["filters"]["tier"] = "A"
+    view["filters"]["posted_within"] = 3
+    check("posted_within is a string, as the menu sends it",
+          not prefs._valid("views", [view]))
+
+
+def test_custom_colors() -> None:
+    """Custom colors and saved themes, which the server checks key by key.
+
+    A palette is three HSL triples, a fade style and a map of hand-picked
+    hex colors. Anything else in it would be written into the page's inline
+    style by app.js and by theme.js before the first paint, so the server
+    turns away a palette with an unknown key, an out-of-range number or a
+    color that is not a plain hex.
+    """
+    section("custom colors")
+    from jobdesk.app import prefs
+    static = ROOT / "jobdesk" / "app" / "static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    script = (static / "app.js").read_text(encoding="utf-8")
+    early = (static / "theme.js").read_text(encoding="utf-8")
+    custom = json.loads(json.dumps(prefs.DEFAULTS["custom"]))
+    check("the default palette is valid", prefs._valid("custom", custom))
+    check("saved themes start empty", prefs.DEFAULTS["themes"] == [])
+    check("the editor has a place on the page", 'id="custom-editor"' in page)
+    check("no scheme group is named after FitNext", 'label="FitNext' not in page)
+    check("Randomize sits by One color and Fade", 'class: "ghost randomize"' in script and "function randomize(d)" in script)
+    # Randomize draws hue 0-359 and color and light 0-100; both ends must save.
+    for ends in ([0, 0, 0], [359, 100, 100]):
+        c = dict(custom, bg=list(ends), ac=list(ends), a=list(ends), b=list(ends))
+        check(f"a randomized palette at {ends} saves", prefs._valid("custom", c))
+    check("theme.js puts the worked-out colors back before the first paint",
+          "look.paint" in early and "fade-custom" in script)
+    for name, change in [
+        ("a hue past 359", lambda c: c["bg"].__setitem__(0, 360)),
+        ("a lightness past 100", lambda c: c["ac"].__setitem__(2, 101)),
+        ("a pair, not a triple", lambda c: c.__setitem__("a", [10, 20])),
+        ("a made-up fade style", lambda c: c.__setitem__("fade_style", "spiral")),
+        ("an unknown key", lambda c: c.__setitem__("extra", 1)),
+        ("a color that is not hex", lambda c: c.__setitem__("over", {"ink": "red; x: y"})),
+        ("a token that does not exist", lambda c: c.__setitem__("over", {"shadow": "#000000"})),
+    ]:
+        bad = json.loads(json.dumps(custom))
+        change(bad)
+        check(f"{name} is turned away", not prefs._valid("custom", bad))
+    good = json.loads(json.dumps(custom))
+    good["over"] = {"ink": "#112233"}
+    check("a hand-picked hex color is kept", prefs._valid("custom", good))
+    theme = {k: custom[k] for k in ("bg", "ac", "fade", "a", "b", "fade_style", "over")}
+    theme.update(id="my-1", name="Night drive")
+    check("a saved theme is valid", prefs._valid("themes", [theme]))
+    check("two with one id are not", not prefs._valid("themes", [theme, dict(theme)]))
+    check("a theme with no name is not", not prefs._valid("themes", [dict(theme, name="")]))
+    check("a theme named past 40 characters is not",
+          not prefs._valid("themes", [dict(theme, name="x" * 41)]))
+    many = [dict(theme, id=f"my-{i}") for i in range(prefs.MAX_THEMES + 1)]
+    check(f"more than {prefs.MAX_THEMES} themes are not", not prefs._valid("themes", many))
+
+
+def test_phone_load() -> None:
+    """What kept a phone from freezing and from losing the tab.
+
+    The lists draw a page of rows at a time; all 800 at once was 17,000
+    elements rebuilt on every filter change. A repeated row never gets a
+    backdrop filter, because each one is a GPU layer and 200 of them cost a
+    phone the tab. And the page asks for the whole screen, or the safe-area
+    insets are 0 on an iPhone and the bottom bar runs into the corners.
+    """
+    section("phone load")
+    import re
+    static = ROOT / "jobdesk" / "app" / "static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    script = (static / "app.js").read_text(encoding="utf-8")
+    style = (static / "app.css").read_text(encoding="utf-8")
+    check("Jobs draws a page at a time", "pageRows(body, rows, (job) =>" in script)
+    check("Applied draws a page at a time", "pageRows(body, rows, (row) =>" in script)
+    check("the page asks for the whole screen", "viewport-fit=cover" in page)
+    blurred_rows = [rule for rule in re.findall(r"([^{}]+)\{([^{}]*)\}", style)
+                    if re.search(r"\b(tr|li)\b[^,]*$", rule[0].strip())
+                    and re.search(r"backdrop-filter:\s*(var|blur)", rule[1])]
+    check("no repeated row has a backdrop filter", not blurred_rows, blurred_rows[:2])
+    check("the Applied count is every application",
+          'String(apps.rows.length) : ""' in script)
+
+
+def test_skill_gaps() -> None:
+    """What a posting asks for that the profile cannot back up.
+
+    Only lines under a requirements heading count, a "preferred:" lead-in
+    makes the lines after it preferred, years and degrees are gaps of their
+    own, a benefits section is never read, and the Growth report counts a
+    gap once per posting.
+    """
+    section("skill gaps")
+    from jobdesk.app import skillgap
+    posting = (
+        "<p><strong>About us</strong></p><p>We use Outlook for everything.</p>"
+        "<p><strong>Requirements</strong></p><ul>"
+        "<li>Bachelor's degree in accounting required</li>"
+        "<li>5+ years of accounts payable experience</li>"
+        "<li>Experience with QuickBooks, Excel and Outlook</li>"
+        "<li>Knowledge of the following preferred:</li>"
+        "<li>Budgeting and forecasting</li>"
+        "<li>Retail or SSMS</li></ul>"
+        "<p><strong>Preferred Qualifications</strong></p><ul><li>Master's degree</li></ul>"
+        "<p><strong>Benefits</strong></p><ul><li>Generous PTO and a SaaS stipend</li></ul>")
+    g = skillgap.for_posting(posting, "Acme")
+    missing = {t["id"]: t for t in g["missing"]}
+    check("a requirements section is found", g["found"])
+    check("a missing tool in a required line is a required gap",
+          missing.get("outlook", {}).get("section") == "required", g["missing"])
+    check("a line after a 'preferred:' lead-in is preferred",
+          missing.get("retail", {}).get("section") == "preferred", g["missing"])
+    check("a skill the profile has is not a gap", "excel" not in missing)
+    check("the benefits section is never read", "saas" not in missing)
+    check("the about section is never read",
+          sum(1 for l in g["lines"] if "Outlook" in l["text"]) == 1)
+    flags = {f["label"]: f for f in g["flags"]}
+    check("years past the criteria are a gap", "5+ years of experience" in flags, g["flags"])
+    check("a degree above the profile's is a gap",
+          flags.get("Master's degree", {}).get("section") == "preferred", g["flags"])
+    check("a degree the profile has is no gap and still read",
+          "Bachelor's degree" not in flags
+          and "Bachelor's degree in accounting required" not in g["unread"], g["unread"])
+    check("an unknown product name is listed", [o["word"] for o in g["others"]] == ["SSMS"],
+          g["others"])
+    check("a lead-in line with no skill is unread",
+          g["unread"] == ["Knowledge of the following preferred:"], g["unread"])
+    none = skillgap.for_posting("<p>We are hiring. Send a resume.</p>", "Acme")
+    check("a posting with no requirements says so", not none["found"] and not none["missing"])
+
+    rows = [{"description": posting, "company": "Acme", "title": "AP Clerk", "uid": "a", "score": 80},
+            {"description": posting, "company": "Beta", "title": "AP Clerk", "uid": "b", "score": 70}]
+    report = skillgap.growth(rows, rows[:1], ("test", 1))
+    terms = {t["id"]: t for t in report["terms"]}
+    check("growth counts a gap once per posting", terms["outlook"]["listed_required"] == 100.0,
+          terms.get("outlook"))
+    check("growth keeps the two sets apart", terms["outlook"]["applied_count"] == 1)
+    check("growth names examples for a gap", len(terms["outlook"]["examples"]) == 2)
+    check("growth lists years and degrees",
+          any(b["label"] == "5+ years of experience" for b in report["barriers"]["listed"]))
+
+    families = {t: skillgap.title_family(t) for t in (
+        "Senior Data Analyst II - Remote", "Data Analyst, Healthcare", "DOC - IT Security Analyst 2",
+        "Analyst, Supply Chain Analytics", "IT Help Desk Technician", "Data Analyst/Programmer",
+        "Helpdesk Support")}
+    check("job titles group into families", families == {
+        "Senior Data Analyst II - Remote": "data analyst", "Data Analyst, Healthcare": "data analyst",
+        "DOC - IT Security Analyst 2": "security analyst",
+        "Analyst, Supply Chain Analytics": "supply chain analyst",
+        "IT Help Desk Technician": "help desk technician", "Data Analyst/Programmer": "data analyst",
+        "Helpdesk Support": ""}, families)
+    titled = [dict(rows[0], title="Data Analyst II", uid="c"), dict(rows[1], title="Data Analyst", uid="d"),
+              dict(rows[1], title="Sr. Data Analyst - Remote", uid="f"),
+              dict(rows[0], title="Payroll Specialist", uid="e", description="<p>Requirements</p>")]
+    whole = skillgap.growth(rows + titled, rows[:1], ("test", 2))
+    check("growth lists the common title families with counts per set",
+          {"key": "data analyst", "listed": 3, "applied": 0} in whole["titles"], whole["titles"])
+    narrow = skillgap.growth(rows + titled, rows[:1], ("test", 2), "data analyst")
+    check("a title narrows both sets to that family",
+          narrow["listed"]["n"] == 3 and narrow["applied"]["n"] == 0 and narrow["title"] == "data analyst",
+          (narrow["listed"], narrow["applied"]))
+    check("the narrowed report still lists every family to switch to", narrow["titles"] == whole["titles"])
+    page = (ROOT / "jobdesk" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    script = (ROOT / "jobdesk" / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    check("the Growth tab is in the bar", 'data-view="growth"' in page and 'id="view-growth"' in page)
+    check("the reader draws the gaps", "gapPanel(full.gaps)" in script)
+    check("Growth has the title chips", 'id="growth-titles"' in page and "pickGrowthTitle" in script)
+
+
+def test_skills_library() -> None:
+    """The library behind the reader: names vocabulary.toml has no term for.
+
+    Acronyms and everyday-word product names match only as written, a
+    library name the vocabulary already has folds into the vocabulary's term,
+    words that are never skills stay out of the unknown names, and a
+    benefits list under a requirements heading is not read.
+    """
+    section("skills library")
+    from jobdesk.app import skillgap
+    from jobdesk.engine import library
+
+    k = skillgap.known()
+    reader = k["vocab"]
+    found = lambda text: {reader.label(t) for t in skillgap._find(k, text)}
+    check("the library loads from its two files", len(reader.library.terms) > 5000,
+          len(reader.library.terms))
+    check("tools the vocabulary lacks are found",
+          {"Terraform", "Kubernetes", "NIST frameworks", "EHR systems"}
+          <= found("Terraform, k8s, NIST 800-53 and EHR systems"), found("Terraform, k8s, NIST 800-53 and EHR systems"))
+    check("a certification is its own kind",
+          reader.kind(next(iter(skillgap._find(k, "CompTIA Security+ required")))) == "cert")
+    check("an acronym matches only in capitals",
+          "Security operations center" in found("Work in the SOC")
+          and "Security operations center" not in found("soc"), found("soc"))
+    check("a product that is also a word matches only capitalized",
+          "React" in found("Experience with React") and "React" not in found("react quickly to change"))
+    check("a name the vocabulary has folds into its term",
+          reader.library.blind.get("microsoft sql server") in reader.vocab.terms,
+          reader.library.blind.get("microsoft sql server"))
+    check("a dropped vendor name matches nothing", not found("Microsoft is an equal opportunity employer"))
+    check("AD&D insurance is not Active Directory", "Active Directory" not in found("Life and AD & D"))
+    check("ASC 606 and an AAS degree are not GitHub topics",
+          not found("ASC 606 revenue recognition, an AAS degree and FTC rules"),
+          found("ASC 606 revenue recognition, an AAS degree and FTC rules"))
+    tokens = library.tokens("C#, .NET, CI/CD and Node.js.")
+    check("skill names stay whole tokens", tokens == ["C#", ".NET", "CI/CD", "and", "Node.js"], tokens)
+
+    posting = ("<p><strong>Requirements</strong></p><ul>"
+               "<li>Hands-on Terraform experience</li>"
+               "<li>Medical, dental and vision, HSA, EAP and 401(k)</li>"
+               "<li>Knowledge of NIST and VDOT tolling</li>"
+               "<li>FP&amp;A and TCP/IP fundamentals</li>"
+               "<li>BS in Accounting, Finance or a related field; 2 years of Power Query</li></ul>")
+    g = skillgap.for_posting(posting, "Acme")
+    words = [o["word"] for o in g["others"]]
+    check("a library term is a gap, not an unknown name",
+          any(t["id"] == "x:terraform" for t in g["missing"]) and "terraform" not in words, g)
+    check("a benefits line under a requirements heading is skipped",
+          not any("dental" in l["text"] for l in g["lines"]) and "HSA" not in words, g["lines"])
+    check("a foreign skill the library knows is not listed as unknown", words == [], words)
+    majors = next(l for l in g["lines"] if l["text"].startswith("BS in"))
+    check("a degree's list of majors is not a list of skills, the rest of the line is",
+          "x:accounting" not in majors["missing"] + majors["have"]
+          and "Power Query" in {reader.label(t) for t in majors["missing"] + majors["have"]}, majors)
+    from jobdesk.app import docscan
+    notes = docscan.scan("notes.txt", b"Wrote Terraform modules for the lab.\n")
+    hit = next((i for i in notes["items"] if i.get("term") == "x:terraform"), {})
+    check("a dropped-in document finds a library term, with its line",
+          "Terraform modules" in hit.get("snippet", ""), notes["items"])
+    script = (ROOT / "jobdesk" / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    check("the app names the certification kind", 'cert: "A certification"' in script)
+
+
+def test_documents() -> None:
+    """Documents dropped in on Criteria: read with no AI, kept only when ticked.
+
+    A slide deck and a code file are read as text, a skill found through one
+    alias offers that alias for the stack, a certificate line is listed, and a
+    kept skill stops being a gap until it is forgotten. Runs against a copy of
+    the example profile, so nothing real is written.
+    """
+    section("documents")
+    import io
+    import zipfile
+    from jobdesk.app import docscan, skillgap
+
+    deck = io.BytesIO()
+    with zipfile.ZipFile(deck, "w") as z:
+        z.writestr("ppt/slides/slide1.xml",
+                   '<p:sld><a:p><a:r><a:t>Quarter close in </a:t></a:r><a:r><a:t>Outlook</a:t></a:r></a:p>'
+                   '<a:p><a:r><a:t>Outlook rules for Outlook folders</a:t></a:r></a:p>'
+                   '<a:p><a:r><a:t>AWS Certified Cloud Practitioner, 2025</a:t></a:r></a:p></p:sld>')
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / "profile"
+        shutil.copytree(ROOT / "profile.example", copy)
+        os.environ["JOBDESK_PROFILE"] = str(copy)
+        profile.forget()
+        try:
+            got = docscan.scan("close.pptx", deck.getvalue())
+            items = {i.get("term") or i.get("word"): i for i in got["items"]}
+            check("a slide deck is read", got["read_as"] == "powerpoint", got)
+            check("a skill the profile lacks is offered", items.get("outlook", {}).get("have") is False,
+                  got["items"])
+            check("with the line it came from", "Outlook" in items.get("outlook", {}).get("snippet", ""))
+            check("a certificate line is listed",
+                  got["certificates"] == ["AWS Certified Cloud Practitioner, 2025"], got["certificates"])
+            code = docscan.scan("etl.py", b"import pandas\n\ndef load():\n    return 1\n")
+            check("a code file counts its language", any(i["label"].lower() == "python" for i in code["items"]),
+                  code["items"])
+            try:
+                docscan.scan("old.doc", b"x" * 10)
+                check("an old Word file is refused", False)
+            except docscan.Unreadable:
+                check("an old Word file is refused", True)
+            try:
+                docscan.scan("big.txt", b"x" * (docscan.MAX_BYTES + 1))
+                check("a file past the size limit is refused", False)
+            except docscan.Unreadable:
+                check("a file past the size limit is refused", True)
+
+            posting = "<p><strong>Requirements</strong></p><ul><li>Experience with Outlook</li></ul>"
+            check("before keeping, the posting shows the gap",
+                  any(t["id"] == "outlook" for t in skillgap.for_posting(posting, "Acme")["missing"]))
+            kept = docscan.keep([{"term": "outlook", "snippet": "Outlook rules", "source": "close.pptx"},
+                                 {"term": "not-a-term"}],
+                                [{"text": "AWS Certified Cloud Practitioner, 2025", "source": "close.pptx"}])
+            check("a ticked skill is kept, an unknown term is not",
+                  [e["term"] for e in kept["skill"]] == ["outlook"], kept)
+            docscan.keep([{"term": "outlook"}], [])
+            check("keeping twice keeps one", len(docscan.load()["skill"]) == 1)
+            check("the file is valid TOML", tomllib.loads((copy / "evidence.toml").read_text(encoding="utf-8"))
+                  ["certificate"][0]["text"].startswith("AWS"))
+            # The cache keys on the file's mtime, which can land in the same tick.
+            time.sleep(0.05)
+            check("a kept skill is no longer a gap",
+                  not any(t["id"] == "outlook" for t in skillgap.for_posting(posting, "Acme")["missing"]))
+            left = docscan.forget(term="outlook")
+            check("forgetting removes it", left["skill"] == [] and len(left["certificate"]) == 1, left)
+            check("the targeting file is untouched",
+                  (copy / "targeting.toml").read_bytes()
+                  == (ROOT / "profile.example" / "targeting.toml").read_bytes())
+        finally:
+            os.environ["JOBDESK_PROFILE"] = str(ROOT / "profile.example")
+            profile.forget()
+    check("the real example profile has no evidence file", not (ROOT / "profile.example" / "evidence.toml").exists())
+    page = (ROOT / "jobdesk" / "app" / "static" / "index.html").read_text(encoding="utf-8")
+    check("the drop box is on Criteria", 'id="ev-drop"' in page and 'id="ev-file"' in page)
+    check("its routes exist", ("POST", "/api/evidence/scan") in api.ROUTES
+          and ("POST", "/api/evidence") in api.ROUTES)
+
+
+def test_tab_shells() -> None:
+    """The hooks Criteria, Console and Setup draw into.
+
+    Criteria lists are edited as tags drawn over their textarea. Save reads
+    the textarea, so the tags must not carry a name of their own, and a list
+    field must not be a label, or a click on its text would land on the
+    first tag's remove button.
+    """
+    section("tab shells")
+    static = ROOT / "jobdesk" / "app" / "static"
+    page = (static / "index.html").read_text(encoding="utf-8")
+    script = (static / "app.js").read_text(encoding="utf-8")
+    for hook in ("points-bar", "tier-legend", "crit-jump", "save-bar", "run-now",
+                 "term-title", "follow", "steps"):
+        check(f"#{hook} is on the page", f'id="{hook}"' in page)
+    check("lists go through the tag editor", "return tagEditor(el(\"textarea\"" in script)
+    check("the add box has no name, so Save skips it",
+          'class: "tag-add"' in script and 'name: "tag' not in script)
+    check("a tag list is a div, not a label", 'tagged ? "div" : "label"' in script)
+    check("the stepper is told how far along it is", '"--progress"' in script)
 
 
 def test_phone() -> None:
@@ -1163,10 +1550,22 @@ def test_settings() -> None:
         for key, attr in (("scheme", "data-scheme"), ("font", "data-font")):
             for value in prefs._CHOICES[key]:
                 painted = f'[{attr}="{value}"]' in css
-                default = value in ("slate", "system")
+                default = value in ("mailroom", "system")
                 check(f"the stylesheet knows {key} {value}", painted or default)
                 check(f"the menu offers {key} {value}",
                       f'<option value="{value}">' in html)
+        # Every one-mode scheme sits in a menu group that says so, which is
+        # how the page knows to gray out Theme, and Slate, the old default,
+        # comes back as Mailroom rather than as a 400.
+        check("the one-mode schemes are grouped as such",
+              all(html.index(f'<option value="{v}">') > html.index('data-mode="light"')
+                  for v in prefs.FIXED_SCHEMES))
+        check("slate is renamed, not refused",
+              prefs.save({"scheme": "slate"})["scheme"] == "mailroom")
+        prefs.FILE.write_text('{"scheme": "slate"}', encoding="utf-8")
+        check("a file that says slate loads as mailroom",
+              prefs.load()["scheme"] == "mailroom")
+        prefs.save({"scheme": "mailroom"})
         check("the page no longer sizes itself by attribute",
               "data-size" not in css and "zoom: var(--zoom" in css)
         for size in ("80", "100", "160"):
@@ -1799,6 +2198,13 @@ def main() -> int:
     test_phone()
     test_home_screen()
     test_tiles()
+    test_jobs_shell()
+    test_custom_colors()
+    test_tab_shells()
+    test_phone_load()
+    test_skill_gaps()
+    test_skills_library()
+    test_documents()
     test_pasted_jd()
     test_no_writes()
     test_override()
