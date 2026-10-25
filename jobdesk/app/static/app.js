@@ -40,6 +40,31 @@ function el(tag, props, ...kids) {
   return node;
 }
 
+/* A group of buttons where one is picked gets one shape under the picked
+   button, and the shape slides when the pick changes. It watches the
+   group's own aria state, so the code that picks a button does not have to
+   know the pill is there. */
+function pillTrack(box) {
+  if (!box || box.classList.contains("has-pill")) return;
+  box.classList.add("has-pill");
+  const move = () => {
+    const on = box.querySelector('[aria-pressed="true"], [aria-checked="true"], [aria-current="true"]');
+    box.classList.toggle("pill-off", !on || !on.offsetWidth);
+    if (!on || !on.offsetWidth) return;
+    box.style.setProperty("--pill-x", on.offsetLeft + "px");
+    box.style.setProperty("--pill-y", on.offsetTop + "px");
+    box.style.setProperty("--pill-w", on.offsetWidth + "px");
+    box.style.setProperty("--pill-h", on.offsetHeight + "px");
+  };
+  new MutationObserver(move).observe(box, { subtree: true, attributes: true,
+    attributeFilter: ["aria-pressed", "aria-checked", "aria-current", "hidden"] });
+  new ResizeObserver(move).observe(box);
+  move();
+  // Placed first, then allowed to move, so it does not slide in from the
+  // corner when the page opens.
+  requestAnimationFrame(() => requestAnimationFrame(() => box.classList.add("pill-ready")));
+}
+
 async function call(path, options) {
   const res = await fetch(path, options);
   let data;
@@ -107,13 +132,15 @@ function when(iso) {
 
 function show(view) {
   $$(".view").forEach((v) => { v.hidden = v.id !== "view-" + view; });
+  document.documentElement.dataset.view = view;
   $$(".tab").forEach((t) => t.setAttribute("aria-current",
     String(t.dataset.view === view)));
   $("#gear").setAttribute("aria-current", String(view === "settings"));
   if (view === "jobs" && !state.jobs.length) loadJobs();
   if (view === "applied") loadApplications();
   if (view === "archive" && !archive.loaded) searchArchive(0);
-  if (view === "criteria") { loadCriteria(); if (critPane === "about") loadAbout(); }
+  if (view === "growth") loadGrowth();
+  if (view === "criteria") { loadCriteria(); loadEvidence(); if (critPane === "about") loadAbout(); }
   if (view === "console") loadRuns();
   // Every field in the phone panel is a live reading -- the address changes
   // with the network, the firewall rule can be added in another window, and
@@ -126,6 +153,220 @@ $("#tabs").addEventListener("click", (e) => {
   const tab = e.target.closest(".tab");
   if (tab) show(tab.dataset.view);
 });
+
+/* ================================================================= growth */
+
+// What the postings keep asking for, and what the profile has nothing for.
+// The server does the reading (skillgap.py) and caches it; this lays it out
+// for one of two sets of postings at a time.
+const growthState = { data: null, scope: "applied", focus: "", loading: null, title: "" };
+
+const growthUrl = () => "/api/growth" + (growthState.title ? "?title=" + encodeURIComponent(growthState.title) : "");
+
+function loadGrowth(focus) {
+  if (focus !== undefined) growthState.focus = focus;
+  if (!growthState.data) $("#learn-list").replaceChildren(
+    el("li", { class: "note", text: "Reading every requirements line…" }));
+  if (growthState.loading) return growthState.loading;
+  const asked = growthState.title;
+  growthState.loading = get(growthUrl()).then((data) => {
+    // A title picked while this was loading has its own request; this
+    // answer is for the old one.
+    if (growthState.title !== asked) return;
+    growthState.data = data;
+    if (!data.applied.n && !data.title && growthState.scope === "applied") growthState.scope = "listed";
+    drawGrowth();
+  }).catch((err) => {
+    $("#learn-list").replaceChildren(el("li", { class: "note", text: err.message }));
+  }).finally(() => { growthState.loading = null; });
+  return growthState.loading;
+}
+
+// From a gap chip in the reader: open Growth on that skill.
+function openGrowth(id) {
+  show("growth");
+  loadGrowth(id).then(() => {
+    const row = document.querySelector(`[data-term="${CSS.escape(id)}"]`);
+    if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+$("#growth-scope").addEventListener("click", (e) => {
+  const btn = e.target.closest(".seg-btn");
+  if (!btn) return;
+  growthState.scope = btn.dataset.value;
+  drawGrowth();
+});
+pillTrack($("#growth-scope"));
+
+// Narrow Growth to one job title family, or back to all of them. The old
+// report stays on screen, dimmed, until the new one arrives.
+function pickGrowthTitle(title) {
+  if (title === growthState.title) return;
+  growthState.title = title;
+  drawTitles();
+  $$("#growth-stats, .growth-grid").forEach((n) => n.classList.add("busy"));
+  get(growthUrl()).then((data) => {
+    if (growthState.title !== title) return;
+    growthState.data = data;
+    drawGrowth();
+  }).catch((err) => { $("#growth-basis").textContent = err.message; }).finally(() => {
+    if (growthState.title === title) $$("#growth-stats, .growth-grid").forEach((n) => n.classList.remove("busy"));
+  });
+}
+
+function drawTitles() {
+  const data = growthState.data;
+  const box = $("#growth-titles");
+  box.textContent = "";
+  if (!data || !data.titles || !data.titles.length) return;
+  const scope = growthState.scope;
+  const chip = (key, label, n) => box.append(el("button", { class: "title-chip", type: "button",
+    "aria-pressed": String(growthState.title === key), on: { click: () => pickGrowthTitle(key) } },
+    label, n == null ? null : el("span", { class: "n", text: String(n) })));
+  chip("", "All titles");
+  data.titles.filter((t) => t[scope] > 0 || t.key === growthState.title)
+    .forEach((t) => chip(t.key, capital(t.key), t[scope]));
+}
+
+function drawGrowth() {
+  const data = growthState.data;
+  if (!data) return;
+  const scope = growthState.scope;
+  const set = data[scope];
+  $$("#growth-scope .seg-btn").forEach((b) => {
+    b.setAttribute("aria-checked", String(b.dataset.value === scope));
+    const n = data[b.dataset.value].n;
+    b.textContent = (b.dataset.value === "applied" ? "Applied to" : "Jobs list") + ` (${n})`;
+  });
+  const named = growthState.title ? ` ${growthState.title}` : "";
+  $("#growth-basis").textContent = set.n
+    ? `${set.with_requirements} of ${set.n}${named} postings have a requirements section to read`
+    : `No${named} postings in this set yet.`;
+  drawTitles();
+
+  const any = (t) => t[scope + "_any"];
+  const req = (t) => t[scope + "_required"];
+  const terms = data.terms.filter((t) => any(t) > 0);
+  // Industries are counted apart from skills. "Healthcare" tops every list
+  // in Richmond, and it is not a thing to study over a weekend.
+  const missing = terms.filter((t) => !t.have && t.kind !== "domain");
+  const industries = terms.filter((t) => t.kind === "domain");
+  const strong = terms.filter((t) => t.have && t.kind !== "domain");
+
+  // The summary row.
+  const stats = $("#growth-stats");
+  stats.textContent = "";
+  const stat = (value, label, cls) => stats.append(
+    el("div", { class: "stat" + (cls ? " " + cls : "") }, el("b", { text: value }), el("span", { text: label })));
+  stat(set.coverage == null ? "—" : Math.round(set.coverage) + "%", "of required skills you have, on average",
+       set.coverage >= 80 ? "offer" : set.coverage != null && set.coverage < 60 ? "dead" : "live");
+  stat(String(set.clear), `postings where you have every required skill`);
+  stat(String(missing.length), "skills asked for that you don't have");
+
+  // Learn next. Demand first, then how many postings it alone stands between
+  // you and a full set of required skills.
+  const unlocks = (t) => t["unlocks_" + scope];
+  const rank = (t) => any(t) + 2 * req(t) + (set.n ? 100 * unlocks(t) / set.n : 0);
+  const learn = missing.slice().sort((a, b) => rank(b) - rank(a)).slice(0, 12);
+  if (learn[0]) stat(learn[0].label, `the top skill to learn, named in ${pctText(any(learn[0]))} of postings`, "dead");
+  const list = $("#learn-list");
+  list.textContent = "";
+  if (!learn.length) list.append(el("li", { class: "note",
+    text: "Nothing to learn here: every skill these postings name is already in your profile." }));
+  learn.forEach((t) => {
+    const li = el("li", { class: "learn" + (t.id === growthState.focus ? " focus" : ""), "data-term": t.id });
+    li.append(el("div", { class: "learn-head" },
+      el("b", { text: t.label }),
+      el("span", { class: "kind", text: KIND_NAMES[t.kind] || t.kind })));
+    const facts = [`named in ${pctText(any(t))} of these postings`];
+    if (req(t)) facts.push(`required in ${pctText(req(t))}`);
+    if (unlocks(t)) facts.push(`the only required skill you lack in ${plural(unlocks(t), "posting")}`);
+    li.append(el("p", { class: "learn-facts", text: facts.join(" · ") }));
+    li.append(el("div", { class: "learn-bar", "aria-hidden": "true" },
+      el("i", { class: "any", style: `width:${Math.min(100, any(t))}%` }),
+      el("i", { class: "req", style: `width:${Math.min(100, req(t))}%` })));
+    li.append(el("p", { class: "learn-how", text: HOW_TO_CLOSE[t.kind] || HOW_TO_CLOSE.method }));
+    if (t.examples.length) {
+      const ex = el("div", { class: "learn-ex" }, el("span", { class: "note", text: "For example:" }));
+      t.examples.slice(0, 3).forEach((j) => {
+        const name = `${j.title} at ${j.company}`;
+        if (j.uid && state.jobs.some((x) => x.uid === j.uid)) {
+          ex.append(el("button", { class: "linkish", type: "button", text: name,
+            on: { click: () => openJobFromGrowth(j.uid) } }));
+        } else ex.append(el("span", { text: name }));
+      });
+      li.append(ex);
+    }
+    list.append(li);
+  });
+
+  // Most asked for: the top of the demand list, whether you have it or not.
+  const chart = $("#demand");
+  chart.textContent = "";
+  terms.filter((t) => t.kind !== "domain").sort((a, b) => any(b) - any(a)).slice(0, 16).forEach((t) => {
+    chart.append(el("div", { class: "dm-row" + (t.have ? " have" : " miss"), "data-term": t.id },
+      el("span", { class: "dm-name", text: t.label }),
+      el("span", { class: "dm-track" },
+        el("i", { class: "dm-any", style: `width:${Math.min(100, any(t))}%` }),
+        el("i", { class: "dm-req", style: `width:${Math.min(100, req(t))}%` })),
+      el("span", { class: "dm-pct", text: pctText(any(t)) })));
+  });
+
+  const strongBox = $("#strong-list");
+  strongBox.textContent = "";
+  strong.slice(0, 14).forEach((t) => strongBox.append(el("span", { class: "gap-chip have",
+    text: `${t.label} · ${pctText(any(t))}` })));
+  if (!strong.length) strongBox.append(el("p", { class: "note", text: "None yet." }));
+
+  const ind = $("#industry-list");
+  ind.textContent = "";
+  industries.slice().sort((a, b) => any(b) - any(a)).slice(0, 8).forEach((t) => {
+    ind.append(el("div", { class: "dm-row" + (t.have ? " have" : " miss"), "data-term": t.id },
+      el("span", { class: "dm-name", text: capital(t.label) }),
+      el("span", { class: "dm-track" },
+        el("i", { class: "dm-any", style: `width:${Math.min(100, any(t))}%` }),
+        el("i", { class: "dm-req", style: `width:${Math.min(100, req(t))}%` })),
+      el("span", { class: "dm-pct", text: pctText(any(t)) })));
+  });
+  if (!industries.length) ind.append(el("p", { class: "note", text: "No industry stands out in these postings." }));
+
+  const bar = $("#barrier-list");
+  bar.textContent = "";
+  const barriers = data.barriers[scope] || [];
+  if (!barriers.length) bar.append(el("p", { class: "note", text: "None of these postings ask for more years or a higher degree than you have." }));
+  barriers.forEach((b) => bar.append(el("div", { class: "dm-row miss" },
+    el("span", { class: "dm-name", text: b.label }),
+    el("span", { class: "dm-track" }, el("i", { class: "dm-any", style: `width:${Math.min(100, b.pct)}%` })),
+    el("span", { class: "dm-pct", text: `${b.count}` }))));
+
+  const unknown = $("#unknown-list");
+  unknown.textContent = "";
+  data.unrecognized.forEach((u) => unknown.append(el("span", { class: "gap-chip other",
+    text: `${u.label} · ${u.count}` })));
+  if (!data.unrecognized.length) unknown.append(el("p", { class: "note", text: "None that come up more than once." }));
+}
+
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+const pctText = (n) => (n >= 10 || n === 0 ? Math.round(n) : n.toFixed(1)) + "%";
+
+// What closing each kind of gap honestly takes. The point of the tab is a
+// study decision, so the advice is about getting the skill, never about
+// getting the word onto the page.
+const HOW_TO_CLOSE = {
+  tool: "A tool. A short course plus one small project that uses it gives you a true bullet to tag it on.",
+  method: "A method. Look for it in work you have already done first; if it is there, a bullet that says so closes the gap.",
+  domain: "Industry experience. Coursework, a certificate or a project on that industry's data is the way in short of a job there.",
+  cert: "A certification or clearance. It is an exam or a credential, not a bullet: list it on the resume once you hold it, and check whether the posting takes it as preferred.",
+  soft: "A soft skill. Show it with a bullet about a time you did it.",
+};
+
+function openJobFromGrowth(uid) {
+  show("jobs");
+  state.open = uid;
+  draw();
+}
 
 /* =================================================================== runs */
 
@@ -162,7 +403,23 @@ function drawRuns() {
     box.lastChild.querySelector(".meta").dataset.state = run.state;
     box.lastChild.dataset.id = run.id;
   });
-  if (!runs.list.length) box.append(el("li", { text: "no runs yet" }));
+  if (!runs.list.length) box.append(el("li", { class: "empty", text: "no runs yet" }));
+  drawRunNow();
+}
+
+function drawRunNow() {
+  const run = runs.list.find((r) => r.id === runs.watching);
+  const card = $("#run-now");
+  card.hidden = !run;
+  $("#term-title").textContent = run ? run.label : "Output";
+  if (!run) return;
+  card.textContent = "";
+  card.dataset.state = run.state;
+  card.append(
+    el("span", { class: "run-state" }, el("i", { class: "pulse" }), run.state),
+    el("b", { text: run.label }),
+    el("span", { class: "note", text: `started ${run.started.slice(11)}`
+      + (run.error ? ` \u00b7 ${run.error}` : "") }));
 }
 
 /* Poll one run's output. The server is asked for lines after the last one
@@ -271,7 +528,8 @@ $("#sweep").addEventListener("click", () => startRun({ kind: "sweep" }));
 // breaks the tie between two postings from the same day.
 const state = { jobs: [], sort: "age_days", dir: "asc", open: null,
                 market: {}, marketIndex: null, starsGone: [],
-                lastRun: null, details: {}, pasted: {}, partMax: {} };
+                lastRun: null, details: {}, pasted: {}, partMax: {},
+                tier: "", rows: [], readerKey: "" };
 
 // The two orders the "Order" menu and Settings offer, as a column and a
 // direction. Clicking a column header picks a third, and the menu says so.
@@ -313,6 +571,7 @@ async function loadJobs() {
     state.lastRun = data.last_run || null;
     stamp(data);
     drawStarsGone();
+    drawSources();
     draw();
     loadMarket();
   } catch (err) {
@@ -338,7 +597,7 @@ let pulsing = false;
 
 async function checkRadar() {
   // Not while the previous check is still out, and not while the page is
-  // hidden: a minimised window polling every minute all night is a battery
+  // hidden: a minimized window polling every minute all night is a battery
   // cost for an answer nobody is looking at.
   if (pulsing || document.hidden || !state.lastRun) return;
   pulsing = true;
@@ -409,13 +668,31 @@ function stamp(data) {
   // them made a rescore that screened out fourteen postings look like it
   // changed nothing.
   const out = state.jobs.filter((j) => j.tier === "F").length;
-  $("#counts").textContent =
-    `${state.jobs.length - out} postings · ${parts.join(" · ")}` +
-    (out ? ` · ${out} screened out` : "") +
-    (floor && floor.capped
-      ? ` · nothing under ${floor.lowest} made the cache (floor is ${floor.configured})`
-      : "") +
-    (ran ? ` · scored ${ran.toLocaleString()}` : "");
+  const box = $("#counts");
+  box.textContent = "";
+  const total = ["A", "B", "C", "D"].reduce((sum, t) => sum + (tiers[t] || 0), 0);
+  const COLORS = { A: "var(--good)", B: "var(--accent)", C: "var(--warn)", D: "var(--ink-faint)" };
+  if (total) {
+    box.append(el("div", { class: "tierbar", role: "img", "aria-label": parts.join(", ") },
+      ...["A", "B", "C", "D"].filter((t) => tiers[t]).map((t) => {
+        const seg = el("i", { class: t, title: `${t}: ${tiers[t]}` });
+        seg.style.flexGrow = String(tiers[t]);
+        return seg;
+      })));
+  }
+  const key = el("div", { class: "tier-key" },
+    el("span", {}, el("b", { text: String(state.jobs.length - out) }), " postings"),
+    ...["A", "B", "C", "D"].map((t) => {
+      const dot = el("span", { class: "dot" });
+      dot.style.background = COLORS[t];
+      return el("span", {}, dot, `${t} `, el("b", { text: String(tiers[t] || 0) }));
+    }));
+  if (out) key.append(el("span", { text: `${out} screened out` }));
+  if (floor && floor.capped) {
+    key.append(el("span", { text: `nothing under ${floor.lowest} made the cache (floor is ${floor.configured})` }));
+  }
+  if (ran) key.append(el("span", { text: `scored ${ran.toLocaleString()}` }));
+  box.append(key);
 }
 
 // Reads the two score boxes. Blank means "no bound on this end" rather than
@@ -434,24 +711,35 @@ function scoreRange() {
   return lo <= hi ? [lo, hi] : [hi, lo];
 }
 
-function visible() {
-  const q = $("#search").value.trim().toLowerCase();
-  const [lo, hi] = scoreRange();
-  const hideApplied = $("#hide-applied").checked;
-  const hidePrepared = $("#hide-prepared").checked;
-  const remoteOnly = $("#remote-only").checked;
-  const starredOnly = $("#starred-only").checked;
+/* Whether one posting passes one set of filters, in the shape Settings keeps
+   a saved view in. The list uses it with what is on screen, and the sidebar
+   uses it with each saved view to count what that view would show, so the
+   two can never disagree about what a filter means. A view saved before a
+   filter existed has no key for it and lets everything through. */
+function matches(j, f) {
+  const score = j.score || 0;
+  const lo = Math.min(f.score_min, f.score_max), hi = Math.max(f.score_min, f.score_max);
+  if (score < lo || score > hi) return false;
+  if (f.hide_applied && j.applied) return false;
+  if (f.hide_prepared && j.prepared) return false;
+  if (f.remote_only && !j.remote) return false;
+  if (f.starred_only && !j.starred) return false;
+  if (f.has_pay && !(j.salary_min || j.salary_max)) return false;
+  if (f.market_up && (marketOf(j) || {}).direction !== "up") return false;
+  if (f.tier && j.tier !== f.tier) return false;
+  if (f.source && j.source !== f.source) return false;
+  if (f.posted_within && f.posted_within !== "any") {
+    if (j.age_days === null || j.age_days === undefined) return false;
+    if (j.age_days > Number(f.posted_within)) return false;
+  }
+  const q = (f.search || "").toLowerCase();
+  if (!q) return true;
+  return `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q);
+}
 
-  const rows = state.jobs.filter((j) => {
-    const score = j.score || 0;
-    if (score < lo || score > hi) return false;
-    if (hideApplied && j.applied) return false;
-    if (hidePrepared && j.prepared) return false;
-    if (remoteOnly && !j.remote) return false;
-    if (starredOnly && !j.starred) return false;
-    if (!q) return true;
-    return `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q);
-  });
+function visible() {
+  const f = currentFilters();
+  const rows = state.jobs.filter((j) => matches(j, f));
   return sortRows(rows, state.sort, state.dir, (row, key) => {
     // Salary sorts on what the cell shows, estimate included, so the column
     // never appears to be out of order. Market sorts on the arrow's number.
@@ -556,7 +844,7 @@ function age(job) {
 const cell = (text, cls) => el("td", { class: cls, text: text });
 
 /* The star. A filled one is yellow, an empty one only appears on hover or
-   focus, because 300 grey outlines down the left of a table is noise. The
+   focus, because 300 gray outlines down the left of a table is noise. The
    button carries its own label so a screen reader gets "Star" rather than a
    character it has to guess at. */
 function starCell(job) {
@@ -642,13 +930,15 @@ function orderJobsHead() {
   });
 }
 
-PHONE.addEventListener("change", () => { orderJobsHead(); draw(); applyLayout(); });
+PHONE.addEventListener("change", () => {
+  orderJobsHead(); applyLayout(); applyJobsStyle(); draw();
+});
 
 /* -- rows or tiles -- */
 
 /* Held upright, a phone shows two or three columns of a row and the rest is
    a sideways scroll per row. Tiles stack each row into a card, every field
-   labelled, so a posting reads top to bottom. The table markup stays the
+   labeled, so a posting reads top to bottom. The table markup stays the
    same and the stylesheet does the stacking, which keeps sorting, the star
    and the expanded posting working without a second renderer.
 
@@ -683,6 +973,72 @@ $$(".layout-toggle").forEach((b) => b.addEventListener("click", () => {
 
 applyLayout();
 
+/* -- how the Jobs list is drawn -- */
+
+/* Four ways to read the same rows, per device like Rows and Tiles:
+   List is Mailroom's two-line item, Compact is the dense table with every
+   column (and the posting opening under its row), Tiles is cards, and
+   Timeline is the list grouped by the day each posting went up. A phone
+   starts on Timeline and a desktop on List. theme.js sets the attribute
+   before the first paint, from the same key. */
+const JOBS_KEY = "jobdesk.jobs";
+const JOBS_STYLES = ["list", "compact", "tiles", "timeline"];
+let jobsChoice = null;
+try { jobsChoice = localStorage.getItem(JOBS_KEY); } catch { /* private mode */ }
+
+function jobsStyle() {
+  if (JOBS_STYLES.includes(jobsChoice)) return jobsChoice;
+  return narrow() ? "timeline" : "list";
+}
+
+function applyJobsStyle() {
+  const now = jobsStyle();
+  document.documentElement.dataset.jobs = now;
+  $$("#styles .style-btn").forEach((b) =>
+    b.setAttribute("aria-pressed", String(b.dataset.style === now)));
+}
+
+pillTrack($("#styles"));
+pillTrack($("#tabs"));
+
+$("#styles").addEventListener("click", (e) => {
+  const b = e.target.closest(".style-btn");
+  if (!b) return;
+  jobsChoice = b.dataset.style;
+  try { localStorage.setItem(JOBS_KEY, jobsChoice); } catch { /* private mode */ }
+  applyJobsStyle();
+  draw();
+});
+
+applyJobsStyle();
+
+/* The open posting reads beside the list on a desktop, in the reader pane,
+   and in place under its row on a phone and in Compact, where the point is
+   to see every column and a second pane would halve them. */
+const readerMode = () => !narrow() && jobsStyle() !== "compact";
+
+/* -- the menu folds to icons -- */
+
+// Per device, like the list style: a laptop may want the room and a big
+// monitor not. Folded, an open posting splits the window half and half.
+const SIDE_KEY = "jobdesk.side";
+
+function applySide(folded) {
+  document.documentElement.dataset.side = folded ? "folded" : "open";
+  const b = $("#side-fold");
+  b.setAttribute("aria-expanded", String(!folded));
+  b.title = folded ? "Show the menu" : "Fold the menu to icons";
+  b.setAttribute("aria-label", b.title);
+}
+
+$("#side-fold").addEventListener("click", () => {
+  const folded = document.documentElement.dataset.side !== "folded";
+  try { localStorage.setItem(SIDE_KEY, folded ? "folded" : "open"); } catch { /* private mode */ }
+  applySide(folded);
+});
+
+applySide(document.documentElement.dataset.side === "folded");
+
 /* A tile has no header row above it, so every cell carries its column's
    name for the stylesheet to print. The star, the score and the lead line
    explain themselves. Hidden columns have no cell, so only the shown
@@ -692,12 +1048,48 @@ function labelCells(tableSel) {
     .map((th) => th.textContent.trim());
   $$(tableSel + " tbody > tr:not(.detail)").forEach((tr) => {
     Array.from(tr.children).forEach((td, i) => {
-      if (td.matches(".star, .score, .lead") || !names[i]) return;
+      if (td.matches(".star, .score, .lead, .item, .day") || !names[i]) return;
       td.dataset.label = names[i];
     });
   });
 }
 
+
+/* Long lists draw a page at a time, and the next page when the end of the
+   last one comes near the screen. Jobs holds 800-odd rows and Applied a few
+   hundred; drawn all at once that was 17,000 elements, rebuilt on every
+   filter change, and a phone froze on it or dropped the tab. `until` is a
+   row that must be drawn now, such as the open one. */
+const PAGE_ROWS = 60;
+
+function pageRows(body, items, drawOne, opts = {}) {
+  if (body._pager) body._pager.disconnect();
+  const span = opts.span || 1;
+  const until = Math.max(opts.until || 0, 0);
+  const sentinel = el("tr", { class: "more-rows", "aria-hidden": "true" },
+    el("td", { colSpan: span }));
+  let at = 0;
+  let pager = null;
+  const step = (min) => {
+    sentinel.remove();
+    const end = Math.min(items.length, Math.max(at + PAGE_ROWS, min + 1));
+    for (; at < end; at++) drawOne(items[at], at);
+    if (opts.after) opts.after();
+    // Observed again each time: the observer only reports a change, and a
+    // sentinel taken out and put back within one task has not changed.
+    pager.unobserve(sentinel);
+    if (at < items.length) { body.append(sentinel); pager.observe(sentinel); }
+    else pager.disconnect();
+  };
+  pager = new IntersectionObserver((seen) => {
+    if (seen.some((e) => e.isIntersecting)) step(0);
+  // Against the screen, not the table's own scroll box: on a phone that box
+  // grows to fit, so the sentinel would always look visible to it and every
+  // page would load at once. Clipping by the box still counts either way.
+  }, { rootMargin: "900px 0px" });
+  body._pager = pager;
+  step(until);
+}
 
 /* The search box redraws after typing stops, not on every key. A queue of
    a few hundred rows is a few hundred rows of DOM each time. */
@@ -707,49 +1099,197 @@ function drawSoon() {
   drawTimer = setTimeout(draw, 150);
 }
 
+// The Timeline's day headings. Past a week the exact day stops mattering
+// and a heading per day is just more headings.
+function dayLabel(days) {
+  if (days === null || days === undefined) return "Date unknown";
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days <= 7) return `${days} days ago`;
+  if (days <= 14) return "Last week";
+  return "Older";
+}
+
+// Mailroom's item: score and tier on the left, then the title with its age,
+// "company · location", and a line of pills for pay, the market arrow, the
+// packet and the source. One cell, so the table's sorting, star and click
+// handling carry on unchanged.
+function itemCell(job, colSpan) {
+  const td = el("td", { class: "item", colSpan });
+  const score = el("div", { class: "it-score" },
+    el("b", { text: String(job.score) }),
+    el("span", { class: "tier " + job.tier, text: job.tier }));
+  if (job.was !== undefined && job.was !== job.score) {
+    const up = job.score > job.was;
+    score.append(el("span", { class: "moved " + (up ? "up" : "down"),
+      text: (up ? "▲" : "▼") + Math.abs(job.score - job.was) }));
+  }
+  const pills = el("div", { class: "it-pills" });
+  const pay = job.salary_min || job.salary_max ? money(job) : null;
+  const est = !pay && estimateOf(job);
+  if (pay) pills.append(el("span", { class: "pl pay", text: pay }));
+  else if (est) pills.append(el("span", { class: "pl est", text: "~" + money(est),
+                                          title: est.basis }));
+  const m = marketOf(job);
+  if (m && m.direction !== "flat") {
+    pills.append(el("span", { class: "pl mkt " + m.direction,
+      text: (m.direction === "up" ? "▲" : "▼") + Math.abs(m.delta) + " market" }));
+  }
+  if (job.applied) pills.append(el("span", { class: "pl status", text: job.app_status }));
+  else if (job.prepared) pills.append(el("span", { class: "pl status", text: "packet ready" }));
+  if (job.remote) pills.append(el("span", { class: "pl", text: "Remote" }));
+  if (job.source) pills.append(el("span", { class: "pl faint", text: job.source }));
+
+  const main = el("div", { class: "it-main" },
+    el("div", { class: "it-top" },
+      el("span", { class: "it-title", text: job.title }),
+      el("span", { class: "it-age", text: age(job) })),
+    el("div", { class: "it-sub", text: [job.company,
+      job.remote ? "Remote" : job.location].filter(Boolean).join(" · ") }),
+    pills);
+  td.append(score, main, starCell(job).firstChild);
+  return td;
+}
+
 function draw() {
   clearTimeout(drawTimer);
-  const rows = visible();
+  let rows = visible();
   const columns = jobColumns();
+  const span = 3 + columns.length;
+  const style = jobsStyle();
+  const items = style === "list" || style === "timeline";
+  const reading = readerMode();
+  // The Timeline groups by day, and the chosen order still decides who
+  // comes first within one. Array.sort is stable, so that survives.
+  if (style === "timeline") {
+    const at = (j) => (j.age_days === null || j.age_days === undefined ? 1e9 : j.age_days);
+    rows = rows.slice().sort((a, b) => at(a) - at(b));
+  }
+  state.rows = rows;
   const body = $("#rows");
   body.textContent = "";
+  // The rows cascade in when the list itself changes (a filter, a search,
+  // another style) and stay still when one row does (a star, a status).
+  const listKey = style + "|" + rows.map((j) => j.uid).join(",");
+  body.classList.toggle("enter", listKey !== state.listKey);
+  state.listKey = listKey;
+  let day = null;
+  let n = 0;
 
-  rows.forEach((job) => {
-    const tr = el("tr", { class: "row" + (job.applied ? " applied" : "") });
-    tr.dataset.uid = job.uid;
-
-    const score = el("td", { class: "score", text: String(job.score) });
-    score.append(el("span", { class: "tier " + job.tier, text: job.tier }));
-    if (job.was !== undefined && job.was !== job.score) {
-      const up = job.score > job.was;
-      score.append(el("span", { class: "moved " + (up ? "up" : "down"),
-        text: (up ? "▲" : "▼") + Math.abs(job.score - job.was) }));
+  pageRows(body, rows, (job) => {
+    if (style === "timeline" && dayLabel(job.age_days) !== day) {
+      day = dayLabel(job.age_days);
+      body.append(el("tr", { class: "day" }, el("td", { class: "day", colSpan: span, text: day })));
     }
+    const open = state.open === job.uid;
+    const tr = el("tr", { class: "row" + (job.applied ? " applied" : "")
+                                  + (open && reading ? " is-open" : "") });
+    tr.dataset.uid = job.uid;
+    if (n < 16) tr.style.setProperty("--n", String(n++));
 
-    const title = el("td", { class: "lead" }, job.title);
-    if (job.applied) title.append(el("span", { class: "pill", text: job.app_status }));
-    else if (job.prepared) title.append(el("span", { class: "pill", text: "packet ready" }));
+    if (items) {
+      tr.append(itemCell(job, span));
+    } else {
+      const score = el("td", { class: "score", text: String(job.score) });
+      score.append(el("span", { class: "tier " + job.tier, text: job.tier }));
+      if (job.was !== undefined && job.was !== job.score) {
+        const up = job.score > job.was;
+        score.append(el("span", { class: "moved " + (up ? "up" : "down"),
+          text: (up ? "▲" : "▼") + Math.abs(job.score - job.was) }));
+      }
 
-    const cells = {
-      company: () => cell(job.company),
-      location: () => cell(job.remote ? "Remote" : (job.location || "—")),
-      age_days: () => cell(age(job)),
-      market: () => marketCell(job),
-      salary: () => salaryCell(job),
-      source: () => cell(job.source),
-    };
-    tr.append(starCell(job), score, title, ...columns.map((k) => cells[k]()));
+      const title = el("td", { class: "lead" }, job.title);
+      if (job.applied) title.append(el("span", { class: "pill", text: job.app_status }));
+      else if (job.prepared) title.append(el("span", { class: "pill", text: "packet ready" }));
+
+      const cells = {
+        company: () => cell(job.company),
+        location: () => cell(job.remote ? "Remote" : (job.location || "—")),
+        age_days: () => cell(age(job)),
+        market: () => marketCell(job),
+        salary: () => salaryCell(job),
+        source: () => cell(job.source),
+      };
+      tr.append(starCell(job), score, title, ...columns.map((k) => cells[k]()));
+    }
     body.append(tr);
 
-    if (state.open === job.uid) body.append(detailRow(job));
-  });
-  labelCells("#jobs");
+    if (open && !reading) body.append(detailRow(job));
+  }, { span, until: rows.findIndex((j) => j.uid === state.open),
+       after: () => labelCells("#jobs") });
+  drawReader(reading ? state.jobs.find((j) => j.uid === state.open) : null);
 
   drawMoreCount();
+  drawChips();
+  $("#ct-jobs").textContent = state.jobs.length ? String(rows.length) : "";
+  if (state.jobs.length) drawSideViews();
   $("#jobs-empty").hidden = rows.length > 0;
   $("#jobs-empty").textContent = state.jobs.length
     ? "Nothing matches those filters."
-    : "No postings yet. Press “Run the radar” above.";
+    : "No postings yet. Press “Run the radar” in the menu.";
+}
+
+/* -- the reader pane -- */
+
+/* Built again only when something it shows has changed, not on every draw:
+   a draw happens on each keystroke in the search box, and rebuilding would
+   throw away a half-pasted description and the scroll position with it. */
+function drawReader(job) {
+  const pane = $("#reader");
+  $("#jobs-split").classList.toggle("reading", !!job);
+  pane.hidden = !job;
+  if (!job) { pane.textContent = ""; state.readerKey = ""; pane._job = null; return; }
+  const cached = state.details[job.uid] || {};
+  const key = [job.uid, job.score, job.tier, job.starred, job.prepared, job.applied,
+               job.app_status, job.jd_chars, !!state.market[job.uid], cached.error || ""]
+    .join("|");
+  if (key === state.readerKey && pane.firstChild && pane._job === job) return;
+  state.readerKey = key;
+  pane.classList.toggle("fresh", !pane._job || pane._job.uid !== job.uid);
+  pane._job = job;
+  pane.textContent = "";
+
+  const m = marketOf(job);
+  const pills = el("div", { class: "rd-pills" });
+  const pay = job.salary_min || job.salary_max ? money(job) : null;
+  const est = !pay && estimateOf(job);
+  if (pay) pills.append(el("span", { class: "pl pay", text: pay }));
+  else if (est) pills.append(el("span", { class: "pl est", text: "~" + money(est) + " estimated",
+                                          title: est.basis }));
+  pills.append(el("span", { class: "pl", text: job.age_days === 0 ? "posted today"
+    : job.age_days ? `posted ${job.age_days}d ago` : "date unknown" }));
+  if (job.source) pills.append(el("span", { class: "pl", text: job.source }));
+  if (job.remote) pills.append(el("span", { class: "pl", text: "Remote" }));
+  if (job.applied) pills.append(el("span", { class: "pl status", text: job.app_status }));
+  else if (job.prepared) pills.append(el("span", { class: "pl status", text: "packet ready" }));
+
+  const star = el("button", { class: "ghost rd-star" + (job.starred ? " on" : ""), type: "button",
+    "aria-pressed": String(!!job.starred),
+    text: job.starred ? "★ Starred" : "☆ Star",
+    on: { click: () => toggleStar(job) } });
+  const close = el("button", { class: "ghost rd-close", type: "button",
+    "aria-label": "Close this posting", title: "Close (Esc)", text: "×",
+    on: { click: () => { state.open = null; draw(); } } });
+
+  const head = el("header", { class: "rd-head" },
+    el("div", { class: "rd-score" },
+      el("b", { text: String(job.score) }),
+      el("span", { class: "tier " + job.tier, text: job.tier }),
+      m ? el("span", { class: "mktv " + m.direction,
+        text: m.direction === "flat" ? "even with market"
+          : (m.direction === "up" ? "▲" : "▼") + Math.abs(m.delta) + " market" }) : ""),
+    el("div", { class: "rd-tools" }, star, close));
+  pane.append(head,
+    el("h2", { class: "rd-title", text: job.title }),
+    el("div", { class: "rd-sub", text: [job.company, job.remote ? "Remote" : job.location]
+      .filter(Boolean).join(" · ") }),
+    pills);
+  const body = el("div", { class: "rd-body" });
+  fillPosting(job, body);
+  pane.append(body,
+    el("div", { class: "rd-keys note" },
+      "↑ ↓ or J K move · S star · O open the posting · Esc close · / search"));
+  pane.scrollTop = 0;
 }
 
 /* -- the expanded posting -- */
@@ -767,6 +1307,16 @@ function jdBlocks(blocks) {
 
 function detailRow(job) {
   const td = el("td", { colSpan: 3 + jobColumns().length });
+  fillPosting(job, td);
+  const tr = el("tr", { class: "detail" });
+  tr.append(td);
+  return tr;
+}
+
+/* The posting itself: the buttons, the guard lines, why it scored what it
+   did, the market, and the description. The same parts whether they open
+   under the row or in the reader pane. */
+function fillPosting(job, td) {
   const actions = el("div", { class: "actions" });
 
   if (webUrl(job.url)) {
@@ -821,12 +1371,15 @@ function detailRow(job) {
   const why = el("div", { class: "why" },
     (job.reasons || []).map((r) => el("span", { text: r })));
   td.append(why);
+  const gapBox = el("div", { hidden: true });
+  td.append(gapBox);
 
   const breakdown = marketPanel(job);
   if (breakdown) td.append(breakdown);
 
   td.append(paste);
 
+  if (td.matches(".rd-body")) td.append(el("h3", { class: "rd-section", text: "The posting" }));
   const jd = el("div", { class: "jd", text: "Loading the description…" });
   td.append(jd);
 
@@ -840,6 +1393,7 @@ function detailRow(job) {
   }
   cached.fetch.then((full) => {
     if (full.points && full.points.length) why.replaceWith(scoreParts(full));
+    if (full.gaps) gapBox.replaceWith(gapPanel(full.gaps));
     if (full.blocks && full.blocks.length) jd.replaceWith(jdBlocks(full.blocks));
     else if (webUrl(job.url) && !cached.tried) readPosting(job, cached, jd);
     else {
@@ -854,10 +1408,6 @@ function detailRow(job) {
       guards.append(line);
     });
   }).catch((err) => { jd.textContent = err.message; });
-
-  const tr = el("tr", { class: "detail" });
-  tr.append(td);
-  return tr;
 }
 
 // How the number was reached, one line per part, in the order the scorer
@@ -885,6 +1435,83 @@ function scoreParts(job) {
     el("span", { class: "part-why",
       text: `tier ${job.tier}` + (sum !== job.score ? ` (the parts add to ${sum})` : "") })));
   return box;
+}
+
+// What this posting's requirement lines name that the profile cannot back up.
+// The server reads the lines (skillgap.py); this only lays them out. Required
+// gaps come first, because a missing gate matters more than a missing wish.
+function gapPanel(g) {
+  const box = el("div", { class: "gaps" });
+  const head = el("div", { class: "gaps-head" }, el("b", {}, "Missing qualifications and requirements"));
+  box.append(head);
+  if (g.error) {
+    box.append(el("p", { class: "note", text: "Could not compare this posting with your profile: " + g.error }));
+    return box;
+  }
+  if (!g.found) {
+    box.append(el("p", { class: "note",
+      text: "This posting has no requirements or qualifications section to read, "
+        + "so there is nothing to compare line by line." }));
+    return box;
+  }
+  head.append(el("span", { class: "note",
+    text: g.asked ? `you have ${g.have} of the ${g.asked} skills it names` : "it names no skill the app knows" }));
+  if (g.asked) {
+    const meter = el("div", { class: "gap-meter", role: "img",
+      "aria-label": `${g.have} of ${g.asked} skills covered` });
+    meter.append(el("i", { style: `width:${Math.round(100 * g.have / g.asked)}%` }));
+    box.append(meter);
+  }
+
+  const group = (section, title) => {
+    const terms = g.missing.filter((t) => t.section === section);
+    const flags = g.flags.filter((f) => f.section === section);
+    const others = g.others.filter((o) => o.section === section);
+    if (!terms.length && !flags.length && !others.length) return;
+    const row = el("div", { class: "gap-group " + section },
+      el("span", { class: "gap-title", text: title }));
+    const chips = el("div", { class: "gap-chips" });
+    flags.forEach((f) => chips.append(el("span", { class: "gap-chip flag", text: f.label, title: f.note })));
+    terms.forEach((t) => chips.append(el("button", { class: "gap-chip", type: "button",
+      text: t.kind === "domain" ? capital(t.label) + " experience" : t.label, title: `${KIND_NAMES[t.kind] || t.kind}. See how often it is asked for in Growth.`,
+      on: { click: () => openGrowth(t.id) } })));
+    others.forEach((o) => chips.append(el("span", { class: "gap-chip other", text: o.word,
+      title: "A name the vocabulary has no term for yet, and nowhere in your profile" })));
+    row.append(chips);
+    box.append(row);
+  };
+  group("required", "Required");
+  group("preferred", "Preferred");
+  if (!g.missing.length && !g.flags.length && !g.others.length) {
+    box.append(el("p", { class: "gap-none",
+      text: "Nothing missing. Every skill these lines name is in your profile." }));
+  }
+
+  // Line by line, for the reader who wants to see what each mark came from.
+  const lines = el("details", { class: "gap-lines" },
+    el("summary", { text: `Line by line (${g.lines.length})` }));
+  g.lines.forEach((l) => {
+    const marks = el("span", { class: "gap-marks" });
+    l.flags.forEach((f) => marks.append(el("span", { class: "gm miss", text: f.label })));
+    l.missing.forEach((t) => marks.append(el("span", { class: "gm miss", text: labelOf(g, t) })));
+    l.others.filter((o) => !o.have).forEach((o) => marks.append(el("span", { class: "gm other", text: o.word })));
+    l.have.forEach((t) => marks.append(el("span", { class: "gm have", text: labelOf(g, t) })));
+    const read = l.have.length || l.missing.length || l.flags.length || l.others.length;
+    if (!read) marks.append(el("span", { class: l.checked ? "gm have" : "gm none",
+      text: l.checked ? "you meet this" : "no skill named" }));
+    lines.append(el("div", { class: "gap-line " + l.section },
+      el("span", { class: "gap-sec", text: l.section === "required" ? "Req" : "Pref" }),
+      el("span", { class: "gap-text", text: l.text }), marks));
+  });
+  box.append(lines);
+  return box;
+}
+
+const KIND_NAMES = { tool: "A tool", method: "A method", domain: "Industry experience",
+                     cert: "A certification", soft: "A soft skill" };
+
+function labelOf(g, id) {
+  return (g.labels && g.labels[id]) || id;
 }
 
 // A row the radar never got a body for. One read of the posting page, once
@@ -1008,6 +1635,38 @@ $("#rows").addEventListener("click", (e) => {
   draw();
 });
 
+/* The keys from Command. Only on the Jobs tab and never while typing, so a
+   J in the search box is still a J. Enter does nothing: building a packet
+   starts a run, and that should take a click. */
+document.addEventListener("keydown", (e) => {
+  if ($("#view-jobs").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest("input, textarea, select, [contenteditable]")) {
+    if (e.key === "Escape" && e.target.id === "search") e.target.blur();
+    return;
+  }
+  const rows = state.rows;
+  const at = rows.findIndex((j) => j.uid === state.open);
+  const job = at >= 0 ? rows[at] : null;
+  const move = (d) => {
+    if (!rows.length) return;
+    const next = at < 0 ? (d > 0 ? 0 : rows.length - 1)
+                        : Math.max(0, Math.min(rows.length - 1, at + d));
+    state.open = rows[next].uid;
+    draw();
+    const tr = $(`#rows tr.row[data-uid="${CSS.escape(state.open)}"]`);
+    if (tr) tr.scrollIntoView({ block: "nearest" });
+  };
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (key === "ArrowDown" || key === "j") move(1);
+  else if (key === "ArrowUp" || key === "k") move(-1);
+  else if (key === "Escape" && job) { state.open = null; draw(); }
+  else if (key === "s" && job) toggleStar(job);
+  else if (key === "o" && job && webUrl(job.url)) window.open(job.url, "_blank", "noopener");
+  else if (key === "/") $("#search").focus();
+  else return;
+  e.preventDefault();
+});
+
 function sortable(tableSel, onSort) {
   $$(tableSel + " th.sortable").forEach((th) => {
     th.addEventListener("click", () => {
@@ -1051,17 +1710,103 @@ $("#reset-filters").addEventListener("click", () => {
 /* -- saved views and the More menu -- */
 
 const VIEW_BOXES = { hide_applied: "#hide-applied", hide_prepared: "#hide-prepared",
-                     remote_only: "#remote-only", starred_only: "#starred-only" };
+                     remote_only: "#remote-only", starred_only: "#starred-only",
+                     has_pay: "#has-pay", market_up: "#market-up" };
 
 // The filters on screen now, in the shape Settings stores a view in.
 function currentFilters() {
   const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
   const [lo, hi] = scoreRange();
   const f = { search: $("#search").value.trim().slice(0, 200),
-              score_min: clamp(lo), score_max: clamp(hi) };
+              score_min: clamp(lo), score_max: clamp(hi),
+              tier: state.tier, posted_within: $("#posted-within").value,
+              source: $("#source").value.slice(0, 60) };
   Object.entries(VIEW_BOXES).forEach(([k, sel]) => { f[k] = $(sel).checked; });
   if (ORDERS[$("#order").value]) f.jobs_sort = $("#order").value;
   return f;
+}
+
+/* -- the chips over the list -- */
+
+// The tier chips are a filter of their own. The yes/no chips are the boxes
+// in the More menu, pressed from outside it, so the two always agree.
+function setTier(tier) {
+  state.tier = ["A", "B", "C", "D"].includes(tier) ? tier : "";
+  drawChips();
+}
+
+function drawChips() {
+  $$("#filter-chips .chip[data-tier]").forEach((c) =>
+    c.setAttribute("aria-pressed", String(c.dataset.tier === state.tier)));
+  $$("#filter-chips .chip[data-box]").forEach((c) =>
+    c.setAttribute("aria-pressed", String($("#" + c.dataset.box).checked)));
+}
+
+$("#filter-chips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  if (chip.dataset.box !== undefined) {
+    const box = $("#" + chip.dataset.box);
+    box.checked = !box.checked;
+    box.dispatchEvent(new Event("input"));
+    return;
+  }
+  setTier(chip.dataset.tier);
+  leftView();
+  draw();
+});
+
+// The Source menu lists what the postings on hand came from, busiest
+// first, and keeps a pick that no posting has any more rather than
+// silently dropping it.
+function drawSources() {
+  const select = $("#source");
+  const keep = select.value;
+  const counts = {};
+  state.jobs.forEach((j) => { if (j.source && j.tier !== "F") counts[j.source] = (counts[j.source] || 0) + 1; });
+  const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  if (keep && !names.includes(keep)) names.push(keep);
+  select.textContent = "";
+  select.append(el("option", { value: "", text: "all" }));
+  names.forEach((n) => select.append(el("option", { value: n,
+    text: counts[n] ? `${n} (${counts[n]})` : n })));
+  select.value = keep;
+}
+
+function setSource(source) {
+  const select = $("#source");
+  if (source && !Array.from(select.options).some((o) => o.value === source)) {
+    select.append(el("option", { value: source, text: source }));
+  }
+  select.value = source || "";
+}
+
+/* -- saved views in the sidebar -- */
+
+// Each view with the number of postings it would show right now, so the
+// menu says which one has something new in it before you open it.
+function drawSideViews() {
+  const box = $("#side-views");
+  const views = prefs.views || [];
+  $("#side-views-box").hidden = !views.length;
+  box.textContent = "";
+  const picked = $("#view").value;
+  views.forEach((v, i) => {
+    const f = Object.assign({}, prefs, v.filters, { search: v.filters.search || "" });
+    const n = state.jobs.filter((j) => matches(j, f)).length;
+    const b = el("button", { class: "side-view", type: "button", title: v.name,
+      "aria-current": String(picked === String(i)),
+      on: { click: () => {
+        const select = $("#view");
+        select.value = String(i);
+        select.dispatchEvent(new Event("change"));
+        show("jobs");
+      } } },
+      el("span", { class: "side-dot", "aria-hidden": "true" }),
+      el("span", { class: "tab-label", text: v.name }),
+      el("span", { class: "ct", text: state.jobs.length ? String(n) : "" }));
+    box.append(b);
+  });
 }
 
 function drawViews(selected) {
@@ -1072,6 +1817,7 @@ function drawViews(selected) {
   views.forEach((v, i) => select.append(el("option", { value: String(i), text: v.name })));
   select.value = selected === undefined || selected < 0 ? "" : String(selected);
   $("#delete-view").hidden = select.value === "";
+  drawSideViews();
 }
 
 // Any filter change after picking a view means the view is no longer what
@@ -1079,6 +1825,7 @@ function drawViews(selected) {
 function leftView() {
   $("#view").value = "";
   $("#delete-view").hidden = true;
+  $$("#side-views .side-view").forEach((b) => b.setAttribute("aria-current", "false"));
 }
 
 // How many of the filters tucked inside More are narrowing the list, so a
@@ -1101,6 +1848,8 @@ $("#view").addEventListener("change", (ev) => {
   if (!view) return;
   $("#search").value = view.filters.search || "";
   applyFilters(Object.assign({}, prefs, view.filters));
+  $$("#side-views .side-view").forEach((b, i) =>
+    b.setAttribute("aria-current", String(String(i) === ev.target.value)));
   draw();
 });
 
@@ -1127,8 +1876,8 @@ $("#delete-view").addEventListener("click", async () => {
   try { await saveViews(views); } catch (err) { banner(err.message, true); }
 });
 
-["#search", "#score-min", "#score-max", "#tier", "#order",
- ...Object.values(VIEW_BOXES)].forEach((sel) =>
+["#search", "#score-min", "#score-max", "#tier", "#order", "#posted-within",
+ "#source", ...Object.values(VIEW_BOXES)].forEach((sel) =>
   $(sel).addEventListener("input", leftView));
 
 // A click anywhere else closes the menu, the way a menu is expected to.
@@ -1140,7 +1889,7 @@ document.addEventListener("click", (e) => {
 $("#search").addEventListener("input", drawSoon);
 ["#score-min", "#score-max"].forEach((sel) =>
   $(sel).addEventListener("input", drawSoon));
-["#hide-applied", "#hide-prepared", "#remote-only", "#starred-only"]
+["#posted-within", "#source", ...Object.values(VIEW_BOXES)]
   .forEach((sel) => $(sel).addEventListener("input", draw));
 
 // The preset writes the two boxes and then gets out of the way. It is a
@@ -1183,6 +1932,7 @@ async function loadApplications() {
     apps.rows = data.applications;
     apps.statuses = data.statuses;
     apps.due = data.due || [];
+    drawAppCount();
     drawFunnel(data);
     drawReport(data);
     if ($("#app-status").options.length <= 1) {
@@ -1191,6 +1941,13 @@ async function loadApplications() {
     }
     drawApps();
   } catch (err) { banner(err.message, true); }
+}
+
+// The tab's count is every application, the same number the table's own
+// count ends on. It used to leave out the dead ones, which made it a number
+// that matched nothing on the screen.
+function drawAppCount() {
+  $("#ct-applied").textContent = apps.rows.length ? String(apps.rows.length) : "";
 }
 
 function drawFunnel(data) {
@@ -1202,8 +1959,8 @@ function drawFunnel(data) {
   ["screening", "interview", "offer", "rejected", "ghosted"].forEach((s) => {
     tiles.push([s, data.funnel[s] || 0]);
   });
-  // Same four colours as the status dropdowns, so a tile and the rows it
-  // counts read as the same thing. A tile at zero stays grey: the colour is
+  // Same four colors as the status dropdowns, so a tile and the rows it
+  // counts read as the same thing. A tile at zero stays gray: the color is
   // there to pull your eye to a number that exists.
   tiles.forEach(([label, n]) => {
     box.append(el("div", { class: `stat ${statusKind(label)}` + (n ? "" : " zero") },
@@ -1264,9 +2021,9 @@ function visibleApps() {
     (b.status === "prepared") - (a.status === "prepared"));
 }
 
-// Four states worth telling apart by colour, which is fewer than there are
+// Four states worth telling apart by color, which is fewer than there are
 // statuses. "screening" and "interview" differ in how far along you are, not
-// in what you should do about them, and a nine-colour legend is not a legend.
+// in what you should do about them, and a nine-color legend is not a legend.
 const DEAD = ["rejected", "ghosted", "withdrawn"];
 
 function statusKind(status) {
@@ -1280,16 +2037,16 @@ function drawApps() {
   const body = $("#app-rows");
   body.textContent = "";
 
-  rows.forEach((row) => {
+  pageRows(body, rows, (row) => {
     const tr = el("tr", { class: "row" + (row.follow_up_overdue ? " overdue" : "") });
     tr.dataset.id = row.id;
 
     const company = el("td", { class: "lead" }, row.company);
 
-    // The colour used to be a badge in this cell, next to the company name,
+    // The color used to be a badge in this cell, next to the company name,
     // which meant the row said "rejected" twice: once in a red bubble and
     // once in the dropdown right beside it. The dropdown is the thing you
-    // actually change, so it is the thing that carries the colour now -- and
+    // actually change, so it is the thing that carries the color now -- and
     // every option in the open menu carries its own, so the list reads as a
     // legend before you pick from it.
     const status = el("td", {},
@@ -1312,8 +2069,8 @@ function drawApps() {
     body.append(tr);
 
     if (apps.open === row.id) body.append(appDetail(row));
-  });
-  labelCells("#apps");
+  }, { span: $$("#apps thead th").length, until: rows.findIndex((r) => r.id === apps.open),
+       after: () => labelCells("#apps") });
 
   $("#app-counts").textContent =
     `${rows.length} of ${plural(apps.rows.length, "application")}`;
@@ -1347,7 +2104,7 @@ const PACKET_TITLES = {
 
    A packet file arrived here as one `<p>`, so every newline collapsed and
    APPLY.md -- a list of things to do in order, with a table at the bottom --
-   read as one grey paragraph you had to re-find your place in twice. The files
+   read as one gray paragraph you had to re-find your place in twice. The files
    are written as markdown by the packet builder. This reads them back as
    markdown.
 
@@ -1778,18 +2535,70 @@ const UNITS = { money: ["$", "per year"], years: ["", "years"],
                 days: ["", "days"], int: ["", ""] };
 let criteriaFile = "";
 
+/* A list as tags. The textarea is still the field, and Save still reads
+   it; the tags are drawn from its lines and write back to them, so "Edit as
+   text" can show it for a long paste and nothing is kept in two places. */
+function tagEditor(area, kind) {
+  const tags = el("div", { class: "tags" });
+  const add = el("input", { type: "text", class: "tag-add", spellcheck: false,
+    placeholder: kind === "weights" ? "Add a skill, like sql: 6" : "Add one, then Enter",
+    "aria-label": "Add a line" });
+  const lines = () => area.value.split("\n").map((t) => t.trim()).filter(Boolean);
+  const write = (list) => {
+    area.value = list.join("\n");
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  const take = () => {
+    const text = add.value.trim();
+    add.value = "";
+    if (text) write([...lines(), text]);
+  };
+  const draw = () => {
+    const focused = document.activeElement === add;
+    tags.textContent = "";
+    lines().forEach((line, i) => {
+      let name = line, pts = null;
+      const m = kind === "weights" && line.match(/^(.*?)\s*[:=]\s*(-?\d+)\s*$/);
+      if (m) { name = m[1]; pts = m[2]; }
+      tags.append(el("span", { class: "tag" + (pts !== null && Number(pts) < 0 ? " minus" : "") },
+        el("span", { text: name }),
+        pts !== null ? el("b", { class: "tag-pts", text: pts }) : null,
+        el("button", { type: "button", class: "tag-x", text: "\u00d7",
+          "aria-label": `Remove ${name}`,
+          on: { click: () => { const list = lines(); list.splice(i, 1); write(list); } } })));
+    });
+    tags.append(add);
+    if (focused) add.focus();
+  };
+  add.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); take(); add.focus(); }
+    if (e.key === "Backspace" && !add.value && lines().length) write(lines().slice(0, -1));
+  });
+  add.addEventListener("blur", take);
+  area.addEventListener("input", draw);
+  const box = el("div", { class: "tag-editor" }, tags, area);
+  box.append(el("button", { type: "button", class: "ghost small tag-raw", text: "Edit as text",
+    on: { click: (e) => {
+      const raw = box.classList.toggle("as-text");
+      e.target.textContent = raw ? "Show as tags" : "Edit as text";
+      if (raw) area.focus();
+    } } }));
+  draw();
+  return box;
+}
+
 function criteriaInput(field) {
   const { key, kind, value } = field;
   if (kind === "list" || kind === "weights") {
     const lines = kind === "list"
       ? (value || [])
       : Object.entries(value || {}).map(([skill, pts]) => `${skill}: ${pts}`);
-    return el("textarea", {
+    return tagEditor(el("textarea", {
       name: key, value: lines.join("\n"),
       rows: Math.min(10, Math.max(3, lines.length)),
       placeholder: kind === "weights" ? "sql: 6\npython: 4" : "one per line",
       spellcheck: false,
-    });
+    }), kind);
   }
   if (kind === "text") {
     return el("input", { type: "text", name: key, value: value || "" });
@@ -1810,13 +2619,21 @@ async function loadCriteria() {
     criteriaFile = data.file;
     $("#criteria-file").textContent = data.file;
     form.textContent = "";
+    const jump = $("#crit-jump");
+    jump.textContent = "";
+    setSaveBar("Everything here is saved.");
     data.sections.forEach((s) => {
-      const box = el("fieldset", { class: "crit-section" },
+      const box = el("fieldset", { class: "crit-section", id: `crit-${s.id}` },
         el("h3", { text: s.title }),
         s.intro ? el("p", { class: "note", text: s.intro }) : null);
+      jump.append(el("button", { type: "button", class: "chip", text: s.title,
+        on: { click: () => box.scrollIntoView({ behavior: "smooth", block: "start" }) } }));
       const grid = el("div", { class: "crit-fields" });
       s.fields.forEach((f) => {
-        const field = el("label", { class: "crit-field" },
+        // A tag list is a div, not a label: a label hands any click on its
+        // text to the first button inside it, which would delete a tag.
+        const tagged = f.kind === "list" || f.kind === "weights";
+        const field = el(tagged ? "div" : "label", { class: "crit-field" },
           el("span", { class: "label", text: f.label }),
           el("span", { class: "help", text: f.help }),
           criteriaInput(f));
@@ -1854,6 +2671,146 @@ function parseWeights(text) {
   return out;
 }
 
+/* -- documents that add to the profile -- */
+
+// Each file is scanned on its own and gets its own card, so a slow image
+// does not hold up the PDF dropped beside it. Nothing is kept until Keep.
+const evDrop = $("#ev-drop");
+evDrop.addEventListener("dragover", (e) => { e.preventDefault(); evDrop.classList.add("over"); });
+evDrop.addEventListener("dragleave", () => evDrop.classList.remove("over"));
+evDrop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  evDrop.classList.remove("over");
+  [...e.dataTransfer.files].forEach(scanDocument);
+});
+$("#ev-file").addEventListener("change", (e) => {
+  [...e.target.files].forEach(scanDocument);
+  e.target.value = "";
+});
+
+async function scanDocument(file) {
+  const card = el("div", { class: "ev-card" },
+    el("div", { class: "ev-head" }, el("b", { text: file.name }),
+      el("span", { class: "note", text: "Reading…" })));
+  $("#ev-results").prepend(card);
+  const status = card.querySelector(".note");
+  if (file.size > 6 * 1024 * 1024) {
+    status.textContent = "Over 6 MB. Drop in a smaller export of it.";
+    card.classList.add("failed");
+    return;
+  }
+  let result;
+  try {
+    result = await post("/api/evidence/scan", { filename: file.name, content: await base64(file) });
+  } catch (err) {
+    status.textContent = err.message;
+    card.classList.add("failed");
+    return;
+  }
+  const fresh = result.items.filter((i) => !i.have);
+  const had = result.items.filter((i) => i.have);
+  status.textContent = `read as ${result.read_as}, ${plural(result.chars, "character")}. `
+    + (fresh.length ? `${plural(fresh.length, "skill")} your profile does not show yet.`
+                    : "Nothing new: your profile already shows every skill in it.");
+  const picks = [];
+  const pick = (item, checked, kind) => {
+    const box = el("input", { type: "checkbox" });
+    box.checked = checked;
+    picks.push({ box, item, kind });
+    return el("label", { class: "ev-item" + (kind === "skill" && item.kind === "name" ? " name" : "") },
+      box,
+      el("span", { class: "ev-label", text: kind === "cert" ? item : item.label }),
+      kind === "skill" ? el("span", { class: "ev-kind",
+        text: item.kind === "name" ? "a name the app does not know" : (KIND_NAMES[item.kind] || item.kind) }) : null,
+      kind === "skill" && item.snippet ? el("span", { class: "ev-line", text: "“" + item.snippet + "”" }) : null);
+  };
+  if (fresh.length) {
+    const list = el("div", { class: "ev-list" });
+    // Known skills start ticked; names the vocabulary does not know start
+    // unticked, since a capitalized word is only sometimes a skill.
+    fresh.forEach((i) => list.append(pick(i, i.kind !== "name", "skill")));
+    card.append(list);
+  }
+  if (result.certificates.length) {
+    const list = el("div", { class: "ev-list" },
+      el("span", { class: "ev-sub", text: "Lines that look like a certificate or license" }));
+    result.certificates.forEach((c) => list.append(pick(c, false, "cert")));
+    card.append(list);
+  }
+  if (had.length) {
+    card.append(el("details", { class: "ev-had" },
+      el("summary", { text: `Already in your profile (${had.length})` }),
+      el("div", { class: "gap-chips" }, ...had.map((i) => el("span", { class: "gap-chip have", text: i.label })))));
+  }
+  if (!fresh.length && !result.certificates.length) return;
+  const keep = el("button", { type: "button", text: "Keep the ticked ones" });
+  const stack = el("button", { type: "button", class: "ghost", text: "Also add them to your stack",
+    title: "Puts the ticked skills in “Skills you also have” below, unsaved, so they count in the score once you press Save" });
+  const note = el("span", { class: "note" });
+  keep.addEventListener("click", async () => {
+    const skills = picks.filter((p) => p.kind === "skill" && p.box.checked)
+      .map((p) => ({ term: p.item.term || "", word: p.item.word || "", snippet: p.item.snippet, source: file.name }));
+    const certificates = picks.filter((p) => p.kind === "cert" && p.box.checked)
+      .map((p) => ({ text: p.item, source: file.name }));
+    if (!skills.length && !certificates.length) { note.textContent = "Tick at least one first."; return; }
+    keep.disabled = true;
+    try {
+      drawEvidence(await post("/api/evidence", { skills, certificates }));
+      note.textContent = `Kept ${plural(skills.length + certificates.length, "item")}.`;
+      card.classList.add("kept");
+      growthState.data = null;
+    } catch (err) { note.textContent = err.message; keep.disabled = false; }
+  });
+  stack.addEventListener("click", () => {
+    const area = $('#criteria textarea[name="supporting_skills"]');
+    if (!area) { note.textContent = "The criteria have not loaded yet."; return; }
+    const have = new Set(area.value.split("\n").map((l) => l.split(/[:=]/)[0].trim().toLowerCase()));
+    const add = picks.filter((p) => p.kind === "skill" && p.box.checked)
+      .map((p) => p.item.stack).filter((w) => w && !have.has(w.toLowerCase()));
+    if (!add.length) { note.textContent = "They are already in your stack."; return; }
+    area.value = [area.value.trim(), ...add].filter(Boolean).join("\n");
+    area.dispatchEvent(new Event("input", { bubbles: true }));
+    note.textContent = `Added ${add.join(", ")} below. Press Save and rescore to count them.`;
+    area.closest(".crit-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  card.append(el("div", { class: "ev-actions" }, keep, stack, note));
+}
+
+function drawEvidence(data) {
+  const box = $("#ev-kept");
+  box.textContent = "";
+  const skills = data.skill || [];
+  const certs = data.certificate || [];
+  if (!skills.length && !certs.length) return;
+  box.append(el("h3", { text: "Kept from your documents" }));
+  const chips = el("div", { class: "gap-chips" });
+  const forget = async (body) => {
+    try { drawEvidence(await post("/api/evidence/forget", body)); growthState.data = null; }
+    catch (err) { banner(err.message, true); }
+  };
+  skills.forEach((s) => chips.append(el("span", { class: "gap-chip have ev-chip",
+    title: (s.source ? `From ${s.source}` : "") + (s.snippet ? `: “${s.snippet}”` : "") },
+    el("span", { text: s.label || s.term || s.word }),
+    el("button", { type: "button", class: "tag-x", text: "\u00d7", "aria-label": `Forget ${s.label}`,
+      on: { click: () => forget({ term: s.term || "", word: s.word || "" }) } }))));
+  certs.forEach((c) => chips.append(el("span", { class: "gap-chip have ev-chip cert",
+    title: c.source ? `From ${c.source}` : "" },
+    el("span", { text: c.text }),
+    el("button", { type: "button", class: "tag-x", text: "\u00d7", "aria-label": "Forget this certificate",
+      on: { click: () => forget({ text: c.text }) } }))));
+  box.append(chips);
+}
+
+function loadEvidence() {
+  get("/api/evidence").then(drawEvidence).catch(() => {});
+}
+
+function setSaveBar(text, dirty) {
+  $("#criteria-status").textContent = text;
+  $("#save-bar").classList.toggle("dirty", !!dirty);
+}
+$("#criteria").addEventListener("input", () => setSaveBar("Unsaved changes", true));
+
 $("#save-criteria").addEventListener("click", async () => {
   const changes = {};
   $$("#criteria .crit-field").forEach((field) => {
@@ -1874,7 +2831,7 @@ $("#save-criteria").addEventListener("click", async () => {
     state.jobs = data.jobs;
     stamp(data);
     draw();
-    status.textContent = `Saved. ${plural(data.moved, "posting")} changed score.`;
+    setSaveBar(`Saved. ${plural(data.moved, "posting")} changed score.`);
     banner(`Criteria saved. ${plural(data.moved, "posting")} changed score; `
          + "the arrows next to each score show which way.");
     show("jobs");
@@ -1907,6 +2864,7 @@ function showCrit(pane) {
 
 $$(".crit-switch .chip").forEach((b) =>
   b.addEventListener("click", () => showCrit(b.dataset.crit)));
+pillTrack($(".crit-switch"));
 
 async function loadAbout() {
   const box = $("#about");
@@ -2072,6 +3030,7 @@ function drawSteps() {
     const n = Number(li.dataset.step);
     li.dataset.state = n === wizard.step ? "now" : (n < wizard.step ? "done" : "");
   });
+  $("#steps").style.setProperty("--progress", String(wizard.step / (STEPS - 1)));
   $$("#wizard .step").forEach((f) => {
     f.hidden = Number(f.dataset.step) !== wizard.step;
   });
@@ -2359,15 +3318,19 @@ $("#make-shortcut").addEventListener("click", async () => {
  * localStorage for theme.js, which applies them before the first paint.
  */
 
-const LOOK_KEYS = ["theme", "scheme", "font", "text_size", "density", "accent"];
+const LOOK_KEYS = ["theme", "scheme", "font", "text_size", "density", "accent", "custom"];
 let prefs = {
   jobs_sort: "newest", score_min: 45, score_max: 100, hide_applied: true,
   hide_prepared: false, remote_only: false, starred_only: false,
+  has_pay: false, market_up: false, tier: "", posted_within: "any", source: "",
   start_tab: "jobs",
-  theme: "system", scheme: "slate", font: "system", text_size: 100,
+  theme: "system", scheme: "mailroom", font: "system", text_size: 100,
   density: "normal", accent: "",
   job_columns: ["company", "location", "age_days", "market", "salary", "source"],
   views: [],
+  custom: { on: false, id: "", bg: [216, 33, 97], ac: [221, 83, 53], fade: false,
+            a: [256, 45, 14], b: [190, 60, 22], fade_style: "diagonal", over: {} },
+  themes: [],
 };
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -2384,19 +3347,129 @@ function accentInk(hex) {
 }
 let prefDefaults = Object.assign({}, prefs);   // replaced by the server's copy
 
+/* -- custom colors -- */
+/*
+ * Built the way FitNext builds its custom themes: a background and an accent,
+ * each picked by hue, saturation and lightness, and every other color worked
+ * out from those two, so any pair stays readable. Cards lift off the page,
+ * text contrasts with it, and the lines sit between. Fade swaps the one
+ * background for two colors the page fades between, and Fine-tune lets any
+ * single color be picked by hand on top of the worked-out one.
+ */
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function hsl(h, s, l) {
+  s = clamp(s, 0, 100) / 100;
+  l = clamp(l, 0, 100) / 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return "#" + [f(0), f(8), f(4)].map((x) =>
+    Math.round(x * 255).toString(16).padStart(2, "0")).join("");
+}
+
+function toHsl(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2, d = max - min;
+  let h = 0;
+  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  const s = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
+  return [Math.round((h * 60 + 360) % 360), Math.round(s * 100), Math.round(l * 100)];
+}
+
+// Halfway between two colors, the short way round the hue circle. A fade's
+// cards and text are worked out from this, so they suit both ends.
+function midHsl(a, b) {
+  const d = ((b[0] - a[0] + 540) % 360) - 180;
+  return [Math.round((a[0] + d / 2 + 360) % 360),
+          Math.round((a[1] + b[1]) / 2), Math.round((a[2] + b[2]) / 2)];
+}
+
+function luminance(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [n >> 16, (n >> 8) & 255, n & 255].reduce((sum, c, i) => {
+    c /= 255;
+    c = c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    return sum + c * [0.2126, 0.7152, 0.0722][i];
+  }, 0);
+}
+
+const FADES = {
+  diagonal: (a, b) => `linear-gradient(135deg, ${a}, ${b})`,
+  vertical: (a, b) => `linear-gradient(180deg, ${a}, ${b})`,
+  horizontal: (a, b) => `linear-gradient(90deg, ${a}, ${b})`,
+  glow: (a, b, ground) => `radial-gradient(60% 55% at 12% 8%, ${a} 0%, transparent 72%), `
+    + `radial-gradient(55% 60% at 92% 88%, ${b} 0%, transparent 72%), ${ground}`,
+};
+
+// Every token a custom palette sets, from its background and accent.
+function palette(c) {
+  const [h, s, l] = c.fade ? midHsl(c.a, c.b) : c.bg;
+  const dark = l < 45;
+  const t = (dl) => hsl(h, s, clamp(l + dl, 0, 100));
+  const accent = hsl(...c.ac);
+  const tokens = {
+    ground: hsl(h, s, l),
+    card: dark ? t(5) : l > 93 ? "#ffffff" : t(Math.min(8, 100 - l)),
+    "line-soft": dark ? t(9) : t(-5),
+    line: dark ? t(14) : t(-10),
+    ink: dark ? hsl(h, Math.min(s, 20), 93) : hsl(h, Math.min(s + 20, 60), 12),
+    "ink-soft": dark ? hsl(h, Math.min(s, 18), 66) : hsl(h, Math.min(s + 10, 25), 40),
+    "ink-faint": dark ? hsl(h, Math.min(s, 15), 47) : hsl(h, Math.min(s + 5, 20), 60),
+    accent, "accent-ink": accentInk(accent),
+    good: dark ? "#4cc38a" : "#1f8a4c",
+    warn: dark ? "#e0b25a" : "#b7791f",
+    bad: dark ? "#f07a6a" : "#c0392b",
+  };
+  const over = c.over || {};
+  Object.keys(over).forEach((k) => { if (k in tokens && HEX.test(over[k])) tokens[k] = over[k]; });
+  // A hand-picked accent still gets readable text on it unless that was
+  // picked by hand too.
+  if (over.accent && !over["accent-ink"]) tokens["accent-ink"] = accentInk(tokens.accent);
+  const isDark = over.ground ? luminance(tokens.ground) < 0.18 : dark;
+  const backdrop = c.fade
+    ? (FADES[c.fade_style] || FADES.diagonal)(hsl(...c.a), hsl(...c.b), tokens.ground) : "";
+  return { dark: isDark, tokens, backdrop };
+}
+
+// The inline properties a custom palette puts on the root, so turning it off
+// can take them back, whether app.js or theme.js put them there. The accent
+// pair is left to applyLook's own accent code, which runs first.
+const PAINTED = ["ground", "card", "line", "line-soft", "ink", "ink-soft", "ink-faint",
+  "good", "warn", "bad"].map((k) => `--${k}-fixed`).concat(["--backdrop", "--shadow"]);
+
+function paintCustom(c) {
+  const root = document.documentElement;
+  PAINTED.forEach((prop) => root.style.removeProperty(prop));
+  root.style.removeProperty("color-scheme");
+  if (!c) return null;
+  const { dark, tokens, backdrop } = palette(c);
+  const vars = {};
+  Object.keys(tokens).forEach((k) => { vars[`--${k}-fixed`] = tokens[k]; });
+  if (backdrop) vars["--backdrop"] = backdrop;
+  vars["--shadow"] = dark ? "none"
+    : "0 1px 2px rgba(20, 25, 35, .05), 0 6px 18px rgba(20, 25, 35, .06)";
+  Object.keys(vars).forEach((prop) => root.style.setProperty(prop, vars[prop]));
+  root.style.colorScheme = dark ? "dark" : "light";
+  return { scheme: c.fade ? "fade-custom" : "custom", vars, dark };
+}
+
 function applyLook(p) {
   const root = document.documentElement;
+  const custom = p.custom && p.custom.on ? p.custom : null;
   if (p.theme === "light" || p.theme === "dark") root.dataset.theme = p.theme;
   else delete root.dataset.theme;
-  root.dataset.scheme = p.scheme || "slate";
   root.dataset.font = p.font || "system";
   root.dataset.density = p.density;
   /* A number, not an attribute, so the size can be any percentage the server
      will accept rather than one of a handful the stylesheet knows by name. */
   root.style.setProperty("--zoom", String((Number(p.text_size) || 100) / 100));
-  // A custom accent overrides the scheme's in both light and dark.
-  const accent = HEX.test(p.accent || "") ? p.accent : "";
-  ["light", "dark"].forEach((mode) => {
+  // A custom accent overrides the scheme's in both light and dark, and over
+  // a one-mode scheme's own. Custom colors bring their own accent.
+  const accent = !custom && HEX.test(p.accent || "") ? p.accent : "";
+  ["light", "dark", "fixed"].forEach((mode) => {
     if (accent) {
       root.style.setProperty(`--accent-${mode}`, accent);
       root.style.setProperty(`--accent-ink-${mode}`, accentInk(accent));
@@ -2405,15 +3478,372 @@ function applyLook(p) {
       root.style.removeProperty(`--accent-ink-${mode}`);
     }
   });
+  const paint = paintCustom(custom);
+  root.dataset.scheme = paint ? paint.scheme : (p.scheme || "mailroom");
   const shown = accent || getComputedStyle(root).getPropertyValue("--accent").trim();
   if (HEX.test(shown)) $("#accent").value = shown.toLowerCase();
   const look = {};
   LOOK_KEYS.forEach((k) => { look[k] = p[k]; });
+  // theme.js cannot work a palette out, so it is handed the result.
+  look.paint = paint;
   try { localStorage.setItem("jobdesk.look", JSON.stringify(look)); } catch { /* private mode */ }
-  // The phone's status bar takes this colour, so it follows the theme too.
+  // The phone's status bar takes this color, so it follows the theme too.
   const meta = document.querySelector('meta[name="theme-color"]');
   const card = getComputedStyle(root).getPropertyValue("--card").trim();
   if (meta && card) meta.content = card;
+  drawThemeNote(p);
+}
+
+/* -- the scheme picker -- */
+
+// Which group of the Colors menu a scheme sits in: "both" for the ones with
+// a light and a dark mode, anything else for one that is always one or the
+// other. The menu's own markup says, so there is no second list to keep.
+function schemeMode(id) {
+  const option = $(`#scheme option[value="${id}"]`);
+  return option ? option.parentElement.dataset.mode : "both";
+}
+
+function customOn(p) { return !!(p.custom && p.custom.on); }
+
+function drawThemeNote(p) {
+  const on = customOn(p);
+  const fixed = on || schemeMode(p.scheme) !== "both";
+  const theme = $('[data-pref="theme"]');
+  theme.disabled = fixed;
+  const note = $("#theme-note");
+  note.hidden = !fixed;
+  if (fixed) {
+    const mine = on && (p.themes || []).find((t) => t.id === p.custom.id);
+    const name = on ? (mine ? mine.name : "Custom colors")
+      : $(`#scheme option[value="${p.scheme}"]`).textContent;
+    const dark = getComputedStyle(document.documentElement).colorScheme === "dark";
+    note.textContent = `${name} ${on && !mine ? "are" : "is"} always ${dark ? "dark" : "light"}, `
+      + `so Theme does nothing while ${on && !mine ? "they are" : "it is"} picked.`;
+  }
+  $$("#swatches .swatch").forEach((b) => {
+    const pressed = b.dataset.mine
+      ? on && b.dataset.mine === p.custom.id
+      : !on && b.dataset.scheme === p.scheme;
+    b.setAttribute("aria-pressed", String(pressed));
+  });
+}
+
+// A saved theme's swatch paints itself from its own palette, inline, which
+// outranks the reset every swatch starts from.
+function mineSwatch(theme) {
+  const { tokens, backdrop } = palette(theme);
+  const b = el("button", { class: "swatch mine", type: "button",
+    title: theme.name, "aria-label": theme.name,
+    on: { click: () => pickMine(theme) } },
+    el("span", { class: "sw-l" }, el("i"), el("b")),
+    el("span", { class: "sw-d" }, el("i"), el("b")),
+    el("span", { class: "sw-name", text: theme.name }));
+  b.dataset.mine = theme.id;
+  ["ground", "card", "line", "accent"].forEach((k) =>
+    b.style.setProperty(`--${k}-fixed`, tokens[k]));
+  if (backdrop) b.style.setProperty("--backdrop", backdrop);
+  const x = el("span", { class: "swatch-x", role: "button", tabindex: "0",
+    title: `Delete ${theme.name}`, "aria-label": `Delete ${theme.name}`, text: "×",
+    on: {
+      click: (e) => { e.stopPropagation(); deleteMine(theme); },
+      keydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); deleteMine(theme); } },
+    } });
+  b.append(x);
+  return b;
+}
+
+/* One button per scheme, grouped the way the menu is. Each carries its own
+   `data-scheme`, so the stylesheet paints it from the same block the page
+   would use: the left half is the light mode, the right half the dark one,
+   and a one-mode scheme is the same on both. Saved custom colors come first,
+   under Yours. */
+function drawSwatches() {
+  const box = $("#swatches");
+  box.textContent = "";
+  const mine = prefs.themes || [];
+  if (mine.length) {
+    box.append(el("h3", { class: "swatch-head", text: "Yours" }),
+      el("div", { class: "swatch-row" }, ...mine.map(mineSwatch)));
+  }
+  $$("#scheme optgroup").forEach((group) => {
+    const row = el("div", { class: "swatch-row" });
+    Array.from(group.children).forEach((option) => {
+      const b = el("button", { class: "swatch", type: "button",
+        title: option.textContent, "aria-label": option.textContent,
+        on: { click: () => {
+          const select = $("#scheme");
+          select.value = option.value;
+          select.dispatchEvent(new Event("change"));
+        } } },
+        el("span", { class: "sw-l" }, el("i"), el("b")),
+        el("span", { class: "sw-d" }, el("i"), el("b")),
+        el("span", { class: "sw-name", text: option.textContent }));
+      b.dataset.scheme = option.value;
+      row.append(b);
+    });
+    box.append(el("h3", { class: "swatch-head", text: group.label }), row);
+  });
+  drawThemeNote(prefs);
+}
+drawSwatches();
+
+/* -- the custom colors editor -- */
+
+// The palette being edited. Moving a slider previews it on the whole page
+// at once; letting go saves it. Once moved, it is no longer the saved theme
+// it started from, so that one stays as it was until saved again.
+let draft = null;
+let customSyncs = [];
+let customTimer = null;
+
+const PALETTE_KEYS = ["bg", "ac", "fade", "a", "b", "fade_style", "over"];
+const FINE_TUNE = [["ground", "Page"], ["card", "Cards"], ["line", "Lines"],
+  ["ink", "Text"], ["ink-soft", "Quiet text"], ["accent", "Accent"],
+  ["accent-ink", "Text on the accent"], ["good", "Good, tier A"],
+  ["warn", "Warning, tier C"], ["bad", "Bad"]];
+
+function freshDraft() {
+  return JSON.parse(JSON.stringify(prefs.custom || prefDefaults.custom));
+}
+
+function previewCustom() {
+  applyLook(Object.assign({}, prefs, { custom: draft }));
+  customSyncs.forEach((sync) => sync());
+}
+
+function editCustom(change, now) {
+  change(draft);
+  draft.on = true;
+  draft.id = "";
+  previewCustom();
+  clearTimeout(customTimer);
+  if (now) commitCustom();
+}
+
+async function commitCustom() {
+  clearTimeout(customTimer);
+  const sending = JSON.parse(JSON.stringify(draft));
+  await saveSetting("custom", sending);
+  applyLook(prefs);
+  drawThemeNote(prefs);
+}
+
+async function pickMine(theme) {
+  draft = Object.assign({ on: true, id: theme.id },
+    JSON.parse(JSON.stringify(Object.fromEntries(PALETTE_KEYS.map((k) => [k, theme[k]])))));
+  previewCustom();
+  await commitCustom();
+}
+
+async function deleteMine(theme) {
+  const themes = (prefs.themes || []).filter((t) => t.id !== theme.id);
+  const body = { themes };
+  // The colors stay on the page; they just stop being that saved theme.
+  if (prefs.custom && prefs.custom.id === theme.id) body.custom = Object.assign({}, prefs.custom, { id: "" });
+  try {
+    const data = await post("/api/settings", { settings: body });
+    prefs = data.settings;
+    draft = freshDraft();
+    drawSwatches();
+    customSyncs.forEach((sync) => sync());
+    saved(`Deleted ${theme.name}.`);
+  } catch (err) { saved(err.message); }
+}
+
+// Three sliders and a color well for one color. The slider tracks show what
+// each one would do from where the other two are.
+function colorGroup(title, key) {
+  const get = () => draft[key];
+  const well = el("input", { type: "color", "aria-label": `${title} color`,
+    on: {
+      input: (e) => editCustom((d) => { d[key] = toHsl(e.target.value); }),
+      change: () => commitCustom(),
+    } });
+  const rows = [["Hue", 0, 359], ["Color", 1, 100], ["Light", 2, 100]].map(([label, i, max]) => {
+    const range = el("input", { type: "range", min: 0, max, "aria-label": `${title} ${label.toLowerCase()}`,
+      on: {
+        input: (e) => editCustom((d) => { d[key] = d[key].slice(); d[key][i] = Number(e.target.value); }),
+        change: () => commitCustom(),
+      } });
+    const num = el("span", { class: "slider-num" });
+    const row = el("label", { class: "slider" }, el("span", { class: "slider-label", text: label }), range, num);
+    return { i, range, num, row };
+  });
+  const box = el("div", { class: "color-group" },
+    el("div", { class: "color-head" }, el("b", { text: title }), well),
+    ...rows.map((r) => r.row));
+  customSyncs.push(() => {
+    const [h, s, l] = get();
+    well.value = hsl(h, s, l);
+    rows.forEach((r) => {
+      r.range.value = get()[r.i];
+      r.num.textContent = String(get()[r.i]);
+    });
+    rows[0].range.style.background = `linear-gradient(90deg, ${[0, 60, 120, 180, 240, 300, 359]
+      .map((x) => hsl(x, Math.max(s, 50), 50)).join(", ")})`;
+    rows[1].range.style.background = `linear-gradient(90deg, ${hsl(h, 0, l)}, ${hsl(h, 100, l)})`;
+    rows[2].range.style.background = `linear-gradient(90deg, #000, ${hsl(h, s, 50)}, #fff)`;
+  });
+  return box;
+}
+
+// Every slider of the background in use (one color, or both fade ends) and
+// the accent gets any value at all. Light or dark is whatever falls out;
+// cards and text are worked out from the result, so it stays readable.
+function randomize(d) {
+  const any = () => [Math.floor(Math.random() * 360), Math.floor(Math.random() * 101),
+    Math.floor(Math.random() * 101)];
+  if (d.fade) { d.a = any(); d.b = any(); } else d.bg = any();
+  d.ac = any();
+}
+
+// A row of buttons that works like a radio group, with a pill that slides to
+// the one picked.
+function segmented(label, options, get, set) {
+  const box = el("div", { class: "seg", role: "radiogroup", "aria-label": label });
+  options.forEach(([value, text]) => box.append(el("button", {
+    type: "button", class: "seg-btn", role: "radio", text,
+    on: { click: () => set(value) } })));
+  box.querySelectorAll(".seg-btn").forEach((b, i) => { b.dataset.value = options[i][0]; });
+  pillTrack(box);
+  customSyncs.push(() => {
+    box.querySelectorAll(".seg-btn").forEach((b) =>
+      b.setAttribute("aria-checked", String(b.dataset.value === get())));
+  });
+  return box;
+}
+
+function switchBox(label, get, set) {
+  const input = el("input", { type: "checkbox", role: "switch",
+    on: { change: (e) => set(e.target.checked) } });
+  customSyncs.push(() => { input.checked = !!get(); });
+  return el("label", { class: "switch" }, input, el("span", { class: "switch-track" }), el("span", { text: label }));
+}
+
+// A small JobDesk, painted from the draft: a menu, a row with a score, two
+// chips and the accent button. It reads the draft directly, so it shows the
+// colors even while they are off on the page.
+function customPreview() {
+  const box = el("div", { class: "custom-preview", "aria-hidden": "true" },
+    el("div", { class: "cp-side" }, el("i", { class: "cp-mark" }), el("i"), el("i", { class: "on" }), el("i")),
+    el("div", { class: "cp-main" },
+      el("div", { class: "cp-chips" }, el("span", { class: "on", text: "All" }), el("span", { text: "A" }), el("span", { text: "Remote" })),
+      el("div", { class: "cp-card" },
+        el("span", { class: "cp-score", text: "93" }), el("span", { class: "cp-tier", text: "A" }),
+        el("span", { class: "cp-lines" }, el("b", { text: "Data Analyst" }), el("small", { text: "Scale Media · Remote" }))),
+      el("div", { class: "cp-card" },
+        el("span", { class: "cp-score", text: "71" }), el("span", { class: "cp-tier b", text: "B" }),
+        el("span", { class: "cp-lines" }, el("b", { text: "Ops Analyst" }), el("small", { text: "CarMax · Richmond" }))),
+      el("span", { class: "cp-btn", text: "Build the packet" })));
+  customSyncs.push(() => {
+    const { tokens, backdrop } = palette(draft);
+    Object.keys(tokens).forEach((k) => box.style.setProperty(`--p-${k}`, tokens[k]));
+    box.style.setProperty("--p-backdrop", backdrop || tokens.ground);
+    box.classList.toggle("glass", !!draft.fade);
+  });
+  return box;
+}
+
+function fineTune() {
+  const list = el("div", { class: "fine" });
+  FINE_TUNE.forEach(([key, label]) => {
+    const well = el("input", { type: "color", "aria-label": label,
+      on: {
+        input: (e) => editCustom((d) => { d.over = Object.assign({}, d.over, { [key]: e.target.value }); }),
+        change: () => commitCustom(),
+      } });
+    const auto = el("button", { type: "button", class: "ghost small", text: "Auto",
+      title: "Go back to the worked-out color",
+      on: { click: () => editCustom((d) => {
+        d.over = Object.assign({}, d.over);
+        delete d.over[key];
+      }, true) } });
+    const row = el("div", { class: "fine-row" }, well, el("span", { class: "fine-label", text: label }), auto);
+    customSyncs.push(() => {
+      well.value = palette(draft).tokens[key];
+      const picked = !!(draft.over && draft.over[key]);
+      row.classList.toggle("picked", picked);
+      auto.hidden = !picked;
+    });
+    list.append(row);
+  });
+  return el("details", { class: "fine-box" },
+    el("summary", {}, el("span", { text: "Fine-tune each color" }),
+      el("span", { class: "note", text: "Anything picked here wins over the worked-out color." })),
+    list);
+}
+
+function drawCustom() {
+  const box = $("#custom-editor");
+  box.textContent = "";
+  customSyncs = [];
+  draft = freshDraft();
+  const solid = colorGroup("Background", "bg");
+  const from = colorGroup("Fade from", "a");
+  const to = colorGroup("Fade to", "b");
+  const style = segmented("Fade direction",
+    [["diagonal", "Diagonal"], ["vertical", "Top to bottom"], ["horizontal", "Side to side"], ["glow", "Two glows"]],
+    () => draft.fade_style, (v) => editCustom((d) => { d.fade_style = v; }, true));
+  const fadeBox = el("div", { class: "fade-box" }, el("div", { class: "color-pair" }, from, to), style,
+    el("p", { class: "note fade-warn" }));
+  const name = el("input", { type: "text", maxlength: 40, placeholder: "Name these colors",
+    "aria-label": "Name for these colors" });
+  const save = el("button", { type: "submit", text: "Save as a theme" });
+  const form = el("form", { class: "save-theme",
+    on: { submit: (e) => { e.preventDefault(); saveMine(name); } } }, name, save);
+  box.append(
+    el("div", { class: "custom-top" },
+      customPreview(),
+      el("div", { class: "custom-switches" },
+        switchBox("Use my colors", () => draft.on, async (on) => {
+          draft.on = on;
+          previewCustom();
+          await commitCustom();
+        }),
+        el("div", { class: "bg-row" },
+          segmented("Background", [["solid", "One color"], ["fade", "Fade"]],
+            () => (draft.fade ? "fade" : "solid"),
+            (v) => editCustom((d) => { d.fade = v === "fade"; }, true)),
+          el("button", { type: "button", class: "ghost randomize", text: "Randomize",
+            title: "Any hue, color and light for every slider, light or dark",
+            on: { click: () => editCustom(randomize, true) } })),
+        el("p", { class: "note", text: "Cards, text and lines follow from the background, "
+          + "so every pair stays readable." }))),
+    el("div", { class: "custom-groups" },
+      el("div", { class: "solid-box" }, solid), fadeBox, colorGroup("Accent", "ac")),
+    fineTune(),
+    form);
+  customSyncs.push(() => {
+    solid.parentElement.hidden = !!draft.fade;
+    fadeBox.hidden = !draft.fade;
+    const far = Math.abs(draft.a[2] - draft.b[2]) > 45;
+    const warn = fadeBox.querySelector(".fade-warn");
+    warn.hidden = !far;
+    warn.textContent = far ? "The two ends are far apart in lightness, so text over one end "
+      + "may be hard to read. Cards stay readable either way." : "";
+    name.placeholder = `My theme ${(prefs.themes || []).length + 1}`;
+  });
+  customSyncs.forEach((sync) => sync());
+}
+
+async function saveMine(nameInput) {
+  const themes = prefs.themes || [];
+  const id = "my-" + Date.now().toString(36);
+  const theme = Object.assign({ id, name: nameInput.value.trim() || `My theme ${themes.length + 1}` },
+    JSON.parse(JSON.stringify(Object.fromEntries(PALETTE_KEYS.map((k) => [k, draft[k]])))));
+  const custom = Object.assign({}, draft, { on: true, id });
+  try {
+    const data = await post("/api/settings", { settings: {
+      themes: [theme, ...themes].slice(0, 24), custom } });
+    prefs = data.settings;
+    nameInput.value = "";
+    draft = freshDraft();
+    applyLook(prefs);
+    drawSwatches();
+    customSyncs.forEach((sync) => sync());
+    saved(`Saved ${theme.name}. It is first under Yours.`);
+  } catch (err) { saved(err.message); }
 }
 
 function applyFilters(p) {
@@ -2423,6 +3853,11 @@ function applyFilters(p) {
   $("#hide-prepared").checked = !!p.hide_prepared;
   $("#remote-only").checked = !!p.remote_only;
   $("#starred-only").checked = !!p.starred_only;
+  $("#has-pay").checked = !!p.has_pay;
+  $("#market-up").checked = !!p.market_up;
+  $("#posted-within").value = p.posted_within || "any";
+  setSource(p.source);
+  setTier(p.tier);
   setOrder(p.jobs_sort);
 }
 
@@ -2461,11 +3896,18 @@ $$("[data-pref]").forEach((input) => input.addEventListener("change", async () =
   const key = input.dataset.pref;
   let value = input.type === "checkbox" ? input.checked : input.value;
   if (input.type === "number" || key === "text_size") value = Number(value);
+  const body = { [key]: value };
+  // Picking one of the built-in schemes puts custom colors away, but keeps
+  // them, so the switch in Custom colors brings them straight back.
+  if (key === "scheme" && customOn(prefs)) body.custom = Object.assign({}, prefs.custom, { on: false });
   try {
-    const data = await post("/api/settings", { settings: { [key]: value } });
+    const data = await post("/api/settings", { settings: body });
     prefs = data.settings;
     drawPrefs();
-    if (LOOK_KEYS.includes(key)) applyLook(prefs);
+    if (LOOK_KEYS.includes(key)) {
+      applyLook(prefs);
+      if (body.custom) drawCustom();
+    }
     else if (key !== "start_tab") { applyFilters(prefs); draw(); }
     saved("Saved.");
   } catch (err) {
@@ -2474,7 +3916,7 @@ $$("[data-pref]").forEach((input) => input.addEventListener("change", async () =
   }
 }));
 
-/* -- accent colour -- */
+/* -- accent color -- */
 
 async function saveSetting(key, value) {
   try {
@@ -2566,6 +4008,9 @@ async function loadSettings() {
     prefs = data.settings;
     prefDefaults = data.defaults;
     drawPrefs();
+    applyLook(prefs);
+    drawSwatches();
+    drawCustom();
     drawColumnList();
     drawFolders(data.folders);
   } catch (err) {
@@ -2593,10 +4038,15 @@ $("#open-profile").addEventListener("click", () =>
 $("#reset-settings").addEventListener("click", async () => {
   if (!confirm("Put every setting on this page back to its default?")) return;
   try {
-    const data = await post("/api/settings", { settings: prefDefaults });
+    // Saved themes are things made, not settings, so they stay.
+    const reset = Object.assign({}, prefDefaults);
+    delete reset.themes;
+    const data = await post("/api/settings", { settings: reset });
     prefs = data.settings;
     drawPrefs();
     applyLook(prefs);
+    drawSwatches();
+    drawCustom();
     applyFilters(prefs);
     draw();
     $("#reset-status").textContent = "Done.";
@@ -2616,23 +4066,42 @@ $("#gear").addEventListener("click", () => show("settings"));
 const TIER_WORDS = { A: "is worth applying to today", B: "is a good fit",
                      C: "is worth a look" };
 
+// One color per part of the score, in the bar and in its key. Decoration
+// only: the key says the same thing in words.
+const PART_COLORS = ["#3b82f6", "#22a06b", "#8b5cf6", "#e0a32b", "#14b8a6",
+                     "#ec4899", "#64748b", "#f97316"];
+
 function drawScoring(scoring) {
   const parts = $("#score-parts");
+  const bar = $("#points-bar");
   parts.textContent = "";
+  bar.textContent = "";
   state.partMax = Object.fromEntries(scoring.parts.map((p) => [p.label, p.max]));
-  scoring.parts.forEach((p) => parts.append(el("li", {},
-    el("b", {}, p.label), ` up to ${p.max}${p.label === "Pay" ? ", when listed" : ""}`)));
+  scoring.parts.forEach((p, i) => {
+    const color = PART_COLORS[i % PART_COLORS.length];
+    const seg = el("i", { title: `${p.label}, up to ${p.max}` });
+    seg.style.flexGrow = String(Math.max(1, p.max));
+    seg.style.background = color;
+    seg.style.animationDelay = `${i * 60}ms`;
+    bar.append(seg);
+    const dot = el("span", { class: "dot" });
+    dot.style.background = color;
+    parts.append(el("li", {}, dot,
+      el("b", {}, p.label), ` up to ${p.max}${p.label === "Pay" ? ", when listed" : ""}`));
+  });
 
   const legend = $("#tier-legend");
-  legend.textContent = "The letter next to each score is a shorthand for it: ";
+  legend.textContent = "";
   const select = $("#tier");
   select.length = 1;
   let ceiling = 100;
   scoring.tiers.forEach(({ tier, floor }) => {
     const range = ceiling === 100 ? `${floor} and up` : `${floor} to ${ceiling}`;
     if (TIER_WORDS[tier]) {
-      legend.append(el("span", { class: `tier ${tier}` }, tier),
-                    ` ${range} ${TIER_WORDS[tier]}. `);
+      legend.append(el("div", { class: `tier-card t-${tier}` },
+        el("span", { class: `tier ${tier}`, text: tier }),
+        el("b", { text: range }),
+        el("span", { class: "note", text: TIER_WORDS[tier].replace(/^is /, "") })));
       select.append(el("option", { value: `${floor},${ceiling}` },
                        `${tier}, ${range}`));
     }
@@ -2640,7 +4109,10 @@ function drawScoring(scoring) {
   });
   const shown = scoring.tiers.find((t) => t.tier === "C");
   if (shown) {
-    legend.append(`Below ${shown.floor} is hidden unless you ask for it.`);
+    legend.append(el("div", { class: "tier-card t-hidden" },
+      el("span", { class: "tier D", text: "D" }),
+      el("b", { text: `Below ${shown.floor}` }),
+      el("span", { class: "note", text: "hidden unless you ask for it" })));
     select.append(el("option", { value: `${shown.floor},100` }, "everything scored"));
   }
   select.append(el("option", { value: "0,100" }, "everything, F-tier included"));
@@ -2682,6 +4154,7 @@ async function boot(stay) {
     drawSteps();
   }
   loadRuns();
+  if ($("#view-applied").hidden) loadApplications();
 }
 
 boot();

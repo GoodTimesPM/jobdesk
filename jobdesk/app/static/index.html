@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>JobDesk</title>
 <!-- Before the stylesheet, so a dark theme is in place on the first paint
      instead of flashing white while app.js fetches the settings. -->
@@ -24,26 +24,72 @@
 </head>
 <body>
 
-<header class="bar">
-  <div class="brand">JobDesk</div>
+<div class="shell">
+<!-- The menu. A sidebar on a desktop that folds down to a rail of icons, and
+     on a phone a bar along the bottom with the brand and the radar button at
+     the top. One set of controls either way, so nothing has two ids. -->
+<aside class="side-nav" id="side-nav">
+  <div class="side-top">
+    <span class="brand-mark" aria-hidden="true">J</span>
+    <span class="brand">JobDesk</span>
+    <button class="side-fold" id="side-fold" type="button" aria-expanded="true"
+            title="Fold the menu to icons" aria-label="Fold the menu">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15.5 10l-2 2 2 2"/></svg>
+    </button>
+  </div>
   <nav class="tabs" id="tabs">
-    <button class="tab" data-view="jobs">Jobs</button>
-    <button class="tab" data-view="applied">Applied</button>
-    <button class="tab" data-view="archive">Archive</button>
-    <button class="tab" data-view="criteria">Criteria</button>
-    <button class="tab" data-view="console">Console</button>
-    <button class="tab" data-view="setup">Setup</button>
+    <button class="tab" data-view="jobs" title="Jobs">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 12l6-6"/></svg>
+      <span class="tab-label">Jobs</span><span class="ct" id="ct-jobs"></span>
+    </button>
+    <button class="tab" data-view="applied" title="Applied">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h11M4 12h11M4 18h7"/><path d="M15 17.5l2 2 4.5-4.5"/></svg>
+      <span class="tab-label">Applied</span><span class="ct" id="ct-applied"></span>
+    </button>
+    <button class="tab" data-view="growth" title="Growth">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M6 16l4-4 3 3 6-7"/><path d="M15 8h4v4"/></svg>
+      <span class="tab-label">Growth</span>
+    </button>
+    <button class="tab" data-view="archive" title="Archive">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/></svg>
+      <span class="tab-label">Archive</span>
+    </button>
+    <button class="tab" data-view="criteria" title="Criteria">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+      <span class="tab-label">Criteria</span>
+    </button>
+    <button class="tab" data-view="console" title="Console">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12.5 15H17"/></svg>
+      <span class="tab-label">Console</span>
+    </button>
+    <button class="tab" data-view="setup" title="Setup">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+      <span class="tab-label">Setup</span>
+    </button>
   </nav>
-  <button class="runbadge" id="runbadge" hidden></button>
-  <div class="who" id="who"></div>
-  <button class="gear" id="gear" aria-label="Settings" title="Settings">
-    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none"
+  <div class="side-views" id="side-views-box" hidden>
+    <div class="side-head">Saved views</div>
+    <div id="side-views"></div>
+  </div>
+  <div class="side-foot">
+    <button class="runbadge" id="runbadge" hidden></button>
+    <button id="sweep" class="side-run" type="button" title="Run the radar">
+      <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5L4.5 13.5h6.5l-1 8 8.5-11h-6.5z"/></svg>
+      <span class="tab-label">Run the radar</span>
+    </button>
+    <div class="who" id="who"></div>
+    <button class="tab gear" id="gear" data-view="settings" aria-label="Settings" title="Settings">
+    <svg class="ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none"
          stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="3"/>
       <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
     </svg>
-  </button>
-</header>
+    <span class="tab-label">Settings</span>
+    </button>
+  </div>
+</aside>
+
+<div class="stage">
 
 <div class="banner" id="banner" hidden>
   <span id="banner-text"></span>
@@ -54,14 +100,66 @@
 
 <!-- == jobs =========================================================== -->
 <main class="view" id="view-jobs" hidden>
-  <section class="controls">
-    <input type="search" id="search" placeholder="Filter by title, company, or location">
+ <div class="jobs-split" id="jobs-split">
+ <section class="list-pane">
+  <section class="controls list-head">
+    <label class="searchbox">
+      <svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+      <input type="search" id="search" placeholder="Filter by title, company, or location" aria-label="Filter the postings">
+    </label>
+    <!-- How the postings are laid out, kept per device like Rows and Tiles on
+         the other tabs. Timeline is what a phone starts with. -->
+    <div class="styles" id="styles" role="group" aria-label="How to show the postings">
+      <button type="button" class="style-btn" data-style="list" title="List" aria-pressed="false">
+        <svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="6" rx="1.5"/><rect x="3.5" y="14" width="17" height="6" rx="1.5"/></svg>
+        <span>List</span></button>
+      <button type="button" class="style-btn" data-style="compact" title="Compact" aria-pressed="false">
+        <svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 9.7h16M4 14.3h16M4 19h16"/></svg>
+        <span>Compact</span></button>
+      <button type="button" class="style-btn" data-style="tiles" title="Tiles" aria-pressed="false">
+        <svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+        <span>Tiles</span></button>
+      <button type="button" class="style-btn" data-style="timeline" title="Timeline" aria-pressed="false">
+        <svg class="ic" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v18"/><circle cx="6" cy="7" r="2"/><circle cx="6" cy="16" r="2"/><path d="M11 7h9M11 16h9"/></svg>
+        <span>Timeline</span></button>
+    </div>
+  </section>
+
+  <!-- One tap each. The tier chips and the Starred, Remote, Pay and Market
+       chips drive the same filters as the More menu and saved views, so
+       there is one set of filters with two ways to reach it. -->
+  <section class="chips filter-chips" id="filter-chips" aria-label="Quick filters">
+    <button type="button" class="chip" data-tier="" aria-pressed="true">All</button>
+    <button type="button" class="chip" data-tier="A" aria-pressed="false">A</button>
+    <button type="button" class="chip" data-tier="B" aria-pressed="false">B</button>
+    <button type="button" class="chip" data-tier="C" aria-pressed="false">C</button>
+    <button type="button" class="chip" data-tier="D" aria-pressed="false">D</button>
+    <span class="chip-gap" aria-hidden="true"></span>
+    <button type="button" class="chip" data-box="starred-only" aria-pressed="false">&#9733; Starred</button>
+    <button type="button" class="chip" data-box="remote-only" aria-pressed="false">Remote</button>
+    <button type="button" class="chip" data-box="has-pay" aria-pressed="false">Pay listed</button>
+    <button type="button" class="chip" data-box="market-up" aria-pressed="false">&#9650; Above market</button>
+  </section>
+
+  <section class="controls filter-bar">
     <label class="pick">Score
       <input type="number" id="score-min" min="0" max="100" step="1" value="45"
              inputmode="numeric" aria-label="Lowest score to show">
       <span class="to">to</span>
       <input type="number" id="score-max" min="0" max="100" step="1" value="100"
              inputmode="numeric" aria-label="Highest score to show">
+    </label>
+    <label class="pick">Posted
+      <select id="posted-within">
+        <option value="any">any time</option>
+        <option value="0">today</option>
+        <option value="3">last 3 days</option>
+        <option value="7">last week</option>
+        <option value="14">last 2 weeks</option>
+      </select>
+    </label>
+    <label class="pick">Source
+      <select id="source"><option value="">all</option></select>
     </label>
     <label class="pick">Order
       <select id="order">
@@ -75,8 +173,6 @@
         <option value="">none saved</option>
       </select>
     </label>
-    <button class="ghost layout-toggle" type="button">Tiles</button>
-    <button id="sweep" class="ghost">Run the radar</button>
     <details class="more" id="jobs-more">
       <summary>More<span class="more-count" id="more-count"></span></summary>
       <div class="more-menu">
@@ -89,6 +185,8 @@
         <label class="check"><input type="checkbox" id="hide-prepared"> Hide prepared</label>
         <label class="check"><input type="checkbox" id="remote-only"> Remote only</label>
         <label class="check"><input type="checkbox" id="starred-only"> Starred only</label>
+        <label class="check"><input type="checkbox" id="has-pay"> Pay listed only</label>
+        <label class="check"><input type="checkbox" id="market-up"> Above market only</label>
         <div class="more-row">
           <input type="text" id="view-name" maxlength="40" placeholder="Name these filters" aria-label="Name for this view">
           <button id="save-view" class="ghost">Save view</button>
@@ -124,7 +222,7 @@
     </div>
   </form>
 
-  <div class="scroller can-tile">
+  <div id="jobs-scroll" class="scroller can-tile">
     <table class="grid" id="jobs">
       <thead>
         <tr>
@@ -144,6 +242,12 @@
   </div>
   <p class="empty" id="jobs-empty" hidden></p>
   <p class="note" id="stars-gone" hidden></p>
+ </section>
+
+ <!-- The open posting, beside the list. On a phone and in the Compact view
+      it opens in place under its row instead, and this stays empty. -->
+ <section class="reader" id="reader" hidden aria-label="The open posting"></section>
+ </div>
 </main>
 
 <!-- == applied ======================================================== -->
@@ -257,6 +361,61 @@
 </main>
 
 <!-- == archive ======================================================== -->
+<main class="view" id="view-growth" hidden>
+  <div class="panel-head">
+    <h2>What to work on next</h2>
+    <p class="note">
+      Every requirements line in the postings you applied to and the postings
+      on your Jobs list, read against what your profile can back up. A skill
+      counts as yours when master.toml, your stack in Criteria, or a document
+      you added says so. Nothing here is guessed by AI; each number is a count
+      of lines you can open and read.
+    </p>
+  </div>
+  <div class="growth-bar">
+    <div class="seg" id="growth-scope" role="radiogroup" aria-label="Which postings">
+      <button type="button" class="seg-btn" role="radio" data-value="applied">Applied to</button>
+      <button type="button" class="seg-btn" role="radio" data-value="listed">Jobs list</button>
+    </div>
+    <span class="note" id="growth-basis"></span>
+  </div>
+  <div class="title-filter" id="growth-titles" role="group" aria-label="Narrow to one job title"></div>
+  <section class="growth-stats" id="growth-stats" aria-label="Summary"></section>
+  <div class="growth-grid">
+    <section class="growth-card" id="growth-learn">
+      <h3>Learn next</h3>
+      <p class="note">Missing from your profile, ranked by how often these postings ask for it.</p>
+      <ol class="learn-list" id="learn-list"></ol>
+    </section>
+    <section class="growth-card" id="growth-chart">
+      <h3>Most asked for</h3>
+      <p class="note"><span class="key have"></span>you have it <span class="key miss"></span>you don't
+        <span class="key req"></span>share that is required</p>
+      <div class="demand" id="demand"></div>
+    </section>
+    <section class="growth-card" id="growth-strong">
+      <h3>Lead with these</h3>
+      <p class="note">Yours already, and asked for often. Make sure the resume says so near the top.</p>
+      <div class="gap-chips" id="strong-list"></div>
+    </section>
+    <section class="growth-card" id="growth-industries">
+      <h3>Industries</h3>
+      <p class="note">The industries these postings ask experience in. Green is one your profile shows.</p>
+      <div class="demand" id="industry-list"></div>
+    </section>
+    <section class="growth-card" id="growth-barriers">
+      <h3>Years and degrees</h3>
+      <p class="note">Lines asking for more than your profile shows. These are not learnable in a weekend; they are worth knowing about when picking postings.</p>
+      <div id="barrier-list"></div>
+    </section>
+    <section class="growth-card" id="growth-unknown">
+      <h3>Names the app does not know yet</h3>
+      <p class="note">Product names in requirement lines that no vocabulary term covers. A real one belongs in vocabulary.toml so the app can count it.</p>
+      <div class="gap-chips" id="unknown-list"></div>
+    </section>
+  </div>
+</main>
+
 <main class="view" id="view-archive" hidden>
   <div class="panel-head">
     <h2>Everything the radar has ever seen</h2>
@@ -326,33 +485,57 @@
   </div>
 
   <div id="crit-scoring">
-  <div class="panel-head">
-    <h2>What counts as a good job</h2>
-    <p class="note">
-      What JobDesk ranks first. Press Save and every posting it has is scored
-      again, so you can see what moved.
-    </p>
-  </div>
-
-  <section class="explain">
+  <section class="explain crit-hero">
+    <div class="crit-hero-head">
+      <h2>What counts as a good job</h2>
+      <p class="note">
+        What JobDesk ranks first. Press Save and every posting it has is scored
+        again, so you can see what moved.
+      </p>
+    </div>
     <h3>How a score works</h3>
-    <p>
+    <p class="note">
       Every posting gets a score out of 100. JobDesk adds up points for each
       thing below that the posting matches, and takes points off for things
       you do not want.
     </p>
+    <div class="points-bar" id="points-bar" aria-hidden="true"></div>
     <ul class="points" id="score-parts"></ul>
-    <p id="tier-legend"></p>
+    <div class="tier-cards" id="tier-legend"></div>
     <p class="note">
       Not sure why a job scored the way it did? Click it on the Jobs tab. The
       reasons are listed line by line, with the points each one was worth.
     </p>
   </section>
 
+  <section class="explain evidence" id="evidence">
+    <div class="crit-hero-head">
+      <h2>Add what setup missed</h2>
+      <p class="note">
+        Drop in anything that shows what you can do: a project deck, a
+        certificate, a transcript, a notebook, code, a screenshot of a course.
+        JobDesk reads it on this PC, with no AI, and lists the skills it finds
+        with the line each one came from. Tick the ones that are true and keep
+        them. Kept skills stop showing as missing on postings and on Growth.
+      </p>
+    </div>
+    <label class="drop ev-drop" id="ev-drop">
+      <input type="file" id="ev-file" multiple hidden
+             accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.csv,.png,.jpg,.jpeg,.bmp,.gif,.tif,.tiff,.ipynb,.py,.sql,.ps1,.js,.ts,.html,.css,.r,.java,.cs,.cpp,.json">
+      <svg class="ic" viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V15"/></svg>
+      <b>Choose files, or drop them here</b>
+      <span class="note">PDF, Word, PowerPoint, Excel, images, notebooks and code. Up to 6 MB each.</span>
+    </label>
+    <div class="ev-results" id="ev-results"></div>
+    <div class="ev-kept" id="ev-kept"></div>
+  </section>
+
+  <nav class="crit-jump" id="crit-jump" aria-label="Sections"></nav>
   <form id="criteria" class="criteria"></form>
-  <div class="panel-foot sticky">
-    <button id="save-criteria">Save and rescore</button>
+  <div class="panel-foot sticky save-bar" id="save-bar">
+    <span class="save-dot" aria-hidden="true"></span>
     <span class="note" id="criteria-status"></span>
+    <button id="save-criteria">Save and rescore</button>
   </div>
   <p class="note">
     The common settings. The rest, like which companies to watch, is in
@@ -392,21 +575,43 @@
     </p>
   </div>
 
-  <section class="controls">
-    <button id="run-sweep">Run the radar</button>
-    <button id="run-dry" class="ghost">Dry run</button>
-    <button id="run-check" class="ghost">Check my resume</button>
-    <button id="run-gap" class="ghost">Gap report</button>
-    <div class="spacer"></div>
-    <label class="check"><input type="checkbox" id="follow" checked> Follow output</label>
+  <section class="action-tiles" aria-label="Start a run">
+    <button id="run-sweep" class="action-tile">
+      <svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg>
+      <b>Run the radar</b>
+      <span>Searches every board, scores what is new and updates the Jobs list.</span>
+    </button>
+    <button id="run-dry" class="ghost action-tile">
+      <svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+      <b>Dry run</b>
+      <span>The same search with nothing saved, to try a change to your criteria.</span>
+    </button>
+    <button id="run-check" class="ghost action-tile">
+      <svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3.5h7l4 4V20.5H7z"/><path d="M9.5 13.5l2 2 3.5-4"/></svg>
+      <b>Check my resume</b>
+      <span>Makes sure your master resume still passes the resume engine's checks.</span>
+    </button>
+    <button id="run-gap" class="ghost action-tile">
+      <svg class="ic" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="M7 16V9M12 16V5M17 16v-4"/></svg>
+      <b>Gap report</b>
+      <span>Lists what your master resume is missing.</span>
+    </button>
   </section>
 
   <div class="split console">
     <aside class="side">
+      <div class="run-now" id="run-now" hidden></div>
       <h2>Runs</h2>
       <ul class="runs" id="runs"></ul>
     </aside>
-    <pre class="out" id="out">Nothing has run yet in this session.</pre>
+    <div class="term">
+      <div class="term-bar">
+        <span class="term-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="term-title" id="term-title">Output</span>
+        <label class="switch term-follow"><input type="checkbox" id="follow" checked><span class="switch-track"></span><span>Follow</span></label>
+      </div>
+      <pre class="out" id="out">Nothing has run yet in this session.</pre>
+    </div>
   </div>
 </main>
 
@@ -433,7 +638,9 @@
       </p>
       <label class="drop" id="drop">
         <input type="file" id="resume" accept=".pdf,.docx,.txt,.md" hidden>
-        <span>Choose a file, or drop one here</span>
+        <svg class="ic" viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 005.5 20h13a1.5 1.5 0 001.5-1.5V15"/></svg>
+        <b>Choose a file, or drop one here</b>
+        <span class="note">PDF, Word or text</span>
       </label>
       <p class="note" id="resume-status"></p>
       <p class="note">No resume handy? Skip this and type the answers yourself.</p>
@@ -490,7 +697,7 @@
       </div>
       <p class="note">
         A posting scores as local when its location contains your city or
-        state. You can add suburbs and neighbouring towns later in the
+        state. You can add suburbs and neighboring towns later in the
         Criteria tab, which is where <code>local_terms</code> lives.
       </p>
     </fieldset>
@@ -596,6 +803,8 @@
       <label class="check"><input type="checkbox" data-pref="hide_prepared"> Hide jobs I already built a packet for</label>
       <label class="check"><input type="checkbox" data-pref="remote_only"> Show remote jobs only</label>
       <label class="check"><input type="checkbox" data-pref="starred_only"> Show starred jobs only</label>
+      <label class="check"><input type="checkbox" data-pref="has_pay"> Show jobs that list pay only</label>
+      <label class="check"><input type="checkbox" data-pref="market_up"> Show jobs above market only</label>
     </div>
   </section>
 
@@ -609,14 +818,54 @@
           <option value="dark">Dark</option>
         </select>
       </label>
-      <label>Colours
-        <select data-pref="scheme">
-          <option value="slate">Slate</option>
-          <option value="ocean">Ocean</option>
-          <option value="forest">Forest</option>
-          <option value="plum">Plum</option>
-          <option value="sand">Sand</option>
-          <option value="contrast">High contrast</option>
+      <label>Colors
+        <select data-pref="scheme" id="scheme">
+          <optgroup label="Light and dark" data-mode="both">
+            <option value="mailroom">Mailroom</option>
+            <option value="ocean">Ocean</option>
+            <option value="forest">Forest</option>
+            <option value="plum">Plum</option>
+            <option value="sand">Sand</option>
+            <option value="contrast">High contrast</option>
+          </optgroup>
+          <optgroup label="Light" data-mode="light">
+            <option value="glacier">Glacier</option>
+            <option value="bloom">Bloom</option>
+            <option value="ember">Ember</option>
+            <option value="lagoon">Lagoon</option>
+            <option value="grape">Grape</option>
+            <option value="rose">Rose</option>
+            <option value="sandstone">Sandstone</option>
+            <option value="graphite">Graphite</option>
+            <option value="citrus">Citrus</option>
+            <option value="mint">Mint</option>
+            <option value="sky">Sky</option>
+            <option value="peach">Peach</option>
+            <option value="lavender">Lavender</option>
+            <option value="paper">Paper</option>
+          </optgroup>
+          <optgroup label="Dark" data-mode="dark">
+            <option value="polar-night">Polar Night</option>
+            <option value="sage-dusk">Sage Dusk</option>
+            <option value="aurora">Aurora</option>
+            <option value="crimson">Crimson</option>
+            <option value="carbon">Carbon</option>
+            <option value="fjord">Fjord</option>
+            <option value="evergreen">Evergreen</option>
+            <option value="espresso">Espresso</option>
+            <option value="neon">Neon</option>
+            <option value="midnight">Midnight</option>
+          </optgroup>
+          <optgroup label="Fade" data-mode="fade">
+            <option value="fade-glass">Glass Ops</option>
+            <option value="fade-aurora">Aurora glow</option>
+            <option value="fade-tide">Deep tide</option>
+            <option value="fade-ember">Ember glow</option>
+            <option value="fade-dusk">Dusk</option>
+            <option value="fade-moss">Moss</option>
+            <option value="fade-mist">Morning mist</option>
+            <option value="fade-peach">Peach haze</option>
+          </optgroup>
         </select>
       </label>
       <label>Font
@@ -646,13 +895,22 @@
           <option value="roomy">Roomy, easier to tap</option>
         </select>
       </label>
-      <label>Accent colour
+      <label>Accent color
         <span class="accent-row">
-          <input type="color" id="accent" aria-label="Accent colour">
+          <input type="color" id="accent" aria-label="Accent color">
           <button type="button" id="accent-reset" class="ghost">Use the scheme&#39;s</button>
         </span>
       </label>
     </div>
+    <p class="note" id="theme-note" hidden></p>
+    <div class="swatches" id="swatches" role="group" aria-label="Color schemes"></div>
+  </section>
+
+  <section class="panel" id="set-custom">
+    <h2>Custom colors</h2>
+    <p class="note">Pick a background and an accent, or two colors to fade between.
+      Save what you make and it sits first in the schemes above, under Yours.</p>
+    <div id="custom-editor"></div>
   </section>
 
   <section class="panel" id="set-columns">
@@ -733,6 +991,9 @@
     </div>
   </section>
 </main>
+
+</div><!-- .stage -->
+</div><!-- .shell -->
 
 <script src="/app.js"></script>
 </body>

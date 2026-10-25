@@ -383,7 +383,7 @@ def assess(job: dict) -> dict | None:
         factors.append({
             "key": "pay", "label": "Pay", "weight": 0.40, "percentile": pct,
             "detail": f"{_money(mid)} midpoint. The group's typical band "
-                      f"centres on {_money(typical)}, across "
+                      f"centers on {_money(typical)}, across "
                       f"{len(group['pay'])} postings that published one.",
         })
 
