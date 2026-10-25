@@ -3,21 +3,37 @@
 # JobDesk
 
 One desktop app for finding jobs, scoring them, tailoring a resume to the ones
-worth it, and assembling a folder you can apply from.
+worth it, and assembling a folder you can apply from. It runs on a Windows PC,
+and your phone can open it too.
 
-No account, no API key, no model. Everything below runs on your machine
-against your own files. The scoring is arithmetic you can read in
-`radar/score.py`, and the resume tailoring is selection from content you wrote,
-never generation.
+![JobDesk on a PC and two phones](docs/screenshots/hero.png)
+
+No account, no API key, no model. Everything runs on your machine against your
+own files. The scoring is arithmetic you can read in `radar/score.py`, and the
+resume tailoring is selection from content you wrote, never generation.
 
 **It never submits an application.** JobDesk builds the packet and opens the
 posting. A human clicks submit. That is a permanent property of this program,
 not a default you can turn off.
 
+Every screenshot here shows the example profile: Wren Adeyemi, a made-up
+accountant in Denver, and made-up employers.
+
 ## Install
 
-Windows. Nothing else: if the machine has no Python, the installer offers to
-put one there.
+Windows only. If the machine has no Python, the installer offers to put one there.
+
+1. Download the ZIP and **extract it** somewhere you want to keep it.
+2. Double-click **`Install.cmd`** inside the extracted folder. Press Enter when
+   it asks about Python. It puts a JobDesk icon on your Desktop.
+3. Windows SmartScreen may say "Windows protected your PC", because the file
+   is not signed with a paid certificate. Click **More info**, then **Run anyway**.
+4. Open JobDesk. It starts on the Setup tab: drop in your resume and it fills
+   in what it can read, then six short screens ask what you are looking for.
+   Nothing touches a job board until that is done.
+
+<details>
+<summary><b>What the installer does, and how to remove JobDesk</b></summary>
 
 Download the ZIP, **extract it** somewhere you want to keep it, and
 double-click **`Install.cmd`** inside the extracted folder. That is the whole
@@ -56,19 +72,38 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall
 That deletes the environment and the shortcut. Your profile, your data and
 your packets stay where they are, and the script prints the paths.
 
-## What the tabs do
+</details>
+
+## What's in it
+
+| | |
+| --- | --- |
+| ![Jobs](docs/screenshots/phone-jobs.png) | **Jobs.** Everything the radar found, scored 0-100 with a letter tier, newest first. Filter by score, tier, source, pay and market, search, and sort any column. List, Compact, Tiles or Timeline, and each device remembers its own choice. |
+| ![A posting, opened](docs/screenshots/phone-posting.png) | **A posting, opened.** The full posting with the employer's own headings and bullets, how the score was earned part by part, the qualifications you are missing, and **Build the packet**. |
+| ![Growth, narrowed to data analyst](docs/screenshots/phone-growth-title.png) | **Growth.** Every requirements line in the postings you applied to or have listed, read against what your profile can back up: what to learn next, what is asked for most, what to lead with, and the years and degrees in the way. Tap a job title to see what that title asks for that you don't have. A library of 8,000+ tools and certifications (O*NET and GitHub's topics) does the reading. |
+| ![Applied](docs/screenshots/phone-applied.png) | **Applied.** The submission log: what you sent, when, what came back, and which sources actually reply. |
+| ![Criteria](docs/screenshots/phone-criteria.png) | **Criteria.** Your targeting as a form: titles by tier, geography, salary floor, the employers you want watched, the words that rule a posting out. **About you** shows everything a resume or letter is built from and edits it in place. Drop in a project, transcript or certificate and JobDesk lists the skills it backs up. |
+| ![Custom colors](docs/screenshots/phone-colors.png) | **Settings.** The gear at the top. What the Jobs tab opens with, 38 color schemes in light, dark and fade, your own background and accent (one color or a fade between two), **Randomize** for any colors at all, the font, text size, row spacing, and where packets get written. |
+
+The other tabs:
 
 | Tab | |
 |---|---|
-| **Jobs** | Everything the radar found, scored 0-100 with a letter tier. Newest first by default. Filter by score range, search, sort any column. Open a row for the full posting, with the employer's own headings and bullet points, and build a packet from it. |
-| **Applied** | The submission log. What you sent, when, what came back, and which sources actually reply. |
-| **Archive** | Every posting ever seen, including the ones that scored too low to surface. Which employers post constantly and never score is a useful thing to know. |
-| **Criteria** | Your targeting, as a form: titles by tier, geography, salary floor, the employers you want watched, the words that disqualify a posting. The **About you** pane shows everything a resume or letter is built from (contact details, transcript, skills, jobs, projects, letter paragraphs) and edits it in place; an edit that breaks a content rule is refused with the reason. |
-| **Console** | Whatever is running, streaming. Discovery runs, engine builds, packet assembly. |
+| **Archive** | Every posting ever seen, including the ones that scored too low to show. Which employers post constantly and never score is a useful thing to know. |
+| **Console** | Whatever is running, streaming: discovery runs, engine builds, packet assembly. |
 | **Setup** | The first-run wizard, the phone pairing, the Desktop shortcut, the logon task. |
-| **Settings** | The gear at the top right. What the Jobs tab opens with, light or dark, six colour schemes, the font, the text size, row spacing, and where packets get written. |
+
+### On a PC
+
+![Jobs, with a posting open](docs/screenshots/desktop-jobs.png)
+![Growth, narrowed to one job title](docs/screenshots/desktop-growth-title.png)
+![Applied](docs/screenshots/desktop-applied.png)
+![Criteria](docs/screenshots/desktop-criteria.png)
+![A fade scheme, dark](docs/screenshots/desktop-glass.png)
 
 ## On your phone
+
+<img src="docs/screenshots/phone-glass.png" width="260" align="right" alt="JobDesk on a phone, in a dark fade scheme">
 
 The Setup tab has a switch for it. Turning it on mints an access token, binds
 an address your phone can reach (your tailnet if you have one, your LAN
@@ -78,7 +113,7 @@ Scan it and JobDesk opens on the phone, full queue, full packets.
 Add it to the home screen and it gets its own icon and its own window.
 
 On a phone, Jobs, Applied and Archive show each row as a tile, a card with
-every field labelled, so a posting reads top to bottom without scrolling
+every field labeled, so a posting reads top to bottom without scrolling
 sideways. The column headers become sort buttons above the tiles. The
 Rows/Tiles button on each of those tabs switches between the two, and each
 device remembers its own choice. A desktop starts in rows.
@@ -92,7 +127,14 @@ account and no cloud in the path -- the phone is talking to the computer on
 your desk. If a device turns up that should not have, `Rotate` in the same
 panel invalidates every paired device at once.
 
-## How a posting compares
+<br clear="right">
+
+## How it works
+
+The details behind the score, the resume and the packet. Open any one.
+
+<details>
+<summary><b>How a posting compares</b></summary>
 
 The Market column holds a green or red arrow and a percentage. It answers one
 question: out of everything else hiring for this kind of role in this kind of
@@ -119,11 +161,14 @@ percentile over eleven postings is a number pretending to be a measurement.
 
 **Estimated salary bands.** Most postings publish no salary. A posting without
 one gets the medians of its peer group's published bands, shown in a different
-colour and flagged as an estimate everywhere it travels. It is the local
+color and flagged as an estimate everywhere it travels. It is the local
 snapshot corpus doing the work, not a third-party salary service, so no
 posting you are looking at leaves your machine.
 
-## What a score has to earn
+</details>
+
+<details>
+<summary><b>What a score has to earn</b></summary>
 
 A fit score is 0-100 and 100 is meant to be rare. The raw total a posting can
 reach is above 100, and the top stretch of it is compressed, so the last ten
@@ -208,7 +253,10 @@ month. Learned employers go to `data/radar/employers.learned.toml`, never into
 your profile; move a block into `employers.toml` by hand to keep it for good.
 `LEARN_ENABLED = False` in `jobdesk/radar/config.py` turns the whole thing off.
 
-## Your profile
+</details>
+
+<details>
+<summary><b>Your profile</b></summary>
 
 `profile/` is the only place your own details live, and it is git-ignored.
 Seven TOML files: who you are and what you have done (`master.toml`), what you
@@ -229,7 +277,10 @@ inside the machinery.
 
 Nothing in the code knows your name, your metro or your job titles.
 
-## The resume engine will not invent a claim
+</details>
+
+<details>
+<summary><b>The resume engine will not invent a claim</b></summary>
 
 A tailored resume is a **subset** of `master.toml`, reordered and reworded for
 one posting. It may drop a bullet, promote a project, or match a posting's
@@ -241,7 +292,10 @@ re-reads the PDF the way a parser would, and shows you the document the
 employer's software will actually see. Those two are usually not the same, and
 nothing else on your screen tells you when they diverge.
 
-## One page, and what it costs to hold one
+</details>
+
+<details>
+<summary><b>One page, and what it costs to hold one</b></summary>
 
 A resume that runs to two pages is a resume nobody reads to the end of, so the
 engine treats one page as a hard constraint rather than a goal. What it spends
@@ -278,7 +332,10 @@ then type, down to 90%. Only after that does it lose a paragraph: the weakest
 evidence first, then the bridge. The opening, the close and your own note
 always stay. Anything it cuts is listed in `APPLY.md`.
 
-## Before it builds a packet
+</details>
+
+<details>
+<summary><b>Before it builds a packet</b></summary>
 
 A handful of rules run before the folder is written, and they are about being
 remembered badly rather than about quality. Two applications open at one
@@ -298,13 +355,18 @@ names the rules it waived, in `APPLY.md` in the packet and on the application
 record, because a rule with no way past it gets worked around outside the
 program, where nothing is written down.
 
-## Layout
+</details>
+
+## For developers
+
+<details>
+<summary><b>Layout</b></summary>
 
 ```
 jobdesk/
   jobdesk/
     paths.py       one root, one answer, for all three packages
-    profile.py     resolves profile/, honouring $JOBDESK_PROFILE
+    profile.py     resolves profile/, honoring $JOBDESK_PROFILE
     radar/         discovery, scoring, dedupe, delivery
     engine/        tailoring, ATS simulation, rendering
     apply/         packets, letters, guard rules, the submission log
@@ -319,7 +381,10 @@ jobdesk/
 `radar` writes and drives `engine` through its CLI, and `tests/test_apply.py`
 asserts it. `app/` is the one package allowed to import all three.
 
-## Running the pieces directly
+</details>
+
+<details>
+<summary><b>Running the pieces directly</b></summary>
 
 The app is the front door, but everything under it is still a CLI, and the
 scheduled task and the app itself both call these:
@@ -337,7 +402,10 @@ py -m jobdesk.engine.main check        # validate master content
 py -m jobdesk.apply.main --help        # the packet builder's subcommands
 ```
 
-## Tests
+</details>
+
+<details>
+<summary><b>Tests</b></summary>
 
 No framework, on purpose. Each file runs in about a second and touches no
 network.
@@ -372,7 +440,10 @@ whose entire job is to show the shape of a secret without being one. It also
 checks for your own contact details, read out of the git-ignored `profile/` so
 the scanner never has to name them.
 
-## Configuration
+</details>
+
+<details>
+<summary><b>Configuration</b></summary>
 
 Optional. Copy `.env.radar.example` to `.env.radar` and `.env.apply.example`
 to `.env.apply` if you want Discord notifications or Notion sync. Every value
@@ -380,6 +451,8 @@ in both is optional, and JobDesk works with neither.
 
 `SWITCH.radar.txt` and `SWITCH.apply.txt` are kill switches for the scheduled
 runs. Both fail open: a missing or unreadable file means the run proceeds.
+
+</details>
 
 ## What it will not do
 
