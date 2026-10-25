@@ -21,6 +21,19 @@
   }
   document.documentElement.dataset.layout = layout;
 
+  // The same for how the Jobs list is drawn and whether the menu is folded.
+  var phone = window.matchMedia("(max-width: 700px)").matches;
+  var jobs = null, side = null;
+  try {
+    jobs = localStorage.getItem("jobdesk.jobs");
+    side = localStorage.getItem("jobdesk.side");
+  } catch (e) { jobs = side = null; }
+  if (["list", "compact", "tiles", "timeline"].indexOf(jobs) < 0) {
+    jobs = phone ? "timeline" : "list";
+  }
+  document.documentElement.dataset.jobs = jobs;
+  document.documentElement.dataset.side = side === "folded" ? "folded" : "open";
+
   var look = null;
   try { look = JSON.parse(localStorage.getItem("jobdesk.look") || "null"); } catch (e) { look = null; }
   if (!look) return;
@@ -31,9 +44,20 @@
   if (look.text_size) root.style.setProperty("--zoom", String(look.text_size / 100));
   if (look.density) root.dataset.density = look.density;
   if (/^#[0-9a-f]{6}$/i.test(look.accent || "")) {
-    // app.js works out the text colour that sits on it; until then, the
+    // app.js works out the text color that sits on it; until then, the
     // scheme's own keeps the buttons readable.
     root.style.setProperty("--accent-light", look.accent);
     root.style.setProperty("--accent-dark", look.accent);
+    root.style.setProperty("--accent-fixed", look.accent);
+  }
+  // Custom colors are worked out in app.js, which leaves the finished
+  // properties here, so this only has to put them back.
+  var paint = look.paint;
+  if (paint && paint.vars && /^(fade-)?custom$/.test(paint.scheme)) {
+    root.dataset.scheme = paint.scheme;
+    Object.keys(paint.vars).forEach(function (prop) {
+      if (/^--[a-z-]+$/.test(prop)) root.style.setProperty(prop, String(paint.vars[prop]));
+    });
+    root.style.colorScheme = paint.dark ? "dark" : "light";
   }
 })();

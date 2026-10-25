@@ -27,8 +27,8 @@ from pathlib import Path
 from .. import paths, profile
 from ..radar import searchplan
 from ..radar import config as radar_config
-from . import (about, actions, archive, criteria, jdstruct, market, prefs,
-               resume_import, runner, setup, stars, tomlpatch)
+from . import (about, actions, archive, criteria, docscan, jdstruct, market, prefs,
+               resume_import, runner, setup, skillgap, stars, tomlpatch)
 
 
 class BadRequest(RuntimeError):
@@ -276,6 +276,7 @@ def jobs(query, body) -> dict:
         row["age_days"] = _age_days(row.get("posted_at"),
                                     row.get("first_seen"))
     _mark_rows(listed)
+    _warm_growth()
     return {
         "jobs": listed,
         "last_run": stamp,
@@ -324,6 +325,11 @@ def job(query, body) -> dict:
             body_text = full.pop("description", "") or ""
             full["blocks"] = jdstruct.structure(body_text)
             full["jd_chars"] = len(body_text)
+            try:
+                full["gaps"] = skillgap.for_posting(body_text, full.get("company") or "",
+                                                    full["blocks"])
+            except Exception as exc:  # a broken master.toml must not hide the posting
+                full["gaps"] = {"error": str(exc)}
             full["age_days"] = _age_days(full.get("posted_at"),
                                          full.get("first_seen"))
             _mark_rows([full])
@@ -339,6 +345,129 @@ def job(query, body) -> dict:
     raise BadRequest(
         f"no posting with id {uid} in the current list. It may have aged out "
         f"of the cache -- the radar keeps 30 days.")
+
+
+def evidence_scan(query, body) -> dict:
+    """One dropped-in document in, the skills it shows out. Nothing is kept.
+
+    Same transport as the resume upload: base64 in the JSON body. The file is
+    read from a temp copy that is deleted before this returns.
+    """
+    name = Path(str(body.get("filename") or "")).name.strip()
+    if not name:
+        raise BadRequest("no filename came with the upload")
+    try:
+        data = base64.b64decode(body.get("content") or "", validate=True)
+    except (binascii.Error, ValueError):
+        raise BadRequest("the file did not arrive intact. Try the upload again.")
+    try:
+        return docscan.scan(name, data)
+    except docscan.Unreadable as exc:
+        raise BadRequest(f"{name}: {exc}")
+
+
+def evidence(query, body) -> dict:
+    """What earlier documents added, for the list under the drop box."""
+    try:
+        return docscan.load()
+    except docscan.Unreadable as exc:
+        raise BadRequest(str(exc))
+
+
+def evidence_keep(query, body) -> dict:
+    """Keep the skills and certificates the person ticked."""
+    skills = body.get("skills") or []
+    certs = body.get("certificates") or []
+    if not isinstance(skills, list) or not isinstance(certs, list):
+        raise BadRequest("send skills and certificates as lists")
+    try:
+        kept = docscan.keep([s for s in skills if isinstance(s, dict)],
+                            [c for c in certs if isinstance(c, dict)])
+    except docscan.Unreadable as exc:
+        raise BadRequest(str(exc))
+    _warm_growth()
+    return kept
+
+
+def evidence_forget(query, body) -> dict:
+    try:
+        kept = docscan.forget(term=_text(body, "term"), word=_text(body, "word"),
+                              text=_text(body, "text"))
+    except docscan.Unreadable as exc:
+        raise BadRequest(str(exc))
+    _warm_growth()
+    return kept
+
+
+_WARMING = threading.Event()
+
+
+def _warm_growth() -> None:
+    """Build the Growth report off the request thread while the list loads.
+
+    Reading every posting takes a few seconds the first time. The report is
+    cached until the list or the profile changes, so warming it here means
+    the tab opens on an answer instead of a wait.
+    """
+    if _WARMING.is_set():
+        return
+    _WARMING.set()
+
+    def run():
+        try:
+            growth({}, {})
+        except Exception:
+            pass
+        finally:
+            _WARMING.clear()
+    # A few seconds late, so it does not compete with sending the list itself.
+    timer = threading.Timer(3.0, run)
+    timer.daemon = True
+    timer.start()
+
+
+def growth(query, body) -> dict:
+    """What the postings keep asking for, and what the profile lacks.
+
+    Two sets of postings. Listed is everything on the Jobs list. Applied is
+    every application whose posting is still in the cache, plus every JD the
+    resume engine kept when it tailored a packet, which is how an application
+    older than the cache still counts. `?title=data analyst` narrows both
+    sets to one title family.
+    """
+    title = ((query or {}).get("title") or [""])[0].strip().lower()[:60]
+    rows, _ = _candidates()
+    by_uid = {r.get("uid"): r for r in rows if r.get("uid")}
+    applied: list[dict] = []
+    names: set[str] = set()
+    for app in actions.applications()["applications"]:
+        row = by_uid.get(app.get("uid"))
+        if row:
+            applied.append(row)
+            names.add(f"{(row.get('company') or '').lower()}|{(row.get('title') or '').lower()}")
+    from ..engine import config as engine_config
+    stored = sorted(engine_config.JD_STORE.glob("*.json"))
+    for path in stored:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        name = f"{(data.get('company') or '').lower()}|{(data.get('title') or '').lower()}"
+        if name in names or not data.get("raw"):
+            continue
+        names.add(name)
+        applied.append({"description": data["raw"], "company": data.get("company"),
+                        "title": data.get("title"), "uid": "", "score": None})
+    try:
+        info = radar_config.CANDIDATES.stat()
+        stamp = (info.st_mtime_ns, len(applied), len(stored))
+    except OSError:
+        stamp = (0, len(applied), len(stored))
+    try:
+        return skillgap.growth(rows, applied, stamp, title)
+    except Exception as exc:
+        raise BadRequest(f"the skills report could not be built ({exc}). "
+                         f"Check master.toml with: py -m jobdesk.engine.main check")
 
 
 _READ_LOCK = threading.Lock()
@@ -1072,6 +1201,11 @@ ROUTES = {
     ("GET", "/api/job"): job,
     ("POST", "/api/job/read"): read_posting,
     ("GET", "/api/market"): market_context,
+    ("GET", "/api/growth"): growth,
+    ("POST", "/api/evidence/scan"): evidence_scan,
+    ("GET", "/api/evidence"): evidence,
+    ("POST", "/api/evidence"): evidence_keep,
+    ("POST", "/api/evidence/forget"): evidence_forget,
     ("POST", "/api/star"): set_star,
     ("GET", "/api/targeting"): targeting,
     ("POST", "/api/targeting"): save_targeting,

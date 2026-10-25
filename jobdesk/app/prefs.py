@@ -33,17 +33,33 @@ DEFAULTS: dict[str, object] = {
     "hide_prepared": False,
     "remote_only": False,
     "starred_only": False,
+    "has_pay": False,           # only postings that print a salary
+    "market_up": False,         # only postings the market arrow points up on
+    "tier": "",                 # "" for every tier, or one letter
+    "posted_within": "any",     # any, or a number of days as a string
+    "source": "",               # "" for every source, or one source's name
     # Where the app opens
     "start_tab": "jobs",
-    # Appearance. `theme` is light or dark, `scheme` is which colours, and
+    # Appearance. `theme` is light or dark, `scheme` is which colors, and
     # they are separate because every scheme has both. Picking "Forest" should
     # not also decide whether the window is bright at 11pm.
     "theme": "system",          # system | light | dark
-    "scheme": "slate",          # which palette
+    "scheme": "mailroom",       # which palette
     "font": "system",           # which typeface
     "text_size": 100,           # percent
     "density": "normal",        # compact | normal | roomy
     "accent": "",               # "" for the scheme's own, or #rrggbb
+    # Your own colors, built the way FitNext builds them: a background and an
+    # accent, each as hue, saturation and lightness, with every other color
+    # worked out from those two. `fade` swaps the background for two colors
+    # the page fades between. `over` holds any color picked by hand in
+    # Fine-tune, which wins over the worked-out one. While `on`, this
+    # replaces the scheme. `id` says which saved theme it came from.
+    "custom": {"on": False, "id": "", "bg": [216, 33, 97], "ac": [221, 83, 53],
+               "fade": False, "a": [256, 45, 14], "b": [190, 60, 22],
+               "fade_style": "diagonal", "over": {}},
+    # Custom colors saved under a name, newest first.
+    "themes": [],
     # The Jobs table after star, score and title, in order. A column left
     # out is hidden.
     "job_columns": ["company", "location", "age_days", "market", "salary",
@@ -54,15 +70,48 @@ DEFAULTS: dict[str, object] = {
 
 JOB_COLUMNS = ("company", "location", "age_days", "market", "salary", "source")
 VIEW_FILTERS = ("search", "score_min", "score_max", "hide_applied",
-                "hide_prepared", "remote_only", "starred_only", "jobs_sort")
+                "hide_prepared", "remote_only", "starred_only", "jobs_sort",
+                "has_pay", "market_up", "tier", "posted_within", "source")
 MAX_VIEWS = 12
+MAX_THEMES = 24
 _HEX = re.compile(r"#[0-9a-fA-F]{6}")
+
+# What a custom palette is made of. The colors in `over` are the page's own
+# token names, so Fine-tune can name any of them and nothing else.
+FADE_STYLES = ("diagonal", "vertical", "horizontal", "glow")
+CUSTOM_TOKENS = ("ground", "card", "line", "line-soft", "ink", "ink-soft",
+                 "ink-faint", "accent", "accent-ink", "good", "warn", "bad")
+_PALETTE_KEYS = {"bg", "ac", "fade", "a", "b", "fade_style", "over"}
+
+# One mode each: light or dark is part of the scheme. Kept in step with the
+# `[data-scheme]` blocks in app.css and the Colors menu by test_settings.
+FIXED_SCHEMES = (
+    # Light
+    "glacier", "bloom", "ember", "lagoon", "grape", "rose", "sandstone",
+    "graphite", "citrus", "mint", "sky", "peach", "lavender", "paper",
+    # Dark
+    "polar-night", "sage-dusk", "aurora", "crimson", "carbon", "fjord",
+    "evergreen", "espresso", "neon", "midnight",
+    # The fades
+    "fade-glass", "fade-aurora", "fade-tide", "fade-ember", "fade-dusk",
+    "fade-moss", "fade-mist", "fade-peach",
+)
+
+# Values that were valid once and now mean something else. Slate was the
+# default until Mailroom replaced it, and a settings file only says "slate"
+# because every save writes the whole file, defaults included.
+_RENAMED = {("scheme", "slate"): "mailroom"}
 
 _CHOICES = {
     "jobs_sort": ("newest", "score"),
+    "tier": ("", "A", "B", "C", "D"),
+    "posted_within": ("any", "0", "3", "7", "14"),
     "start_tab": ("jobs", "applied", "archive", "criteria", "console"),
     "theme": ("system", "light", "dark"),
-    "scheme": ("slate", "ocean", "forest", "plum", "sand", "contrast"),
+    # Light-and-dark schemes first, then the one-mode themes and the fades,
+    # which Settings shows in groups of their own.
+    "scheme": ("mailroom", "ocean", "forest", "plum", "sand", "contrast")
+              + FIXED_SCHEMES,
     "font": ("system", "humanist", "narrow", "serif", "mono"),
     "density": ("compact", "normal", "roomy"),
 }
@@ -87,13 +136,53 @@ def _view(value) -> bool:
                else _valid(k, v) for k, v in filters.items())
 
 
+def _hsl(value) -> bool:
+    return isinstance(value, list) and len(value) == 3 \
+        and all(isinstance(n, int) and not isinstance(n, bool) for n in value) \
+        and 0 <= value[0] <= 359 and 0 <= value[1] <= 100 and 0 <= value[2] <= 100
+
+
+def _palette(value: dict) -> bool:
+    over = value.get("over")
+    return _hsl(value.get("bg")) and _hsl(value.get("ac")) \
+        and _hsl(value.get("a")) and _hsl(value.get("b")) \
+        and isinstance(value.get("fade"), bool) \
+        and value.get("fade_style") in FADE_STYLES \
+        and isinstance(over, dict) and set(over) <= set(CUSTOM_TOKENS) \
+        and all(isinstance(v, str) and bool(_HEX.fullmatch(v)) for v in over.values())
+
+
+def _custom(value) -> bool:
+    return isinstance(value, dict) and set(value) == _PALETTE_KEYS | {"on", "id"} \
+        and isinstance(value["on"], bool) and isinstance(value["id"], str) \
+        and len(value["id"]) <= 40 and _palette(value)
+
+
+def _theme(value) -> bool:
+    if not isinstance(value, dict) or set(value) != _PALETTE_KEYS | {"id", "name"}:
+        return False
+    return isinstance(value["id"], str) and 0 < len(value["id"]) <= 40 \
+        and isinstance(value["name"], str) and 0 < len(value["name"].strip()) <= 40 \
+        and _palette(value)
+
+
 def _valid(key: str, value) -> bool:
     default = DEFAULTS[key]
     if key == "accent":
         return value == "" or (isinstance(value, str) and bool(_HEX.fullmatch(value)))
+    # A source is whatever the radar calls one, so any short name will do;
+    # one that no posting has any more just matches nothing.
+    if key == "source":
+        return isinstance(value, str) and len(value) <= 60
     if key == "job_columns":
         return isinstance(value, list) and len(set(value)) == len(value) \
             and all(v in JOB_COLUMNS for v in value)
+    if key == "custom":
+        return _custom(value)
+    if key == "themes":
+        return isinstance(value, list) and len(value) <= MAX_THEMES \
+            and all(_theme(v) for v in value) \
+            and len({v["id"] for v in value}) == len(value)
     if key == "views":
         return isinstance(value, list) and len(value) <= MAX_VIEWS \
             and all(_view(v) for v in value) \
@@ -119,6 +208,7 @@ def load() -> dict[str, object]:
         saved = {}
     out = copy.deepcopy(DEFAULTS)
     for key, value in saved.items():
+        value = _RENAMED.get((key, value), value) if isinstance(value, str) else value
         if key in DEFAULTS and _valid(key, value):
             out[key] = value
     return out
@@ -136,6 +226,8 @@ def save(changes: dict) -> dict[str, object]:
     for key, value in changes.items():
         if key not in DEFAULTS:
             raise Invalid(f"{key} is not a setting")
+        if isinstance(value, str):
+            value = _RENAMED.get((key, value), value)
         if key in _RANGES and isinstance(value, str) and value.strip().isdigit():
             value = int(value)
         if not _valid(key, value):
