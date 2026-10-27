@@ -338,10 +338,10 @@ class Live:
     def get(self, path):
         return self._open(urllib.request.Request(self.base + path))
 
-    def post(self, path, payload):
+    def post(self, path, payload, timeout=10):
         return self._open(urllib.request.Request(
             self.base + path, data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST"))
+            headers={"Content-Type": "application/json"}, method="POST"), timeout)
 
     def raw(self, path):
         """A static file, which is not JSON and must not be parsed as it."""
@@ -368,9 +368,9 @@ class Live:
         finally:
             conn.close()
 
-    def _open(self, request):
+    def _open(self, request, timeout=10):
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 return response.status, json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as err:
             return err.code, json.loads(err.read().decode("utf-8"))
@@ -411,7 +411,9 @@ def test_api() -> None:
         check("the pulse carries no postings",
               "jobs" not in beat and len(beat) == 2, str(beat))
 
-        code, body = live.post("/api/rescore", {})
+        # Rescoring reads the real list, which takes about nine seconds at
+        # 858 postings, so ten seconds failed whenever the machine was busy.
+        code, body = live.post("/api/rescore", {}, timeout=120)
         check("rescore answers", code == 200 and "moved" in body)
         check("rescore on the example profile saves nothing",
               "Nothing was saved" in body["note"], body.get("note"))
@@ -525,6 +527,7 @@ def test_api() -> None:
 
 def test_jdstruct() -> None:
     section("job descriptions get their shape back")
+    from jobdesk.app import skillgap
     # A Workday posting, in the shape Workday returns one: every newline
     # collapsed, so the whole thing arrives as a single line. The sections here
     # are long enough to cross the 200-character floor under which a run of
@@ -594,6 +597,71 @@ def test_jdstruct() -> None:
           any("2+ years" in b.get("text", "") for b in blocks), str(blocks))
     check("an empty description is no blocks, not a crash",
           jdstruct.structure("") == [] and jdstruct.structure("   ") == [])
+
+    # Adzuna's other shape: markdown with the line breaks taken out. Bold runs
+    # are the headings, "+" and "-" runs the bullets, an italic run a note.
+    md = ("**About Us** Here at Baylor we promote well-being. Our Core Values are: "
+          "+ We serve faithfully. + We never settle. + We are in it together. "
+          "**Benefits** + 401(k) savings plan + Tuition Reimbursement "
+          "_Note: Benefits may vary based upon position type._ This role measures "
+          "digital experiences across a 3-5 year roadmap, Monday - Friday. "
+          "**Primary Responsibilities** - Partner with Product Owners. - Develop "
+          "tracking plans. - Define event taxonomies. "
+          "**What You’ll Bring** - 3+ years of Google Tag Manager. - Experience with SQL.")
+    blocks = jdstruct.structure(md)
+    heads = [b["text"] for b in blocks if b["kind"] == "heading"]
+    check("markdown bold runs are headings",
+          heads == ["About Us", "Benefits", "Primary Responsibilities", "What You’ll Bring"], heads)
+    lists = [b["items"] for b in blocks if b["kind"] == "list"]
+    check("markdown + and - runs are list items",
+          lists[0] == ["We serve faithfully.", "We never settle.", "We are in it together."]
+          and lists[2] == ["Partner with Product Owners.", "Develop tracking plans.",
+                           "Define event taxonomies."], lists)
+    check("an italic note does not run on as part of the bullet before it",
+          lists[1] == ["401(k) savings plan", "Tuition Reimbursement"], lists)
+    check("a range and a weekday dash in prose are not bullets",
+          any("3-5 year roadmap, Monday - Friday." in b.get("text", "") for b in blocks), blocks)
+    g = skillgap.for_posting(md, "Baylor Scott & White Health")
+    check("a curly-apostrophe heading opens the requirements",
+          [l["text"] for l in g["lines"]] == ["3+ years of Google Tag Manager.", "Experience with SQL."],
+          g["lines"])
+    check("one bold phrase and two hyphens is not markdown",
+          jdstruct._from_markdown("Our **Richmond** office - Monday - Friday.") is None)
+
+    # Bold in the middle of a sentence is emphasis. A bold heading whose line
+    # break Adzuna took out still has a new item starting right after it.
+    md = ("**Required Qualifications** + Hands-on experience with **Infor SaaS**, "
+          "preferably multi-tenant. + Experience with **Workbrain**. + Strong SQL. "
+          "+ Reporting and product insight enablement **Desired Experience and Skills** "
+          "+ Experience with Google Tag Manager.")
+    blocks = jdstruct.structure(md)
+    heads = [b["text"] for b in blocks if b["kind"] == "heading"]
+    check("bold emphasis mid-sentence is not a heading; a flattened bold heading is",
+          heads == ["Required Qualifications", "Desired Experience and Skills"], heads)
+
+    # Deloitte: flattened, "+" bullets, and headings that are plain words.
+    deloitte = ("We innovate and deliver. Qualifications Required + Bachelor's degree "
+                "+ 1+ years of actuarial experience + Passed 1 actuarial examination "
+                "Education: + Bachelor's degree in Accounting Experience: + 4 years of SQL")
+    blocks = jdstruct.structure(deloitte)
+    heads = [b["text"] for b in blocks if b["kind"] == "heading"]
+    check("plain-word headings in flattened markdown are found",
+          heads == ["Required", "Education", "Experience"], blocks)
+    check("the heading a subheading replaced is kept on it",
+          blocks[1].get("over") == "Qualifications", blocks)
+    g = skillgap.for_posting(deloitte, "Deloitte")
+    check("Deloitte's requirements are read from flattened markdown",
+          [l["text"] for l in g["lines"]][:2] == ["Bachelor's degree", "1+ years of actuarial experience"],
+          g["lines"])
+
+    check("an escaped #LI tag mid-line ends the section",
+          not any("Benefits" in l["text"] for l in skillgap.for_posting(
+              "**Requirements** + Strong SQL. + Python. + Tableau. \\#LI-CS1 \\#LI-Remote "
+              "Benefits of Working at Mercury", "Mercury")["lines"]))
+    check("a dot-bulleted #LI tag is not a requirement",
+          [l["text"] for l in skillgap.for_posting(
+              "Requirements:\n• Strong SQL\n• Python\n• #LI-TW1\n#LI-Remote\nWhat you can expect:\n• A bonus",
+              "Optiv")["lines"]] == ["Strong SQL", "Python"])
 
 
 def test_runner() -> None:
@@ -953,6 +1021,22 @@ def test_skill_gaps() -> None:
     section("skill gaps")
     from jobdesk.app import skillgap
     from jobdesk.engine import jd
+
+    # Pay and EEO text glued to the last requirement, with no heading between.
+    lines = [l["text"] for l in skillgap.for_posting(
+        "**Desired Experience and Skills** + Strong SQL. + Python. + Debug tracking issues. "
+        "As a health care system we ask our employees to model healthy habits. "
+        "Baylor no longer hires nicotine users. We are an equal opportunity employer. "
+        "+ 401(k) match", "Baylor Scott & White Health")["lines"]]
+    check("boilerplate after the last requirement ends the section",
+          lines == ["Strong SQL.", "Python.", "Debug tracking issues."], lines)
+    lines = [l["text"] for l in skillgap.for_posting(
+        "Requirements:\n- Bachelor's degree in Business 1-2 years of experience in Category "
+        "Management Pay Range USD $23.40 - USD $36.30 /Hr.\n- Paid time off plan", "Tyson")["lines"]]
+    check("a run-on requirement keeps what came before the pay range",
+          lines == ["Bachelor's degree in Business 1-2 years of experience in Category Management"],
+          lines)
+
     posting = (
         "<p><strong>About us</strong></p><p>We use Outlook for everything.</p>"
         "<p><strong>Requirements</strong></p><ul>"
