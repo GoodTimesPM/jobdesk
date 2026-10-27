@@ -211,6 +211,48 @@ _EMPLOYER_VOICE = re.compile(
     r"sponsorship|eoe)\b", re.I)
 
 
+# The legal and pay text every posting closes with. Markdown postings put it
+# straight after the last requirement with no heading between, so the first
+# sentence of it ends the section, and the requirement it was glued to keeps
+# the sentences before it: "Proficient in Microsoft Office. Maximus is an
+# equal opportunity employer."
+_BOILERPLATE = re.compile(
+    r"equal (employment )?opportunity|without regard to|\beoe\b|"
+    r"\b(pay|salary|hourly|wage) range|\bbase pay\b|\bstarting pay\b|pay transparency|"
+    r"the compensation for|competitive compensation|"
+    r"\$\s?\d[\d,.]*\s*(?:-|–|—|to|\?)\s*(?:USD\s*)?\$?\s?\d|"
+    r"privacy (notice|policy)|benefits package|\bwe offer\b|"
+    r"in addition to your salary|\bapply now\b|transparency notice|"
+    r"use of ai in our|arrest or conviction|fair chance|"
+    r"[\w.+-]+@[\w-]+\.[a-z]{2,}",
+    re.I)
+_SENTENCE_END = re.compile(r"[.!?]\s+")
+
+
+def _before_boilerplate(item: str, names: list[str]) -> str | None:
+    """The item cut where boilerplate starts, or None if none does.
+
+    The employer's sentences just before it go too: "...resolve tracking
+    issues. As a health care system ... we are asking our employees ...
+    Baylor Scott & White Health no longer hires ... We are an equal
+    opportunity employer."
+    """
+    found = _BOILERPLATE.search(item)
+    if not found:
+        return None
+    ends = [m.end() for m in _SENTENCE_END.finditer(item, 0, found.start())]
+    voice = re.compile(r"\b(we|our|us)\b" + "".join(rf"|\b{n}\b" for n in names), re.I)
+    while len(ends) > 1 and voice.search(item[ends[-2]:ends[-1]]):
+        ends.pop()
+    if ends:
+        return item[:ends[-1]].strip()
+    # Tyson's whole list is one run-on item with the pay range at its end.
+    # Without a sentence break the cut is at the boilerplate itself, kept
+    # only when there is more before it than the start of that sentence.
+    head = item[:found.start()].strip()
+    return head if len(head) >= 40 else ""
+
+
 def _lines(blocks: list[dict], company: str = "") -> list[tuple[str, str]]:
     """(section, line) for every line under a requirements heading.
 
@@ -228,7 +270,10 @@ def _lines(blocks: list[dict], company: str = "") -> list[tuple[str, str]]:
     for block in blocks:
         if block["kind"] in ("heading", "end"):
             text = block.get("text", "")
-            current = jdmod._classify(text) or "other"
+            # "Qualifications:" over "Beyond the basics, what will make you
+            # successful" names the section in the heading that was dropped.
+            current = (jdmod._classify(text)
+                       or jdmod._classify(block.get("over", "")) or "other")
             short = jdmod.subject_heading(text)
             seen = False
             lead = ""
@@ -244,6 +289,12 @@ def _lines(blocks: list[dict], company: str = "") -> list[tuple[str, str]]:
         seen = True
         for item in items:
             item = item.strip()
+            cut = _before_boilerplate(item, names)
+            if cut is not None:
+                section, current = lead or current, "other"
+                if len(cut) >= 3 and not _is_benefits(cut):
+                    out.append((section, cut))
+                break
             if len(item) < 3 or _is_benefits(item):
                 continue
             section = lead or current

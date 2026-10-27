@@ -109,7 +109,7 @@ def _phrase_pattern(phrase: str) -> str:
     are the same heading.
     """
     parts = [re.escape(word).replace("'", "['’]?") for word in phrase.split()]
-    return r"[\s\-]+".join(parts)
+    return r",?[\s\-]+".join(parts)
 
 
 # Longest first, so "What You'll Bring" never matches as "What You".
@@ -125,7 +125,8 @@ _HEADING_RE = re.compile(
     # A digit is as good a start to a section as a capital letter: "Required
     # Qualifications 3+ years of SQL" is the single most common way a flattened
     # posting opens a requirements list.
-    + r"))\s*:?\s*(?=[A-Z(0-9]|$)"
+    # So is a "+" bullet, in markdown Adzuna flattened.
+    + r"))\s*:?\s*(?=[A-Z(0-9+]|$)"
 )
 
 # A heading that promises a list. Sentences under one of these get shown one
@@ -176,6 +177,105 @@ def _from_html(raw: str) -> list[str]:
     return [clean(line) for line in text.split("\n")]
 
 
+# --- markdown --------------------------------------------------------------
+
+# Adzuna passes most postings on as markdown with the line breaks taken out:
+#
+#   **Primary Responsibilities** - Partner with Product Owners ... - Develop
+#   and maintain tracking plans ... **Qualifications** + Bachelor's degree
+#
+# The bold runs are the headings and the "+" and "-" runs are the bullets, so
+# putting the line breaks back is a matter of reading the markup it kept.
+_BOLD = re.compile(r"\*\*\s*([^*\n]{1,120}?)\s*\*\*")
+# A bullet sign between two items: a space on each side and a capital, digit
+# or bracket after it, so "3-5 years" and "well-being" stay as they are. A
+# "+" is never prose ("+ Tuition Reimbursement + PTO"), so it may follow any
+# word. A hyphen or asterisk may not: "Monday - Friday" is prose. It has to
+# start a line or follow the end of a sentence.
+_MD_BULLET = re.compile(
+    r"(?:(?<=\s)\+|(?:(?<=[.:;!?)]\s)|^)[\-*])\s+(?=[A-Z0-9(\"'“])", re.M)
+# A short label with a colon right before a bullet sign heads the items after
+# it: "Education: + Bachelor's degree ... Experience: + 4 years". Deloitte
+# drops the colon after its two ("Qualifications Required + Prefer one of").
+_MD_LABEL = re.compile(
+    r"(?:(?<=\s)|^)((?:[A-Z][\w&/'’-]*\s){0,3}[A-Z][\w&/'’-]*:|Required|Preferred)"
+    r"\s*(?=[+\-*]\s)",
+    re.M)
+_MD_ITALIC = re.compile(r"(?<![A-Za-z0-9])_([^_\n]{2,200})_(?![A-Za-z0-9])")
+
+
+def _bold_is_heading(match: re.Match) -> bool:
+    """A bold run that stands where a heading would.
+
+    "experience with **Infor SaaS**, preferably" is emphasis: the sentence
+    runs on after it. A heading starts a line or follows the end of one, or,
+    where Adzuna flattened the line break away ("product insight enablement
+    **Desired Experience and Skills** + Experience"), has a new item or
+    sentence starting right after it.
+    """
+    text = match.group(1).strip().rstrip(":").strip()
+    if not text or len(text.split()) > 10 or text[-1] in ".,;" \
+            or not text[:1].isupper():
+        return False
+    before = match.string[:match.start()].rstrip(" \t")
+    after = match.string[match.end():].lstrip(" \t")
+    if after[:1].islower() or after[:1] in (".", ",", ";", ":", ")"):
+        return False
+    return not before or before[-1] in "\n.:!?)*" \
+        or not after or after[0] in "\n+-*•(" or after[0].isupper() or after[0].isdigit()
+
+
+_JOINERS = {"in", "of", "with", "and", "or", "the", "a", "an", "for", "to", "on"}
+
+
+def _label(match: re.Match) -> str:
+    """A label as a heading, less the words that belong to the sentence.
+
+    "degree in Accounting Experience: + 4 years" is a sentence ending in a
+    major and then the label "Experience": a capital straight after "in" is
+    a name inside the sentence, not the start of a heading.
+    """
+    words = match.group(1).rstrip(":").split()
+    before = match.string[:match.start()].split()
+    prev = before[-1] if before else ""
+    sentence: list[str] = []
+    while len(words) > 1 and prev.lower() in _JOINERS:
+        prev = words.pop(0)
+        sentence.append(prev)
+    tail = " ".join(sentence) + " " if sentence else ""
+    return tail + "\n" + _H + " ".join(words) + "\n"
+
+
+def _from_markdown(raw: str) -> str | None:
+    """Markdown with its line breaks restored, or None if it is not markdown.
+
+    Two bold headings make a posting markdown; so do three bullet signs, the
+    count below which a hyphen in running text is likelier a dash.
+    """
+    heads = [m for m in _BOLD.finditer(raw) if _bold_is_heading(m)]
+    bullets = _MD_BULLET.findall(raw)
+    if len(heads) < 2 and len(bullets) < 3:
+        return None
+
+    def bold(match: re.Match) -> str:
+        inner = match.group(1).strip()
+        if _bold_is_heading(match):
+            return "\n" + _H + inner.rstrip(":").strip() + "\n"
+        return inner
+
+    text = _BOLD.sub(bold, raw)
+    # An italic run is a note of its own ("_Note: Benefits may vary_"), and
+    # without a line of its own it ran on as part of the bullet before it.
+    text = _MD_ITALIC.sub(lambda m: "\n" + m.group(1) + "\n", text)
+    # A tag mid-line is where the recruiter's part ended, as it is on a line
+    # of its own: "machine learning. \#LI-CS1 \#LI-Remote Benefits of".
+    text = _LI_TAG.sub(lambda m: "\n" + m.group(0).strip() + "\n", text)
+    if len(bullets) >= 3:
+        text = _MD_LABEL.sub(_label, text)
+        text = _MD_BULLET.sub("\n" + _B, text)
+    return text
+
+
 # --- flattened text --------------------------------------------------------
 
 def _unflatten(text: str) -> list[str]:
@@ -187,13 +287,18 @@ def _unflatten(text: str) -> list[str]:
     requirements and translate them" is a sentence. Capitalisation is the only
     signal left once the line breaks are gone, so it is the one used.
     """
+    return [clean(line) for line in _mark_headings(text).split("\n")]
+
+
+def _mark_headings(text: str) -> str:
+    """Put each title-cased heading phrase on a line of its own."""
     def mark(match: re.Match) -> str:
         phrase = match.group(1).strip()
         if not phrase[:1].isupper():
             return match.group(0)
         return "\n" + _H + phrase + "\n"
 
-    return [clean(line) for line in _HEADING_RE.sub(mark, text).split("\n")]
+    return _HEADING_RE.sub(mark, text)
 
 
 def _looks_like_heading(line: str) -> bool:
@@ -221,7 +326,8 @@ def _looks_like_heading(line: str) -> bool:
 # where reading it as a heading is what stops the disclaimer below from
 # counting as one. So a tag inside a list is skipped, and anywhere else it
 # becomes an "end" block: the section stops, and the page shows nothing.
-_LI_TAG = re.compile(r"(#LI-[A-Za-z0-9]+\s*)+")
+# Adzuna escapes the hash as markdown does: "\#LI-Remote".
+_LI_TAG = re.compile(r"(\\?#LI-[A-Za-z0-9]+\s*)+")
 
 
 def _is_item(line: str) -> bool:
@@ -247,9 +353,9 @@ def _blocks(lines: list[str]) -> list[dict]:
     for at, line in enumerate(lines):
         if not line:
             continue
-        if _LI_TAG.fullmatch(line.lstrip(_H + _B).strip()):
+        if _LI_TAG.fullmatch(_BULLET.sub("", line.lstrip(_H + _B)).strip()):
             after = next((l for l in lines[at + 1:] if l), "")
-            if line.startswith(_B) or (pending and _is_item(after)):
+            if _is_item(line) or (pending and _is_item(after)):
                 continue
             flush()
             out.append({"kind": "end"})
@@ -323,7 +429,11 @@ def _tidy(blocks: list[dict]) -> list[dict]:
         # Two headings in a row means the first one titled nothing, and an
         # end straight after a heading ends nothing.
         pair = (out[-1]["kind"] if out else "", block["kind"])
+        # The first heading's text stays on the second as "over", because
+        # "Qualifications:" above a subheading is what names the section.
         if pair[0] in ("heading", "end") and pair[1] in ("heading", "end"):
+            if pair == ("heading", "heading"):
+                block = {**block, "over": out[-1]["text"]}
             out[-1] = block
             continue
         out.append(block)
@@ -340,6 +450,14 @@ def structure(raw: str) -> list[dict]:
     raw = raw.replace("\\n", "\n")
     if _HAS_TAGS.search(raw):
         lines = _from_html(raw)
+    # Adzuna flattens the markdown too, and then "Qualifications Required: +
+    # Bachelor's degree" has its bullets marked but not its heading, so the
+    # heading vocabulary runs over it first, as it would over any other
+    # flattened text.
+    elif (md := _from_markdown(
+            _mark_headings(html.unescape(raw)) if raw.count("\n") < 3
+            else html.unescape(raw))) is not None:
+        lines = [clean(line) for line in md.split("\n")]
     elif raw.count("\n") >= 3:
         lines = [clean(line) for line in html.unescape(raw).split("\n")]
     else:
