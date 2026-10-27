@@ -1297,6 +1297,7 @@ function drawReader(job) {
 function jdBlocks(blocks) {
   const box = el("div", { class: "jd" });
   blocks.forEach((block) => {
+    if (block.kind === "end") return;   // a section break with nothing to show
     if (block.kind === "heading") box.append(el("h4", { text: block.text }));
     else if (block.kind === "list") {
       box.append(el("ul", {}, block.items.map((i) => el("li", { text: i }))));

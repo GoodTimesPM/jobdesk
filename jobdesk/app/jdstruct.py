@@ -31,6 +31,7 @@ The output is a list of blocks the page renders directly:
     {"kind": "heading", "text": ...}
     {"kind": "para",    "text": ...}
     {"kind": "list",    "items": [...]}
+    {"kind": "end"}     a section ends here, with no heading to show
 """
 
 from __future__ import annotations
@@ -132,7 +133,7 @@ _HEADING_RE = re.compile(
 _LIST_HEADING = re.compile(
     r"responsibilit|qualification|requirement|skills|duties|experience|"
     r"what you|you will|benefits|perks|we offer|nice to have|bonus|"
-    r"essential|competenc|abilities",
+    r"essential|competenc|abilities|education|certificat|licens",
     re.I,
 )
 
@@ -213,6 +214,20 @@ def _looks_like_heading(line: str) -> bool:
 
 # --- assembly --------------------------------------------------------------
 
+# The tags recruiters paste in for LinkedIn's matcher: "#LI-AB", "#LI-Remote".
+# On a line of their own they read as an all-caps heading. Markel puts one in
+# the middle of its Skill Sets list, and the lines after it were filed under
+# it instead of Skill Sets. Most postings put it after the last requirement,
+# where reading it as a heading is what stops the disclaimer below from
+# counting as one. So a tag inside a list is skipped, and anywhere else it
+# becomes an "end" block: the section stops, and the page shows nothing.
+_LI_TAG = re.compile(r"(#LI-[A-Za-z0-9]+\s*)+")
+
+
+def _is_item(line: str) -> bool:
+    return line.startswith(_B) or bool(_BULLET.match(line) or _NUMBERED.match(line))
+
+
 def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE.split(text) if s.strip()]
 
@@ -229,8 +244,15 @@ def _blocks(lines: list[str]) -> list[dict]:
             out.append({"kind": "list", "items": list(pending)})
             pending.clear()
 
-    for line in lines:
+    for at, line in enumerate(lines):
         if not line:
+            continue
+        if _LI_TAG.fullmatch(line.lstrip(_H + _B).strip()):
+            after = next((l for l in lines[at + 1:] if l), "")
+            if line.startswith(_B) or (pending and _is_item(after)):
+                continue
+            flush()
+            out.append({"kind": "end"})
             continue
         if line.startswith(_H):
             flush()
@@ -292,14 +314,16 @@ def _tidy(blocks: list[dict]) -> list[dict]:
             items = [i for i in block["items"] if len(i) > 1]
             if items:
                 kept.append({"kind": "list", "items": items})
-        elif block.get("text"):
+        elif block.get("text") or block["kind"] == "end":
             kept.append(block)
-    while kept and kept[-1]["kind"] == "heading":
+    while kept and kept[-1]["kind"] in ("heading", "end"):
         kept.pop()
     out: list[dict] = []
     for block in kept:
-        # Two headings in a row means the first one titled nothing.
-        if out and out[-1]["kind"] == "heading" and block["kind"] == "heading":
+        # Two headings in a row means the first one titled nothing, and an
+        # end straight after a heading ends nothing.
+        pair = (out[-1]["kind"] if out else "", block["kind"])
+        if pair[0] in ("heading", "end") and pair[1] in ("heading", "end"):
             out[-1] = block
             continue
         out.append(block)
@@ -310,6 +334,10 @@ def structure(raw: str) -> list[dict]:
     """The whole thing. Raw stored JD in, renderable blocks out."""
     if not raw or not raw.strip():
         return []
+    # V-Soft's feed escapes its line breaks twice, so the text holds a
+    # backslash and an n where each newline was. Each of those became a
+    # paragraph of its own, and an empty one under a heading hid what it headed.
+    raw = raw.replace("\\n", "\n")
     if _HAS_TAGS.search(raw):
         lines = _from_html(raw)
     elif raw.count("\n") >= 3:
@@ -329,6 +357,6 @@ def plain(raw: str) -> str:
             parts.append("\n" + block["text"].upper())
         elif block["kind"] == "list":
             parts.extend("- " + item for item in block["items"])
-        else:
+        elif block["kind"] != "end":
             parts.append(block["text"])
     return "\n".join(parts).strip()
