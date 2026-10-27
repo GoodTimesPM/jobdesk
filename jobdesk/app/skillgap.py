@@ -203,7 +203,15 @@ def _is_benefits(line: str) -> bool:
     return len({m.group(1).lower() for m in _BENEFITS.finditer(line)}) >= 2
 
 
-def _lines(blocks: list[dict]) -> list[tuple[str, str]]:
+# The posting talking about the employer rather than the candidate. Under a
+# heading like "Education", which has no heading after it to close it, the
+# first block that sounds like this is where the requirements stopped.
+_EMPLOYER_VOICE = re.compile(
+    r"\b(we|our|offers?|benefits|salary|pay range|compensation|equal (employment )?opportunity|"
+    r"sponsorship|eoe)\b", re.I)
+
+
+def _lines(blocks: list[dict], company: str = "") -> list[tuple[str, str]]:
     """(section, line) for every line under a requirements heading.
 
     `section` is required or preferred. A posting with no such heading gives
@@ -213,14 +221,27 @@ def _lines(blocks: list[dict]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     current = "other"
     lead = ""   # set by a line like "Knowledge of the following preferred:"
+    short = False   # under "Education" and the like, until the employer talks
+    seen = False
+    names = [w for w in re.findall(r"[A-Za-z]{3,}", company)
+             if w.lower() not in ("inc", "llc", "the", "and", "company", "group", "corporation")]
     for block in blocks:
-        if block["kind"] == "heading":
-            current = jdmod._classify(block["text"]) or "other"
+        if block["kind"] in ("heading", "end"):
+            text = block.get("text", "")
+            current = jdmod._classify(text) or "other"
+            short = jdmod.subject_heading(text)
+            seen = False
             lead = ""
             continue
         if current not in ("required", "preferred"):
             continue
         items = block["items"] if block["kind"] == "list" else [block["text"]]
+        if short and seen:
+            said = " ".join(items)
+            if _EMPLOYER_VOICE.search(said) or any(re.search(rf"\b{n}\b", said) for n in names):
+                current = "other"
+                continue
+        seen = True
         for item in items:
             item = item.strip()
             if len(item) < 3 or _is_benefits(item):
@@ -308,7 +329,7 @@ def for_posting(description: str, company: str = "", blocks: list[dict] | None =
     blocks = jdstruct.structure(description) if blocks is None else blocks
     lines = []
     asked: dict[str, str] = {}
-    for section, text in _lines(blocks):
+    for section, text in _lines(blocks, company):
         read = _read_line(text, k, company)
         for tid in read["have"] + read["missing"]:
             if asked.get(tid) != "required":
@@ -405,7 +426,7 @@ def _summary(description: str, company: str, k: dict) -> dict:
     preferred: set[str] = set()
     flags: set[str] = set()
     others: set[str] = set()
-    for section, text in _lines(jdstruct.structure(description)):
+    for section, text in _lines(jdstruct.structure(description), company):
         read = _read_line(text, k, company)
         bucket = required if section == "required" else preferred
         bucket.update(read["have"] + read["missing"])
