@@ -33,24 +33,45 @@ _BLANKS = re.compile(r"\n{3,}")
 _PREFERRED = (
     "preferred", "nice to have", "nice-to-have", "bonus", "a plus", "pluses",
     "desired", "additional qualifications", "would be great", "icing on the cake",
+    "stand out if", "nice if you", "that's helpful", "might make you successful",
+    "would also have",
 )
 _REQUIRED = (
     "what you'll need", "what you will need", "what you need", "requirements",
     "qualifications", "required", "who you are", "what we're looking for",
     "what we are looking for", "must have", "minimum", "basic qualifications",
     "skills and experience", "education and experience", "you have",
+    # The headings the 2026-10-27 sweep found on postings with no section read.
+    "what you bring", "you'll bring", "you will bring", "what we look for",
+    # Not "experience in" or "ability to": a needle matches anywhere in a
+    # short line, and those start requirement lines as often as headings.
+    "the essentials", "skill set", "skillset", "competencies",
+    "about you", "ideal candidate", "we want you to have",
+    "what we expect", "what you know", "key skills", "important skills",
+    "essential skills", "qualification", "what we ask of you", "non-negotiables",
+    "what it takes", "excited about you", "great fit if you",
+    "you'll need", "you will need",
 )
 _RESPONSIBILITIES = (
     "what you'll do", "what you will do", "what you'll be doing",
     "responsibilities", "duties", "about the role", "the role", "the position",
     "day to day", "day-to-day", "essential functions", "job summary",
     "position summary", "in this role", "your impact", "what you'll own",
+    "what will you be doing", "your role", "job description", "make an impact",
+    "take the lead on", "things you'll do", "as part of this role",
+    "as a part of the team, you will", "role objective", "job role",
+    "impact the organization", "what you'll do",
 )
 _IGNORE = (
     "about us", "about the company", "who we are", "benefits", "perks",
     "compensation", "pay range", "equal opportunity", "eeo", "why join",
     "our values", "diversity", "accommodation", "disclaimer", "how to apply",
     "our mission", "life at",
+    "what we offer", "our offer", "total rewards", "what you'll get",
+    "in it for you", "privacy", "why work", "why top", "take care of",
+    "support you", "salary", "work authorization", "pay information",
+    "employment scams", "client offers", "relocation", "commitment to",
+    "background screening", "how we hire", "the process", "rewards",
 )
 
 # Headings made only of these words are requirement sections too. Markel
@@ -198,7 +219,9 @@ def _classify(line: str) -> str | None:
     stripped = line.strip().rstrip(":").strip()
     if not stripped or len(stripped) > 70:
         return None
-    low = stripped.lower()
+    # Most postings type "What You’ll Do" with a curly apostrophe, and the
+    # needles are written with a straight one.
+    low = stripped.lower().replace("’", "'").replace("‘", "'")
     # A heading is short and label-like -- a sentence with a period is prose
     # that happens to contain the word "requirements".
     if stripped.endswith(".") and len(stripped.split()) > 6:

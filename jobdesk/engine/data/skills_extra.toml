@@ -250,7 +250,7 @@ term = [
   { id="higher-ed", label="Higher education", kind="domain", aliases=["higher education", "higher ed", "university setting", "academic setting", "k-12"], same_as=["dom-education"] },
   { id="retail", label="Retail", kind="domain", aliases=["retail", "retail industry", "e-commerce", "ecommerce", "consumer goods", "cpg"], same_as=["dom-retail"] },
   { id="manufacturing", label="Manufacturing", kind="domain", aliases=["manufacturing", "manufacturing environment", "production environment", "plant operations"], same_as=["dom-manufacturing"] },
-  { id="utilities", label="Energy and utilities", kind="domain", aliases=["utilities", "utility industry", "energy industry", "oil and gas", "power generation"] },
+  { id="utilities", label="Energy and utilities", kind="domain", aliases=["utilities industry", "utilities sector", "utility company", "utilities company", "utility industry", "energy industry", "oil and gas", "power generation"] },
   { id="telecom", label="Telecommunications", kind="domain", aliases=["telecommunications", "telecom", "wireless industry"] },
   { id="legal", label="Legal", kind="domain", aliases=["legal industry", "law firm", "e-discovery", "ediscovery", "litigation support", "legal operations"] },
   { id="nonprofit", label="Nonprofit", kind="domain", aliases=["nonprofit", "non-profit", "not-for-profit"], same_as=["dom-nonprofit"] },
@@ -298,4 +298,7 @@ drop = [
   # contest, "GAN" and "ENS" as tech, "todo" as an app.
   "asc", "aas", "ftc", "frc", "aoc", "ens", "gan", "opa", "oas", "oai", "dle", "bds", "tns",
   "ilp", "wot", "sui", "todo", "bch", "lcu", "kak", "zem", "obo", "olm", "dwd", "mge", "pio",
+  # A generic word aliased to one product: "analytics SDK" read as the
+  # Playdate SDK, "digital analytics" as IBM's tool of that name.
+  "sdk", "digital analytics",
 ]
