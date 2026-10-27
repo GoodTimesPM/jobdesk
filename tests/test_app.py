@@ -952,6 +952,7 @@ def test_skill_gaps() -> None:
     """
     section("skill gaps")
     from jobdesk.app import skillgap
+    from jobdesk.engine import jd
     posting = (
         "<p><strong>About us</strong></p><p>We use Outlook for everything.</p>"
         "<p><strong>Requirements</strong></p><ul>"
@@ -987,6 +988,43 @@ def test_skill_gaps() -> None:
           g["unread"] == ["Knowledge of the following preferred:"], g["unread"])
     none = skillgap.for_posting("<p>We are hiring. Send a resume.</p>", "Acme")
     check("a posting with no requirements says so", not none["found"] and not none["missing"])
+
+    # Markel's layout: one heading per subject, none of them "Requirements",
+    # and a LinkedIn tag on a line of its own in the middle of a list.
+    markel = ("Job Responsibilities:\n- Perform journal entries\nEducation:\n"
+              "- Bachelor's degree in accounting, finance, or similar required\n"
+              "Certification:\n- Certified Public Accountant (CPA) license or candidate preferred\n"
+              "Work Experience:\n- 1+ years of accounting experience preferred\n"
+              "Skill Sets:\n- Strong computer skills including proficiency within Excel.\n"
+              "#LI-AB\n- Detail oriented with strong organizational skills.\n"
+              "Who we are:\n- Markel Group (NYSE MKL) is a holding company\n")
+    g = skillgap.for_posting(markel, "Markel")
+    texts = [l["text"] for l in g["lines"]]
+    check("Education, Certification, Work Experience and Skill Sets are requirement headings",
+          g["found"] and len(texts) == 5 and any("CPA" in t for t in texts), texts)
+    check("a #LI tag does not cut a list off from its section",
+          any(t.startswith("Detail oriented") for t in texts), texts)
+    tail = skillgap.for_posting("Requirements:\n- 2+ years of SQL\n#LI-Remote\n"
+                                "SitusAMC does not accept unsolicited resumes from agencies.", "Acme")
+    check("a #LI tag after the last requirement still ends the section",
+          [l["text"] for l in tail["lines"]] == ["2+ years of SQL"], tail["lines"])
+    herm = skillgap.for_posting("Education:\nBachelors Degree preferred.\n"
+                                "Hermanson offers a comprehensive package to support your future.\n"
+                                "Skills:\n- Procore\n- Bluebeam\n", "Hermanson")
+    check("Education covers the block under it, not the benefits after",
+          [l["text"] for l in herm["lines"]] == ["Bachelors Degree preferred.",
+           "Procore", "Bluebeam"], herm["lines"])
+    vsoft = skillgap.for_posting("Intro\\n\nEducation and Experience\n\\n\n\\n Experience running meetings.\n"
+                                 "\\n Knowledge and Skills:\n\\n Extensive SQL experience.\n", "V-Soft")
+    check("a posting with escaped line breaks still reads its sections",
+          [l["text"] for l in vsoft["lines"]] == ["Experience running meetings.",
+                                                   "Extensive SQL experience."], vsoft["lines"])
+    check("Who we are is about the company, not a requirement",
+          not any("NYSE" in t for t in texts), texts)
+    check("the CPA line keeps its preferred", next(l for l in g["lines"] if "CPA" in l["text"])["section"]
+          == "preferred")
+    check("Candidate Experience is not a requirement heading",
+          jd._classify("Candidate Experience") is None and jd._classify("Skills") == "required")
 
     rows = [{"description": posting, "company": "Acme", "title": "AP Clerk", "uid": "a", "score": 80},
             {"description": posting, "company": "Beta", "title": "AP Clerk", "uid": "b", "score": 70}]
