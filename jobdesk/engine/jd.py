@@ -53,6 +53,21 @@ _IGNORE = (
     "our mission", "life at",
 )
 
+# Headings made only of these words are requirement sections too. Markel
+# splits its requirements into "Education", "Certification", "Work
+# Experience" and "Skill Sets", and none of those says "requirements". The
+# whole heading has to be made of them, so "Candidate Experience" or
+# "Training and Development" (a benefit) stays out.
+_REQUIRED_NAMES = frozenset((
+    "education", "certification", "certifications", "certificate", "certificates",
+    "license", "licenses", "licensure", "licensing", "experience", "skill", "skills",
+    "knowledge", "abilities", "competencies", "competency",
+))
+_NAME_FILLER = frozenset((
+    "and", "or", "work", "professional", "technical", "key", "core", "relevant",
+    "set", "sets", "job", "related", "your",
+))
+
 _SECTION_WEIGHT = {
     "required": config.WEIGHT_REQUIRED,
     "responsibilities": config.WEIGHT_RESPONSIBILITIES,
@@ -194,7 +209,18 @@ def _classify(line: str) -> str | None:
     ):
         if any(n in low for n in needles):
             return name
-    return None
+    return "required" if subject_heading(stripped) else None
+
+
+def subject_heading(line: str) -> bool:
+    """A heading that names a subject (Education, Skill Sets) and nothing else.
+
+    It opens a requirements section that may have no heading after it to
+    close it: Hermanson's "Education" runs straight into its benefits.
+    skillgap ends such a section where the employer starts talking.
+    """
+    words = re.findall(r"[a-z]+", line.lower())
+    return bool(words) and set(words) <= _REQUIRED_NAMES | _NAME_FILLER         and not _REQUIRED_NAMES.isdisjoint(words)
 
 
 def split_sections(text: str) -> dict[str, str]:
