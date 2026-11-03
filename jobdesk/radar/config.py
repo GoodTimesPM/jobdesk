@@ -97,6 +97,9 @@ MAX_DETAIL_FETCHES_PER_HOST = 60
 # worth being early on. Each one is a single GET of a page a person could have
 # opened themselves by clicking the link in the digest. Doubled when the Adzuna
 # pull went from 25 to 50 a search, or the new postings wait as snippets.
+# These run about 10 seconds apart, so 120 is 20 minutes of the run, and the
+# scheduled task's time limit in scripts/radar/install_schedule.ps1 has to leave
+# room for it.
 MAX_PARTIAL_FETCHES = 120
 
 # How many days a posting stays in seen.json before being forgotten.
