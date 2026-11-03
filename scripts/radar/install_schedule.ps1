@@ -40,7 +40,7 @@ foreach ($t in $Times) {
     $triggers += New-ScheduledTaskTrigger -Daily -At $t
 }
 
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings -Description "Job Radar: daily job discovery, scoring, and Notion tracking." -Force | Out-Null
 

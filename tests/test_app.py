@@ -401,6 +401,32 @@ def test_api() -> None:
         check("an unknown posting is a readable 400",
               code == 400 and "no posting" in missing["error"])
 
+        # A run the task limit killed leaves only a log that stops short.
+        from datetime import datetime as _dt, timedelta as _td
+        from jobdesk.radar import config as _radar_config
+        real_logs = _radar_config.LOGS
+        with tempfile.TemporaryDirectory() as logs:
+            _radar_config.LOGS = Path(logs)
+            bar = "=" * 60
+            def died_with(*lines):
+                (Path(logs) / "run.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                return api.unfinished_run(_dt.now() + _td(hours=1))
+            check("no log is no alarm", api.unfinished_run() == "")
+            check("a run that stopped short says when it started",
+                  died_with("2026-11-02 16:19:30  done", f"2026-11-03 06:00:05  {bar}",
+                            "2026-11-03 06:29:21  53 new posting(s)")
+                  == "2026-11-03T06:00:05")
+            check("a run that saved and then died during discovery lost nothing",
+                  died_with(f"2026-11-03 06:00:05  {bar}", "2026-11-03 06:29:30  results saved") == "")
+            check("a finished run from before the marker is fine",
+                  died_with(f"2026-11-02 16:00:05  {bar}", "2026-11-02 16:19:30  done") == "")
+            check("the switch being off is not a death",
+                  died_with(f"2026-11-03 06:00:05  {bar}",
+                            "2026-11-03 06:00:05  SWITCH.txt is OFF - exiting") == "")
+            (Path(logs) / "run.log").write_text(f"2026-11-03 06:00:05  {bar}\nworking\n", encoding="utf-8")
+            check("a run still writing is not dead", api.unfinished_run() == "")
+            _radar_config.LOGS = real_logs
+
         # The page polls this every minute to notice a scheduled radar run,
         # so it has to answer the same stamp the list did and cost nothing.
         code, beat = live.get("/api/pulse")
