@@ -1591,17 +1591,18 @@ def test_criteria() -> None:
     # the sentence in criteria.py or index.html has to change with it.
     src = (ROOT / "jobdesk" / "radar" / "score.py").read_text(encoding="utf-8")
     help_text = " ".join(f[3] for s in criteria.SECTIONS for f in s["fields"])
-    for points, needle in ((35, 'listed_why = 35, f"tier-1'),
-                           (24, 'listed_why = 24, f"tier-2'),
-                           (14, 'listed_why = 14, f"tier-3'),
-                           (25, "points += 25"), (22, "points += 22"),
-                           (10, "return -10 + points"), (8, "return 8 + points")):
+    for points, needle in ((30, "TITLE_MAX = 30"),
+                           (21, 'listed_why = 21, f"tier-2'),
+                           (12, 'listed_why = 12, f"tier-3'),
+                           (5, "LOCATION_MAX = 5"), (15, "PAY_MAX = 15"),
+                           (8, 'return -8, [f"pays'), (16, "return 16, [")):
         check(f"{points} points is what score.py gives",
               needle in src and f"{points} " in help_text, needle)
     check("the tier lines on the page match tier_for",
-          (score.tier_for(75), score.tier_for(74), score.tier_for(60),
-           score.tier_for(59), score.tier_for(45), score.tier_for(44))
-          == ("A", "B", "B", "C", "C", "D"))
+          (score.tier_for(85), score.tier_for(84), score.tier_for(75),
+           score.tier_for(74), score.tier_for(60), score.tier_for(59),
+           score.tier_for(45), score.tier_for(44))
+          == ("A", "B", "B", "C", "C", "D", "D", "F"))
     page = (ROOT / "jobdesk" / "app" / "static" / "index.html").read_text(encoding="utf-8")
     check("the page states no tier floors of its own",
           "75 and up" not in page and "60 to 74" not in page)
