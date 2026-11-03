@@ -1412,8 +1412,8 @@ function fillPosting(job, td) {
 }
 
 // How the number was reached, one line per part, in the order the scorer
-// adds them. The caps, the squeeze into 90-100 and the evergreen penalty are
-// lines too, so the column sums to the score in the table.
+// adds them. The caps and the evergreen penalty are lines too, so the column
+// sums to the score in the table.
 function scoreParts(job) {
   const box = el("div", { class: "parts" });
   box.append(el("div", { class: "parts-head" },
@@ -1499,7 +1499,8 @@ function gapPanel(g) {
     l.have.forEach((t) => marks.append(el("span", { class: "gm have", text: labelOf(g, t) })));
     const read = l.have.length || l.missing.length || l.flags.length || l.others.length;
     if (!read) marks.append(el("span", { class: l.checked ? "gm have" : "gm none",
-      text: l.checked ? "you meet this" : "no skill named" }));
+      text: l.checked ? "you meet this" : "not scored",
+      title: l.checked ? "" : "This line names no application or certification, so it does not touch your score." }));
     lines.append(el("div", { class: "gap-line " + l.section },
       el("span", { class: "gap-sec", text: l.section === "required" ? "Req" : "Pref" }),
       el("span", { class: "gap-text", text: l.text }), marks));

@@ -802,8 +802,8 @@ def rescore(query, body) -> dict:
 
     path = radar_config.CANDIDATES
     rows, stamp = _candidates()
-    # Read only. The radar's evergreen penalty lives in the seen-store, and a
-    # rescore without it handed every evergreen row its 15 points back.
+    # Read only. The radar's evergreen warning lives in the seen-store, and a
+    # rescore without it would take the warning off every evergreen row.
     store = dedupe.SeenStore()
     try:
         read_at = path.stat()
