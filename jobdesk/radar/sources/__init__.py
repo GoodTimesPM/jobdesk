@@ -26,6 +26,8 @@ BOARD_SOURCES: dict[str, bool] = {
     "remotive": True,
     "himalayas": True,
     "weworkremotely": True,
+    "themuse": True,
+    "jobicy": True,
     "adzuna": True,        # no-ops without ADZUNA_APP_ID / ADZUNA_APP_KEY
     "usajobs": True,       # no-ops without USAJOBS_API_KEY / USAJOBS_EMAIL
     "hackernews": True,

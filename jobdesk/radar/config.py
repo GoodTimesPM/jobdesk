@@ -95,8 +95,9 @@ MAX_DETAIL_FETCHES_PER_HOST = 60
 # `sources.fill_partials`. Separate from the budget above so that a pull heavy
 # in aggregator results cannot starve the ATS boards, which are the channel
 # worth being early on. Each one is a single GET of a page a person could have
-# opened themselves by clicking the link in the digest.
-MAX_PARTIAL_FETCHES = 60
+# opened themselves by clicking the link in the digest. Doubled when the Adzuna
+# pull went from 25 to 50 a search, or the new postings wait as snippets.
+MAX_PARTIAL_FETCHES = 120
 
 # How many days a posting stays in seen.json before being forgotten.
 SEEN_RETENTION_DAYS = 120
