@@ -693,6 +693,11 @@ function stamp(data) {
   }
   if (ran) key.append(el("span", { text: `scored ${ran.toLocaleString()}` }));
   box.append(key);
+  const died = data.run_died ? new Date(data.run_died) : null;
+  if (died && !isNaN(died)) {
+    box.append(el("p", { class: "run-died",
+      text: `The radar run from ${died.toLocaleString()} never finished, so nothing it found is on this list. The next run picks those postings up.` }));
+  }
 }
 
 // Reads the two score boxes. Blank means "no bound on this end" rather than

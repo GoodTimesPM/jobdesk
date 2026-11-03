@@ -21,7 +21,7 @@ import json
 import os
 import tempfile
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .. import paths, profile
@@ -89,6 +89,35 @@ def _scoring() -> dict:
 
 _CACHE: dict = {"key": None, "rows": [], "stamp": ""}
 _CACHE_LOCK = threading.Lock()
+
+
+# The longest a healthy run goes without a log line is the snippet fetch.
+RUN_QUIET_LIMIT = timedelta(minutes=45)
+_RUN_SETTLED = ("results saved", "SWITCH.txt is OFF", "dry run - skipping")
+
+
+def unfinished_run(now: datetime | None = None) -> str:
+    """When the last radar run started, if it died before saving what it found.
+
+    A killed run under pythonw leaves no error and no new rows, so the list just
+    looks like a quiet day. The log is the only record: a run that got its
+    results out says so, and a run still going is still writing.
+    """
+    path = radar_config.LOGS / "run.log"
+    try:
+        info = path.stat()
+        with path.open("rb") as handle:
+            handle.seek(max(0, info.st_size - 200_000))
+            tail = handle.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    quiet = (now or datetime.now()) - datetime.fromtimestamp(info.st_mtime)
+    head, mark, last = tail.rpartition("=" * 60)
+    if not mark or quiet < RUN_QUIET_LIMIT:
+        return ""
+    if any(text in last for text in _RUN_SETTLED) or last.rstrip().endswith("  done"):
+        return ""
+    return head.rpartition("\n")[2].strip().replace(" ", "T", 1)
 
 
 def _candidates() -> tuple[list[dict], str]:
@@ -280,6 +309,7 @@ def jobs(query, body) -> dict:
     return {
         "jobs": listed,
         "last_run": stamp,
+        "run_died": unfinished_run(),
         "stars_gone": stars.gone({r.get("uid") or "" for r in listed}),
         "using_example": profile.is_example(),
         "tiers": {t: sum(1 for r in listed if r.get("tier") == t)
