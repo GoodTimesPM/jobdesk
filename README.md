@@ -170,11 +170,25 @@ posting you are looking at leaves your machine.
 <details>
 <summary><b>What a score has to earn</b></summary>
 
-A fit score is 0-100 and 100 is meant to be rare. The raw total a posting can
-reach is above 100, and the top stretch of it is compressed, so the last ten
-points cost several times what the first ten did. A posting that gets the
-title, the tools, the location and the experience right lands in the nineties.
-Being perfect is a separate achievement.
+A fit score is 0-100, and the parts add up to exactly 100: title 30, skills 25,
+experience 20, pay 15, location 5, freshness 5. Location is small on purpose.
+A posting has to be local or remote to survive at all, so points for it would
+be free. Nothing reshapes the total, so the score is the sum of the lines shown
+under it.
+
+A is 85 and up, B 75, C 60, D 45, and F is everything under that. A is held for
+jobs you meet. A posting whose floor is past `years_comfortable`, or that
+requires two or more applications you do not have, stops at 84.
+
+A skill is a named application, platform or certification. "Attention to
+detail" and a diploma never touch the score, in any field. A posting that names
+nothing you lack starts at 18 of 25, and what it names that you have earns the
+rest. Each required application you lack costs 5, and only a real requirement
+counts: "Oracle preferred", "Terraform or Pulumi" and "tools such as SAP" cost
+nothing.
+
+Age is how old a posting already was when JobDesk found it. Time on your board
+never lowers a score.
 
 Experience is the thing the score is strictest about, because it is the thing
 that actually closes a door. A req asking for "2 years of SQL and 5 years of
