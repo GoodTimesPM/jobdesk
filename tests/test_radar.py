@@ -28,7 +28,7 @@ import os
 import sys
 import tempfile
 import types
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,7 +143,7 @@ EXPECTED = {
     ("Senior Accounting Manager", "Test Co"):
         ("F", 0, 0, ("seniority-mismatch",), ()),
     ("Billing Analyst", "Test Co"):
-        (None, 55, 85, (), ("disqualified",)),
+        (None, 30, 60, ("stretch-experience",), ("disqualified",)),
     ("Payroll Specialist", "Test Co"):
         ("F", 0, 0, ("disqualified",), ()),
     ("Accounts Receivable Specialist", "Test Co"):
@@ -153,13 +153,13 @@ EXPECTED = {
         (None, 60, 100, (), ("disqualified",)),
     # The equivalency escape hatch opens...
     ("Financial Systems Analyst", "Test Co"):
-        (None, 50, 100, ("equivalency-accepted",), ("disqualified",)),
+        (None, 20, 50, ("equivalency-accepted",), ("disqualified",)),
     # ...but not at ten years.
     ("Cost Accountant", "Test Co"):
         ("F", 0, 0, ("over-experienced-req",), ()),
     # "2014 year over year" is not a 14-year requirement.
     ("Accounting Specialist", "Test Co"):
-        (None, 60, 100, (), ("disqualified",)),
+        (None, 50, 100, (), ("disqualified",)),
     # Surfaced, but visibly demoted.
     ("Staff Accountant", "Robert Half"):
         (None, 45, 85, ("staffing-agency", "off-hours-availability"), ()),
@@ -287,14 +287,15 @@ def rules_check() -> int:
     pts, why, _ = geo("Business Analyst", "USA - Remote USA - St. Louis, MO")
     want("but a posting that also offers remote is remote", why[:1], ["remote"])
     pts, why, _ = geo("Business Analyst", "Phoenix, AZ Denver, CO Irving, TX")
-    want("a list of cities that includes home stays local", pts, 25)
+    want("a list of cities that includes home stays local", pts, score.LOCATION_MAX)
     pts, _, _ = geo("Business Analyst", "Skills: Agile, MS Office, Excel.")
-    want("'Agile, MS Office' is not Mississippi", pts, 25)
+    want("'Agile, MS Office' is not Mississippi", pts, score.LOCATION_MAX)
     pts, _, _ = geo("Support Technician II, DC", "Data center support role.")
-    want("'Technician II, DC' in a title is a data center, not a city", pts, 25)
+    want("'Technician II, DC' in a title is a data center, not a city", pts,
+         score.LOCATION_MAX)
     pts, _, _ = geo("Business Analyst", "Phoenix, AZ Mesa, AZ Irving, TX "
                     + "Katy, TX " * 60 + "Denver, CO Reading, PA")
-    want("home far down a long list of cities stays local", pts, 25)
+    want("home far down a long list of cities stays local", pts, score.LOCATION_MAX)
 
     # -- a clerical word on a tier list is wanted ------------------------------
     try:
@@ -345,9 +346,10 @@ def rules_check() -> int:
     seen = dedupe.SeenStore.__new__(dedupe.SeenStore)
     seen._data = {j.uid: {"first_seen": "2026-01-01T00:00:00+00:00",
                           "times_seen": 40}}
+    before = j.score
     seen.ghost_check(j)
-    want("the evergreen penalty is a line too",
-         (j.points[-1][0], sum(p[1] for p in j.points)), ("Evergreen", j.score))
+    want("time on our board warns and costs nothing",
+         (j.score, "ghost-suspect" in j.flags), (before, True))
 
     # -- a years range is a band ---------------------------------------------
     def band(text: str):
@@ -376,30 +378,118 @@ def rules_check() -> int:
 
     want("a band topping out past the stretch is not 'in range'",
          flags_for("3-5 years of experience required")[1],
-         ("band-tops-out-high",))
+         ("stretch-experience", "band-tops-out-high"))
     want("a band inside the stretch is demoted, not blocked",
          flags_for("2-3 years of experience required")[1],
          ("stretch-experience",))
-    want("a band wholly in range gets the full bonus",
-         flags_for("1-2 years of experience required"), (15, ()))
+    want("a band wholly in range gets the most a band can",
+         flags_for("0-2 years of experience required")[0] >= 16, True)
+    want("a floor past what you have earns next to nothing",
+         flags_for("3 years of experience required")[0] <= 2, True)
 
     # -- 100 costs what it says it costs -------------------------------------
-    want("nothing below the linear point moves", score.scale(40), 40)
-    want("the linear point itself is fixed",
-         score.scale(score.SCORE_LINEAR_TO), score.SCORE_LINEAR_TO)
-    want("a perfect raw total is 100", score.scale(score.SCORE_CEILING), 100)
-    want("and nothing can exceed it", score.scale(score.SCORE_CEILING + 50), 100)
-    want("halfway up the stretch is halfway to 100",
-         score.scale((score.SCORE_LINEAR_TO + score.SCORE_CEILING) // 2), 95)
-    want("the scale never goes backwards",
-         all(score.scale(n) <= score.scale(n + 1) for n in range(0, 200)), True)
+    want("every part at its most is exactly 100", score.SCORE_CEILING, 100)
+    want("the parts listed on Criteria add to it",
+         sum(m for _l, m in score.SCORE_PARTS), 100)
+    want("no raw total is reshaped on the way to the score", score.scale(83), 83)
+
+    # -- what A means --------------------------------------------------------
+    def strong(extra: str, company: str = "Test Co"):
+        return score.score_job(Job(
+            title="Junior Staff Accountant", company=company, url="x",
+            source="greenhouse", location="Denver, CO",
+            salary_min=80000, salary_max=90000,
+            description="Requirements: general ledger, reconciliation, Excel, "
+                        "QuickBooks, month end close and journal entries. "
+                        + extra))
+    best = strong("1-2 years of experience required.")
+    want("a job you meet can reach A", best.tier, "A")
+    want("being local is not what got it there",
+         dict((p[0], p[1]) for p in best.points)["Location"], 5)
+    want("the most it can stretch is a B, whatever else adds up",
+         strong("3 years of experience required.").score <= score.NOT_A_CEILING, True)
+    want("the letters sit at the agreed lines",
+         [score.tier_for(n) for n in (85, 84, 75, 74, 60, 59, 45, 44)],
+         ["A", "B", "B", "C", "C", "D", "D", "F"])
+
+    # -- filler is not a skill -----------------------------------------------
+    def skills_for(body: str, title: str = "Help Desk Analyst"):
+        job = score.score_job(Job(title=title, company="Test Co", url="x",
+                                  source="greenhouse", location="Denver, CO",
+                                  description=body))
+        return dict((p[0], p[1]) for p in job.points)["Skills"]
+    filler = ("Requirements: high school diploma, attention to detail, strong "
+              "time management and communication skills.\n")
+    want("a posting that names nothing you lack is not marked down",
+         skills_for(filler), score.SKILLS_NOTHING_LACKING)
+    want("what it names that you have moves it up",
+         skills_for(filler + "Excel and QuickBooks.\n") > score.SKILLS_NOTHING_LACKING, True)
+    want("what it requires that you lack moves it down",
+         skills_for(filler + "Must have Terraform.\n"),
+         score.SKILLS_NOTHING_LACKING - score.MISSING_TOOL_COST)
+
+    # -- months are experience too -------------------------------------------
+    def band(body: str):
+        return score.required_band(Job(title="Analyst", company="Test Co", url="x",
+                                       source="t", description=body))
+    want("'6-12 months' is an entry band",
+         band("Minimum 6-12 months' experience in a Service Desk role."), (0, 1))
+    want("spelled out too", band("Six months of experience with invoices."), (0, 1))
+    want("24 months is two years", band("24 months of experience required."), (2, 2))
+    want("18 months has a floor of one", band("18 months experience."), (1, 2))
+    want("a contract is not a requirement",
+         band("This is a 12 month contract role. Great experience awaits."), None)
+    want("nor is an onboarding plan",
+         band("Within 6 months you will gain experience in billing."), None)
+    want("the higher of months and years wins",
+         band("6 months of experience with Excel and 2 years experience overall."), (2, 2))
+
+    # -- a score does not fall because time passed ---------------------------
+    def aged(posted_ago: int, found_ago: int | None):
+        now = datetime.now(timezone.utc)
+        return score.score_job(Job(
+            title="Help Desk Analyst", company="Test Co", url="x", source="greenhouse",
+            location="Denver, CO", description="Excel.",
+            posted_at=now - timedelta(days=posted_ago),
+            first_seen=None if found_ago is None else now - timedelta(days=found_ago)))
+    want("age stops counting at the find",
+         aged(61, 60).score, aged(1, None).score)
+    want("a posting that was already old when found still pays for it",
+         aged(61, 0).score < aged(1, None).score, True)
+    want("and the row says which age it read",
+         any("1d old when found" in r for r in aged(61, 60).reasons), True)
+
+    # -- applications the posting requires that you do not have --------------
+    def lacking(body: str, company: str = "Test Co"):
+        return score.missing_tools(Job(title="Analyst", company=company, url="x",
+                                       source="t", description=body))
+    want("a required application you never used is read",
+         lacking("Requirements: experience with Terraform.\n"), ["Terraform"])
+    want("a wish is not a requirement",
+         lacking("Requirements: Terraform experience preferred.\n"), [])
+    want("a choice is not a requirement",
+         lacking("Requirements: Terraform or Pulumi.\n"), [])
+    want("nor a list given as an example",
+         lacking("Requirements: cloud tools such as Terraform.\n"), [])
+    want("a skill on your profile is not missing",
+         lacking("Requirements: Excel and QuickBooks.\n"), [])
+    want("the company's own name is not a tool",
+         lacking("Requirements: experience here at Workday.\n", "Workday"), [])
+    want("an ordinary word is not a product",
+         lacking("Requirements: spark ideas on each workday.\n"), [])
+    want("the product pitch above the requirements is not asked of you",
+         lacking("We integrate with Salesforce. Requirements: Excel.\n"), [])
+    two = strong("1-2 years of experience required. Must have Terraform. "
+                 "Must have Kubernetes.")
+    want("each one costs points", two.score < best.score, True)
+    want("and two of them keep a job out of A", two.score <= score.NOT_A_CEILING, True)
 
     # -- synonyms ------------------------------------------------------------
     syn = profile.synonyms()
     want("the example profile declares synonyms", bool(syn), True)
     want("a title synonym lands one notch below an exact hit",
          score._synonym_title("fp&a analyst")[0],
-         24 - profile.SYNONYM_DISCOUNT)
+         21 - profile.SYNONYM_DISCOUNT)
     want("an unrecognised title gets nothing",
          score._synonym_title("licensed massage therapist")[0], 0)
     want("alternates match on word boundaries",
