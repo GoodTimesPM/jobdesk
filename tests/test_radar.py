@@ -412,6 +412,18 @@ def rules_check() -> int:
          [score.tier_for(n) for n in (85, 84, 75, 74, 60, 59, 45, 44)],
          ["A", "B", "B", "C", "C", "D", "D", "F"])
 
+    # -- a killed run loses nothing it could have saved ----------------------
+    import inspect
+    from jobdesk.radar import main as radar_main
+    steps = inspect.getsource(radar_main.run)
+    want("results are saved before anything that can run long",
+         steps.index("store.save()") < min(steps.index("learn.run("),
+                                           steps.index("repair_partials(")), True)
+    installer = (Path(__file__).resolve().parents[1] / "scripts" / "radar"
+                 / "install_schedule.ps1").read_text(encoding="utf-8")
+    want("the task's limit leaves room for the snippet fetch",
+         "-ExecutionTimeLimit (New-TimeSpan -Hours 2)" in installer, True)
+
     # -- filler is not a skill -----------------------------------------------
     def skills_for(body: str, title: str = "Help Desk Analyst"):
         job = score.score_job(Job(title=title, company="Test Co", url="x",
