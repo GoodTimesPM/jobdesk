@@ -1855,6 +1855,7 @@ button:not(.tab):not(:disabled):active { transform: scale(.97); }
 .tierbar .D { background: var(--ink-faint); }
 .tier-key { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ink-faint); }
 .tier-key b { font-weight: 600; color: var(--ink-soft); }
+.run-died { margin: 6px 0 0; color: var(--warn); overflow-wrap: anywhere; }
 .tier-key .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   margin-right: 5px; vertical-align: 1px; }
 
