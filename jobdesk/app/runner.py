@@ -115,9 +115,10 @@ def _drain() -> None:
         except Exception as exc:
             buffer.flush()
             run.error = f"{type(exc).__name__}: {exc}"
-            run.state = "failed"
             run.lines.append("")
             run.lines.extend(traceback.format_exc().rstrip().splitlines())
+            # Last, because a poller stops reading the moment it sees this.
+            run.state = "failed"
             print(f"[jobdesk] run {run.label!r} failed: {run.error}",
                   file=sys.stderr)
         finally:

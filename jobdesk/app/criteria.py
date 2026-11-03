@@ -33,11 +33,11 @@ SECTIONS = [
             "Every title here is also searched for; how often is below."),
         "fields": [
             ("tier_1_titles", "list", "Jobs you would take today",
-             "Worth 35 points."),
+             "Worth 30 points."),
             ("tier_2_titles", "list", "Jobs you could land with the right pitch",
-             "Worth 24 points."),
+             "Worth 21 points."),
             ("tier_3_titles", "list", "Stretch jobs",
-             "Worth 14 points."),
+             "Worth 12 points."),
         ],
     },
     {
@@ -50,13 +50,13 @@ SECTIONS = [
              "The name shown on local jobs, like \"Richmond, VA\". The town "
              "list below is what actually decides what counts as local."),
             ("local_terms", "list", "Towns within commuting distance",
-             "Worth 25 points when the job's location names one. On-site jobs "
+             "Worth 5 points when the job's location names one. On-site jobs "
              "anywhere else are hidden, because JobDesk assumes you are not "
              "moving."),
             ("remote_terms", "list", "Words that mean remote",
-             "Worth 22 points when the job uses one."),
+             "Worth 5 points when the job uses one."),
             ("hybrid_terms", "list", "Words that mean partly in the office",
-             "A remote job that also uses one of these loses 8 points."),
+             "A remote job that also uses one of these loses 2 points."),
         ],
     },
     {
@@ -66,7 +66,13 @@ SECTIONS = [
             "One skill per line, with its points after a colon, like "
             "\"sql: 6\". A skill earns its points when the job description "
             "mentions it."),
-        "outro": "Skills add up to 25 points at most, however many a job mentions.",
+        "outro": (
+            "Only named applications, platforms and certifications count. Lines "
+            "like attention to detail or a diploma never touch the score. A job "
+            "starts at 18 of 25 when it names nothing you lack, and these add "
+            "the rest. Each application or certification a job requires that is "
+            "not here, on your resume or kept under Import Criteria takes 5 off. "
+            "Two of them keep a job out of A."),
         "fields": [
             ("core_skills", "weights", "Your main skills",
              "Leave the number off and it is worth 4."),
@@ -78,16 +84,15 @@ SECTIONS = [
         "id": "pay",
         "title": "Pay",
         "intro": (
-            "Most postings do not list pay at all, and those are not marked "
-            "down for it. A posting that does list pay starts with 3 points, "
-            "because a company that shows its pay up front usually has the "
-            "job funded."),
+            "Pay is worth 15 points. A job that does not list it gets 5, about "
+            "what a band a little over your minimum gets."),
         "outro": "",
         "fields": [
             ("salary_floor", "money", "The least you would accept, per year",
-             "A job paying less than this loses 10 points."),
+             "A job paying less than this loses 8 points. A band sitting right at "
+             "it gets 3."),
             ("salary_target", "money", "What you are aiming for, per year",
-             "A job paying this much or more gets 8 more. In between gets 3 more."),
+             "A band centered here or higher gets all 15 points. In between earns its share."),
         ],
     },
     {
@@ -97,10 +102,11 @@ SECTIONS = [
         "outro": "",
         "fields": [
             ("years_comfortable", "years", "Years of experience you have",
-             "A job asking for this many years or fewer gets 15 points."),
+             "A job asking for this many years or fewer gets 16 of the 20 experience "
+             "points. An early-career title or an offer to train adds the rest."),
             ("max_years_stretch", "years", "The most years you would still apply for",
-             "Up to this counts as a stretch and gets 4 points. A job asking "
-             "for more is hidden."),
+             "Up to this counts as a stretch: 2 points at most, and it cannot "
+             "reach A. A job asking for more is hidden."),
         ],
     },
     {
@@ -112,9 +118,10 @@ SECTIONS = [
         "outro": "",
         "fields": [
             ("fresh_days", "days", "Counts as brand new for",
-             "Posted within this many days: 10 points. Within two weeks: 5."),
+             "Up this many days or fewer when JobDesk found it: 5 points. Up to two "
+             "weeks: 2. The time since JobDesk found it never counts."),
             ("stale_days", "days", "Counts as old after",
-             "Older than this loses 10 points. Older than 90 days loses 18, "
+             "Older than this when found loses 10 points. Older than 90 days loses 18, "
              "because a posting that old is often never filled."),
         ],
     },
