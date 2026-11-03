@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import re
 
+from .. import profile as _shared
 from . import languages, profile
 from .models import Job, division_in
 
@@ -51,6 +52,16 @@ _DEGREE_SWAP = re.compile(
     r"|without\s+a\s+(?:\w+\s+)?degree"
     r"|high\s+school\s+diploma|\bged\b)"
     r"[^.;]{0,60}?\d{1,2}\s*\+?\s*(?:or\s+more\s+)?years?")
+
+
+# "Minimum 6-12 months' experience" is an entry band, and with only years to
+# read it scored as a posting that never said. "Experience" has to follow, or
+# a 12-month contract is a requirement, and "within 6 months" is an onboarding
+# plan.
+_MONTHS_OF_EXPERIENCE = re.compile(
+    r"(?<!\d)(?<!within\s)(?<!first\s)(?<!after\s)(\d{1,2})\s*"
+    r"(?:(?:-|to|–|—)\s*(\d{1,2})\s*)?\+?\s*months?(?:'|’)?\s+"
+    r"[^.;\n]{0,60}?experience", re.I)
 
 
 def _numerals(text: str) -> str:
@@ -202,6 +213,18 @@ def _bands_in(text: str) -> list[tuple[int, int]]:
     return bands
 
 
+def _month_bands(text: str) -> list[tuple[int, int]]:
+    """Months of experience as whole years: "6-12 months" is (0, 1)."""
+    bands = []
+    for m in _MONTHS_OF_EXPERIENCE.finditer(text):
+        if _not_a_requirement(text, m):
+            continue
+        low = int(m.group(1))
+        top = int(m.group(2) or low)
+        bands.append((low // 12, max(1, (top + 11) // 12)))
+    return bands
+
+
 def _tail_bands(job: Job) -> list[tuple[int, int]]:
     """Years requirements below the preferred marker that still bind."""
     tail = _numerals(_preferred_tail(job))
@@ -241,6 +264,7 @@ def required_band(job: Job) -> tuple[int, int] | None:
         for m in pat.finditer(text):
             if not _not_a_requirement(text, m):
                 bands.extend(_bands_in(m.group(0)))
+    bands += _month_bands(text)
     bands += _tail_bands(job)
     if not bands:
         return None
@@ -562,13 +586,13 @@ def _function_match(title: str) -> tuple[int, str]:
 def _tier_points(term: str) -> int:
     """What an exact hit on this term would have been worth."""
     if term in profile.TIER_1_TITLES:
-        return 35
+        return TITLE_MAX
     if term in profile.TIER_2_TITLES:
-        return 24
+        return 21
     if term in profile.TIER_3_TITLES:
-        return 14
-    if term in profile.ADJACENT_TITLES:
         return 12
+    if term in profile.ADJACENT_TITLES:
+        return 10
     return 0
 
 
@@ -644,30 +668,29 @@ def _title_tier(title: str) -> tuple[int, str]:
 
     for good in profile.TIER_1_TITLES:
         if good in t:
-            listed, listed_why = 35, f"tier-1 title ({good})"
+            listed, listed_why = TITLE_MAX, f"tier-1 title ({good})"
             break
     else:
         for good in profile.TIER_2_TITLES:
             if good in t:
-                listed, listed_why = 24, f"tier-2 title ({good})"
+                listed, listed_why = 21, f"tier-2 title ({good})"
                 break
         else:
             for good in profile.TIER_3_TITLES:
                 if good in t:
-                    listed, listed_why = 14, f"tier-3 title ({good})"
+                    listed, listed_why = 12, f"tier-3 title ({good})"
                     break
             else:
                 # A bare family noun with no qualifier still counts ("Accountant",
-                # "Nurse"). 15 rather than 12: at 12 a remote generic role landed one point
-                # under the C line. The nouns come from the profile, and an empty list
+                # "Nurse"). The nouns come from the profile, and an empty list
                 # skips the bonus.
                 family = next((f for f in profile.FAMILY_TITLES if f in t), "")
                 if family:
-                    listed, listed_why = 15, f"generic {family} title"
+                    listed, listed_why = 13, f"generic {family} title"
                 else:
                     for good in profile.ADJACENT_TITLES:
                         if good in t:
-                            listed, listed_why = 12, f"analyst-adjacent ({good.strip()})"
+                            listed, listed_why = 10, f"analyst-adjacent ({good.strip()})"
                             break
 
     if not listed:
@@ -682,7 +705,7 @@ def _title_tier(title: str) -> tuple[int, str]:
         return 0, fn_why
 
     if fn_pts > listed:
-        return fn_pts, fn_why
+        return min(fn_pts, TITLE_MAX), fn_why
     return listed, (listed_why or "title not on the target list")
 
 
@@ -851,16 +874,19 @@ def _geo_points(job: Job) -> tuple[int, list[str], list[str]]:
         flags.append("remote-but-not-US")
         return -100, ["remote, but restricted to a region you can't work in"], flags
 
+    # Being somewhere you can work is the entry ticket, not a reason to apply.
+    # Every posting that gets this far has it, so at 25 points it lifted all of
+    # them alike and a 3-year job with tools you never used still reached A.
     if is_local:
-        points += 25
+        points += LOCATION_MAX
         reasons.append(f"{profile.HOME_METRO} metro")
         if is_hybrid:
             flags.append("hybrid")
     elif is_remote:
-        points += 22
+        points += LOCATION_MAX
         reasons.append("remote")
         if is_hybrid:
-            points -= 8
+            points -= 2
             flags.append("hybrid")
             reasons.append("listed remote but mentions hybrid/onsite")
     else:
@@ -906,14 +932,31 @@ def _stack_points(job: Job) -> tuple[int, list[str], list[str]]:
                if _said(hay, s) or (s[:1] == "." and s in hay)]
     raw -= 2 * len(foreign)
 
-    points = max(-6, min(25, raw))
+    # What it asks for that you have nothing to show for. Overlap alone never
+    # looked at this, so "SQL and Excel, plus Terraform, Kubernetes and Azure"
+    # earned the same as "SQL and Excel".
+    missing = missing_tools(job)
+
+    # A skill is a named application, platform or certification. "Attention to
+    # detail" and a diploma are not, and most postings for most fields name few
+    # of them, so the part starts from what you lack and not from what you
+    # match. Counting matches from zero gave a service desk job that asks for
+    # nothing you lack 0 of 25, and gave any field with a short tool list the
+    # same treatment. What you have moves it up; each thing you lack moves it
+    # down, after the cap, or a long posting would never feel it.
+    bonus = min(SKILLS_MAX - SKILLS_NOTHING_LACKING, raw // SKILL_POINTS_PER_BONUS)
+    points = max(0, SKILLS_NOTHING_LACKING + bonus - MISSING_TOOL_COST * len(missing))
     reasons = []
     if hits:
         reasons.append("stack overlap: " + ", ".join(sorted(set(hits))[:8]))
+    elif not missing:
+        reasons.append("names no application or certification you lack")
     else:
-        reasons.append("no recognizable stack overlap")
+        reasons.append("names nothing from your skills")
     if foreign:
         reasons.append("unfamiliar stack: " + ", ".join(foreign[:4]))
+    if missing:
+        reasons.append("requires what you have not listed: " + ", ".join(missing[:5]))
     return points, reasons, hits
 
 
@@ -935,6 +978,112 @@ TOOL_YEARS_PENALTY = 12
 # The years figure and the product have to sit in one clause: "4+ years of
 # professional experience developing reporting solutions with Power BI".
 _TOOL_CLAUSE = 140
+
+
+# Applications and certifications a posting can require, written the way
+# employers write them. Case matters: "Spark" is a product, "spark" is a verb,
+# and "Workday" is a product where "each workday" is not.
+REQUIRED_TOOLS = (
+    "Power BI", "Tableau", "Looker", "Qlik", "Power Query", "DAX", "Alteryx",
+    "SSRS", "SSIS", "SSAS", "Informatica", "dbt", "Airflow", "Spark", "Hadoop",
+    "Snowflake", "Databricks", "Redshift", "BigQuery", "AWS", "Azure", "GCP",
+    "Google Cloud", "Azure DevOps", "Terraform", "Kubernetes", "Docker",
+    "Jenkins", "Git", "GitHub", "Ansible", "Splunk", "Datadog", "Linux",
+    "SAS", "SPSS", "Stata", "MATLAB", "Python", "SQL", "R",
+    "Salesforce", "ServiceNow", "Workday", "SAP", "Oracle", "NetSuite",
+    "Dynamics 365", "PeopleSoft", "Epic", "Cerner", "QuickBooks", "Yardi",
+    "HubSpot", "Marketo", "Google Analytics", "Adobe Analytics", "Mixpanel",
+    "Amplitude", "Zendesk", "Jira", "Confluence", "Smartsheet", "Visio",
+    "SharePoint", "Power Apps", "Power Automate", "Active Directory",
+    "Intune", "SCCM", "Okta", "CrowdStrike", "SailPoint", "AutoCAD",
+    "CompTIA A+", "CompTIA Network+", "CompTIA Security+", "Security+",
+    "CISSP", "CISA", "CISM", "CRISC", "CCNA", "PMP", "CFA", "CPA", "SHRM",
+    "ITIL", "Six Sigma", "CAMS",
+)
+MISSING_TOOL_COST = 5
+# Where the Skills part starts when a posting names nothing you lack. The rest
+# of SKILLS_MAX is earned by what it names that you have.
+SKILLS_NOTHING_LACKING = 18
+SKILL_POINTS_PER_BONUS = 2
+# The second one is the line. One tool can be learned before the start date;
+# two means the posting is written for somebody else.
+MISSING_TOOLS_FOR_NOT_A = 2
+
+_TOOL_NAME = re.compile(
+    r"(?<![A-Za-z0-9+/#-])(" + "|".join(
+        re.escape(t) for t in sorted(REQUIRED_TOOLS, key=len, reverse=True)
+    ) + r")(?![A-Za-z0-9+#-])")
+# A clause that offers a choice or calls it a wish requires no one name.
+_NOT_A_GATE = re.compile(
+    r"(?i)\b(?:preferred|a plus|nice to have|bonus|desired|ideally|familiarity"
+    r"|exposure|similar|equivalent|e\.g\.|such as|etc|helpful|advantage"
+    r"|plus|or)\b")
+_CLAUSE_END = re.compile(r"[\n;•]|<[^>]{0,40}>|\.(?:\s|$)")
+# Where a posting starts saying what it wants from you. Above it is the company
+# and the product, and "integrates with Salesforce" is not a requirement.
+_ASKS_FROM = re.compile(
+    r"(?i)\b(?:qualifications|requirements|what you(?:'|’)?ll? (?:bring|need|have)"
+    r"|what we(?:'|’)?re looking for|what we look for|skills|you have|you bring"
+    r"|must have|experience)\b")
+
+_OWNED: dict = {"stamp": None, "text": ""}
+
+
+def _owned_text() -> str:
+    """Everything the profile can back up, lower case: the stack lists and
+    their synonyms, master.toml, and skills kept on the Criteria tab."""
+    paths = [_shared.path("master.toml"), _shared.path("evidence.toml")]
+    stamp = (id(profile.CORE_SKILLS), tuple(
+        p.stat().st_mtime_ns if p.exists() else 0 for p in paths))
+    if _OWNED["stamp"] == stamp:
+        return _OWNED["text"]
+    words = [*profile.CORE_SKILLS, *profile.SUPPORTING_SKILLS]
+    alt = profile.synonyms()
+    words += [a for w in list(words) for a in alt.get(w, [])]
+    parts = [" ".join(words)]
+    for path in paths:
+        if path.exists():
+            parts.append(path.read_text(encoding="utf-8-sig", errors="replace"))
+    _OWNED.update(stamp=stamp, text="\n".join(parts).lower())
+    return _OWNED["text"]
+
+
+def _owned(tool: str, owned: str) -> bool:
+    low = tool.lower()
+    if _said(owned, low):
+        return True
+    # A certification written alone is the same certification.
+    return low.startswith("comptia ") and _said(owned, low[len("comptia "):])
+
+
+def missing_tools(job: Job) -> list[str]:
+    """Tools the binding half requires and the profile has nothing to show for.
+
+    Read clause by clause from where the posting starts asking. A clause that
+    calls a name a wish, or offers a choice that includes one you have, is not
+    a requirement of that name.
+    """
+    text = _binding_text(job)
+    if not text or job.partial:
+        return []
+    start = _ASKS_FROM.search(text)
+    text = text[start.start():] if start else text
+    owned = _owned_text()
+    company = job.company.lower()
+    out: list[str] = []
+    for clause in _CLAUSE_END.split(text):
+        names = _TOOL_NAME.findall(clause)
+        if not names or _NOT_A_GATE.search(clause):
+            continue
+        lacking = [n for n in names
+                   if not _owned(n, owned) and n.lower() not in company]
+        if not lacking:
+            continue
+        # "Terraform/Bicep" is a choice too, when you have one of them.
+        if len(lacking) < len(names) and "/" in clause:
+            continue
+        out.extend(n for n in lacking if n not in out)
+    return out
 
 
 def tool_years(job: Job) -> list[tuple[int, str]]:
@@ -979,46 +1128,78 @@ def _tool_years_points(job: Job) -> tuple[int, list[str], list[str]]:
 
 
 def _experience_points(job: Job) -> tuple[int, list[str], list[str]]:
-    """Score the years gate on the whole band, not just its floor.
+    """How well the posting's level matches yours, out of EXPERIENCE_MAX.
 
-    Floors past MAX_YEARS_STRETCH are already blocked in `score_job`. The floor
-    decides whether a posting is reachable; the ceiling decides how much of the
-    in-range bonus it earns, since "2-5 years" tops out above you.
+    The years band decides most of it: the floor says whether you get
+    considered and the ceiling who it is aimed at. An early-career title and
+    a body saying it trains or takes education in place of experience add to
+    that, unless the band has already said the job wants more than you have.
     """
+    points, reasons, flags = _years_points(job)
+    band = required_band(job)
+    equiv = equivalency_clause(job)
+    if band and band[0] > profile.YEARS_COMFORTABLE:
+        if equiv:
+            reasons.append(f"education accepted in place of experience ({equiv})")
+            flags.append("equivalency-accepted")
+        return points, reasons, flags
+
+    entry = entry_level_marker(job.title)
+    if entry:
+        points += 4
+        reasons.append(f"early-career signal ({entry})")
+        flags.append("entry-level")
+    signal = no_experience_signal(job)
+    if signal:
+        points += 6
+        reasons.append(f"no prior experience needed ({signal})")
+        flags.append("no-experience-required")
+    elif equiv:
+        points += 2
+        reasons.append(f"education accepted in place of experience ({equiv})")
+        flags.append("equivalency-accepted")
+    return min(points, EXPERIENCE_MAX), reasons, flags
+
+
+def _years_points(job: Job) -> tuple[int, list[str], list[str]]:
     band = required_band(job)
     if band is None:
         if job.partial:
             # "No years stated" only means something on a full posting. On a
-            # 500-character snippet the requirement is likely below the cut, so it
-            # earns nothing.
-            return 0, ["years requirement not visible in the snippet"], \
+            # 500-character snippet the requirement is likely below the cut.
+            return 4, ["years requirement not visible in the snippet"], \
                 ["unverified-experience"]
-        return 6, ["no explicit years requirement"], []
+        return 10, ["no explicit years requirement"], []
     low, high = band
 
     if low > profile.MAX_YEARS_STRETCH:
-        return -25, [f"{low}+ years required - out of range"], ["over-experienced-req"]
+        return -15, [f"{low}+ years required - out of range"], ["over-experienced-req"]
 
     span = f"{low}-{high}" if high > low else f"{low}+"
+    if low > profile.YEARS_COMFORTABLE:
+        # Allowed through by the max, but the minimum is more than you have.
+        if high > profile.MAX_YEARS_STRETCH:
+            return 0, [f"{span} years required - more than you have, and the "
+                       f"band tops out past your max"], \
+                ["stretch-experience", "band-tops-out-high"]
+        return 2, [f"{span} years required - a stretch"], ["stretch-experience"]
     if high > profile.MAX_YEARS_STRETCH:
         # The floor is reachable, the band is not aimed at you. Worth less
         # than a posting with no stated requirement at all: this one has
         # said out loud who it is looking for.
-        return 3, [f"{span} years required - you are at the floor of the band"], \
+        return 7, [f"{span} years required - you are at the floor of the band"], \
             ["band-tops-out-high"]
-    if low <= profile.YEARS_COMFORTABLE:
-        if high <= profile.YEARS_COMFORTABLE:
-            return 15, [f"{span} years required - in range"], []
-        return 11, [f"{span} years required - top of the band is a stretch"], \
+    if high > profile.YEARS_COMFORTABLE:
+        return 12, [f"{span} years required - top of the band is a stretch"], \
             ["stretch-experience"]
-    return 4, [f"{span} years required - a stretch"], ["stretch-experience"]
+    return 16, [f"{span} years required - in range"], []
 
 
 def _education_points(job: Job) -> tuple[int, list[str], list[str]]:
     """Score the posting's education requirement against your degree.
 
-    A req asking for your degree earns points, and one demanding a Master's
-    costs them.
+    Holding what it asks is a pass, not a point, because nearly every posting
+    on the list asks for it. One demanding a Master's costs points.
     """
     text = _binding_text(job).lower()
     if not text:
@@ -1029,10 +1210,8 @@ def _education_points(job: Job) -> tuple[int, list[str], list[str]]:
     if _has_any(text, profile.BACHELORS_TERMS):
         field = _has_any(text, profile.DEGREE_FIELDS)
         if field:
-            points += 6
             reasons.append(f"bachelor's in {field} - your degree")
         else:
-            points += 3
             reasons.append("bachelor's degree required - held")
 
     advanced = _has_any(text, profile.ADVANCED_DEGREE_TERMS)
@@ -1042,23 +1221,6 @@ def _education_points(job: Job) -> tuple[int, list[str], list[str]]:
         flags.append("advanced-degree-req")
 
     return points, reasons, flags
-
-
-def _no_experience_points(job: Job) -> tuple[int, list[str], list[str]]:
-    """Points for a body that says no prior experience is required.
-
-    Separate from the title's early-career bonus because the two show up
-    independently: plenty of plain "Analyst" titles say "we will train".
-    """
-    signal = no_experience_signal(job)
-    if signal:
-        return 8, [f"no prior experience needed ({signal})"], ["no-experience-required"]
-
-    equiv = equivalency_clause(job)
-    if equiv:
-        return 4, [f"education accepted in place of experience ({equiv})"], \
-            ["equivalency-accepted"]
-    return 0, [], []
 
 
 def staffing_agency(job: Job) -> str | None:
@@ -1107,13 +1269,14 @@ def _syndication_points(job: Job) -> tuple[int, list[str], list[str]]:
 
     A req on five aggregators is in front of far more applicants than one only
     on the company's own Workday. `dedupe.collapse` already knows every source
-    carrying it, so this costs nothing.
+    carrying it, so this costs nothing. Where a posting lives says nothing about
+    whether you fit it, so it can only cost points.
     """
     breadth = len(job.also_on)
     on_ats = job.source.startswith(_ATS_SOURCES)
 
     if on_ats and breadth == 0:
-        return 8, ["company ATS only - not yet syndicated, low competition"], \
+        return 0, ["company ATS only - not yet syndicated, low competition"], \
             ["low-competition"]
     if breadth >= 4:
         return -5, [f"syndicated across {breadth + 1} boards - crowded"], \
@@ -1124,18 +1287,25 @@ def _syndication_points(job: Job) -> tuple[int, list[str], list[str]]:
 
 
 def _freshness_points(job: Job) -> tuple[int, list[str], list[str]]:
-    age = job.age_days
+    """How old the posting already was when JobDesk found it.
+
+    Measured to the find, not to today, so a score does not fall just because
+    a posting has been on the board a while. That decay pushed good rows under
+    MIN_SCORE_TO_REPORT, and the next run deleted them.
+    """
+    age = job.age_when_found
     if age is None:
         return 0, ["posting age unknown"], ["no-date"]
+    said = f"{age:.0f}d old when found"
     if age <= profile.FRESH_DAYS:
-        return 10, [f"posted {age:.0f}d ago - fresh"], ["fresh"]
+        return NEW_MAX, [f"{said} - fresh"], ["fresh"]
     if age <= 14:
-        return 5, [f"posted {age:.0f}d ago"], []
+        return 2, [said], []
     if age <= profile.STALE_DAYS:
-        return 0, [f"posted {age:.0f}d ago"], []
+        return 0, [said], []
     if age <= 90:
-        return -10, [f"posted {age:.0f}d ago - stale"], ["stale"]
-    return -18, [f"posted {age:.0f}d ago - likely evergreen/ghost"], ["ghost-suspect"]
+        return -10, [f"{said} - stale"], ["stale"]
+    return -18, [f"{said} - likely evergreen/ghost"], ["ghost-suspect"]
 
 
 def pay_ceiling() -> float:
@@ -1169,26 +1339,31 @@ def _band_floor(job: Job) -> tuple[float | None, bool]:
 
 
 def _salary_points(job: Job) -> tuple[int, list[str], list[str]]:
+    """How close the pay is to your target, out of PAY_MAX.
+
+    The middle of the band against the line from floor to target. Silence earns
+    what a band a little over the floor does, so a posting that hides its pay
+    neither loses to a low one nor passes for a good one.
+    """
     lo, hi = parse_salary(job)
     if lo:
         job.salary_min, job.salary_max = lo, hi
     top = hi or lo
     if not top:
-        return 0, [], []
+        return PAY_UNPOSTED, ["pay not posted"], []
     low = lo or hi
     if low >= PAY_STRETCH * pay_ceiling():
         return -10, [f"pays {job.salary_text} - well above your range, "
                      f"likely a senior role"], ["salary-above-level"]
-
-    # Posting a salary is a small sign of a real, funded req (Virginia does not
-    # require it). Applies even below the floor.
-    points, flags = 3, ["salary-posted"]
     if top < profile.SALARY_FLOOR:
-        return -10 + points, [f"pays {job.salary_text} - below floor"], \
-            ["below-salary-floor"] + flags
-    if top >= profile.SALARY_TARGET:
-        return 8 + points, [f"pays {job.salary_text} - posted up front"], flags
-    return 3 + points, [f"pays {job.salary_text} - posted up front"], flags
+        return -8, [f"pays {job.salary_text} - below floor"], \
+            ["below-salary-floor", "salary-posted"]
+    middle = (low + top) / 2
+    room = max(1.0, float(profile.SALARY_TARGET) - float(profile.SALARY_FLOOR))
+    share = max(0.0, min(1.0, (middle - profile.SALARY_FLOOR) / room))
+    points = PAY_AT_FLOOR + round(share * (PAY_MAX - PAY_AT_FLOOR))
+    return points, [f"pays {job.salary_text} - {share:.0%} of the way from your "
+                    f"floor to your target"], ["salary-posted"]
 
 
 def _disqualifiers(job: Job) -> list[str]:
@@ -1200,58 +1375,40 @@ def _disqualifiers(job: Job) -> list[str]:
 
 
 # --------------------------------------------------------------------------
-# What 100 means.
-#
-# The axes add up to 159 at their best, and clamping at 100 tied every good
-# posting at 100. Below SCORE_LINEAR_TO nothing changes, so the tier lines
-# and weights keep their calibrated meaning. Above it the rest of the range
-# is stretched, so 100 needs the best case on every axis.
-#
-# Each term is one scoring function's best case, in the order score_job calls
-# them. Re-weight a rule and this needs the same edit; `tests/test_radar.py`
-# holds it to the arithmetic.
+# What 100 means: every part at its most. The parts add to exactly 100, so the
+# number on the row is the number the parts add to. Anything else a posting can
+# trip (an agency, a dealbreaker, a staleness) only takes away.
 # --------------------------------------------------------------------------
-SCORE_CEILING = (
-    35 + 4       # title: a tier-1 hit with a domain word beside it
-    + 25         # geo: in the home metro
-    + 15         # experience: a stated requirement inside your range
-    + 6          # education: a bachelor's in one of your fields
-    + 8          # no prior experience needed
-    + 10         # freshness: posted inside FRESH_DAYS
-    + 11         # salary: at or above target, and posted up front
-    + 8          # syndication: the company's own ATS, not yet copied anywhere
-    + 25         # stack: the cap in _stack_points
-    + 6          # an early-career marker in the title
-    + 6          # applying direct to the company ATS
-)
+TITLE_MAX = 30
+SKILLS_MAX = 25
+EXPERIENCE_MAX = 20
+PAY_MAX = 15
+LOCATION_MAX = 5
+NEW_MAX = 5
+SCORE_CEILING = (TITLE_MAX + SKILLS_MAX + EXPERIENCE_MAX + PAY_MAX
+                 + LOCATION_MAX + NEW_MAX)
 
-SCORE_LINEAR_TO = 90
-
-# The most a posting can score when its body was only sent in part. 78 clears
-# the A floor, so a strong snippet still reaches you, but it cannot outrank a
-# posting whose requirements were actually checked.
-PARTIAL_CEILING = 78
+PAY_AT_FLOOR = 3
+PAY_UNPOSTED = 5
 
 
 def scale(total: int) -> int:
-    """One raw total as a 0-100 score.
-
-    Identity below SCORE_LINEAR_TO. Above it, the raw range that used to be
-    flattened against the clamp is spread across the last ten points.
-    """
-    if total <= SCORE_LINEAR_TO:
-        return max(0, total)
-    room = SCORE_CEILING - SCORE_LINEAR_TO
-    over = min(total, SCORE_CEILING) - SCORE_LINEAR_TO
-    return SCORE_LINEAR_TO + round(over * (100 - SCORE_LINEAR_TO) / room)
+    """One raw total as a 0-100 score."""
+    return max(0, min(total, SCORE_CEILING))
 
 
 # The lowest score for each letter, best first. The page reads these too.
-TIER_FLOORS = (("A", 75), ("B", 60), ("C", 45), ("D", 30))
+TIER_FLOORS = (("A", 85), ("B", 75), ("C", 60), ("D", 45))
 
 # The most each part of a score can add, as the Criteria tab lists them.
-SCORE_PARTS = (("Title", 35), ("Location", 25), ("Skills", 25),
-               ("Experience", 15), ("How new it is", 10), ("Pay", 11))
+SCORE_PARTS = (("Title", TITLE_MAX), ("Skills", SKILLS_MAX),
+               ("Experience", EXPERIENCE_MAX), ("Pay", PAY_MAX),
+               ("Location", LOCATION_MAX), ("How new it is", NEW_MAX))
+
+# A is "you meet what this asks". A posting that asks for more years than you
+# are comfortable with, two tools you have never used, or that was only
+# published as a snippet stops at the top of B however well the rest adds up.
+NOT_A_CEILING = TIER_FLOORS[0][1] - 1
 
 
 def tier_for(score: int) -> str:
@@ -1349,7 +1506,6 @@ def score_job(job: Job) -> Job:
     for label, fn in (("Location", _geo_points), ("Experience", _experience_points),
                       ("Years of one product", _tool_years_points),
                       ("Degree", _education_points),
-                      ("No experience needed", _no_experience_points),
                       ("How new it is", _freshness_points), ("Pay", _salary_points),
                       ("Staffing agency", _agency_points),
                       ("Dealbreakers", _dealbreaker_points),
@@ -1365,25 +1521,10 @@ def score_job(job: Job) -> Job:
     reasons.extend(why)
     part("Skills", pts, why)
 
-    # An explicit early-career signal in the title is the strongest fit signal
-    # in your applied set. Small additive bonus, placed BEFORE the
-    # off-target cap so it lifts real entry roles over the line without
-    # rescuing a capped off-target title (a capped "Associate <off-target>"
-    # is still held at 40).
-    entry = entry_level_marker(job.title)
-    if entry:
-        total += 6
-        reasons.append(f"early-career signal ({entry})")
-        flags.append("entry-level")
-        part("Early-career title", 6, [reasons[-1]])
-
-    # The company's own ATS beats an aggregator repost: the real req, fresher,
-    # no agency in the middle. Stacks with `_syndication_points` (a better path
-    # vs. less competition); together they reach +14.
+    # The company's own ATS is a better way in, not a better fit: a reason on
+    # the row and no points. With the syndication bonus it once added 14.
     if job.source.startswith(_ATS_SOURCES):
-        total += 6
         reasons.append("direct to company ATS")
-        part("Company's own site", 6, [reasons[-1]])
 
     # A title off the target list is capped below the reporting threshold: kept
     # for the market data, never surfaced. 55 was not low enough, since remote,
@@ -1394,19 +1535,24 @@ def score_job(job: Job) -> Job:
         reasons.append("capped: title is off-target")
 
     job.score = scale(total)
-    if total > SCORE_LINEAR_TO:
-        part("Top-end squeeze", job.score - total,
-             [f"{total} raw points; past {SCORE_LINEAR_TO} they are squeezed "
-              f"into the last ten"])
-    elif job.score != total:
+    if job.score != total:
         part("Floor", job.score - total,
              [f"{total} raw points; a score stops at 0"])
-    if job.partial and job.score > PARTIAL_CEILING:
-        part("Cap", PARTIAL_CEILING - job.score,
-             [f"capped at {PARTIAL_CEILING}: only a snippet was published"])
-        job.score = PARTIAL_CEILING
-        reasons.append("capped: only a snippet of this posting was published")
+    not_a = []
+    band = required_band(job)
+    if band and band[0] > profile.YEARS_COMFORTABLE:
+        not_a.append(f"it asks for {band[0]}+ years")
+    lacking = missing_tools(job)
+    if len(lacking) >= MISSING_TOOLS_FOR_NOT_A:
+        not_a.append(f"it requires {', '.join(lacking[:3])}")
+    if job.partial:
+        not_a.append("only a snippet was published")
         flags.append("partial-description")
+    if not_a and job.score > NOT_A_CEILING:
+        why = f"held below A: {'; '.join(not_a)}"
+        part("Cap", NOT_A_CEILING - job.score, [why])
+        job.score = NOT_A_CEILING
+        reasons.append(why)
     job.tier = tier_for(job.score)
     job.reasons = reasons
     job.flags = flags

@@ -235,7 +235,7 @@ class Job:
     # two filters that do the most work -- the years gate and the stack match
     # -- read the body, so a posting whose body was never fully sent cannot
     # be scored the same way as one that was. Scoring reads this; see
-    # `score.PARTIAL_CEILING`.
+    # `score.NOT_A_CEILING`.
     partial: bool = False
 
     # --- filled in by dedupe.collapse() ------------------------------------
@@ -288,6 +288,15 @@ class Job:
         if not self.posted_at:
             return None
         return (datetime.now(timezone.utc) - self.posted_at).total_seconds() / 86400
+
+    @property
+    def age_when_found(self) -> float | None:
+        """Days the posting had been up when JobDesk first saw it. Fixed once
+        it is found, unlike `age_days`, so it is what a score may read."""
+        if not self.posted_at:
+            return None
+        found = self.first_seen or datetime.now(timezone.utc)
+        return max(0.0, (found - self.posted_at).total_seconds() / 86400)
 
     @property
     def haystack(self) -> str:

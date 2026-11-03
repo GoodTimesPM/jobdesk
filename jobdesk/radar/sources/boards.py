@@ -232,19 +232,33 @@ def weworkremotely(_cfg: dict | None = None) -> list[Job]:
 # data, which feeds both the salary filter and the market dashboard later.
 # --------------------------------------------------------------------------
 
+# A call costs one of 250 a day however many rows it returns, and 25 a search
+# left most of the market unread: "data analyst" in Richmond had 179 results.
+ADZUNA_PER_PAGE = 50
+# The family noun in the title alone. Measured in Richmond: 525 postings with
+# "analyst" in the title, 38 of the first 50 on target, against 20 for the
+# phrase search. `what_exclude` is no use for dropping senior roles, because it
+# reads the whole body: it took "data analyst" from 179 results to 8.
+ADZUNA_TITLE_PAGES = 5
+
+
 def adzuna(_cfg: dict | None = None) -> list[Job]:
     app_id = os.getenv("ADZUNA_APP_ID")
     app_key = os.getenv("ADZUNA_APP_KEY")
     if not (app_id and app_key):
         return []
+    searches = [({"what": q}, 1) for q in queries()]
+    searches += [({"title_only": noun}, page)
+                 for noun in targeting.FAMILY_TITLES
+                 for page in range(1, ADZUNA_TITLE_PAGES + 1)]
     out: list[Job] = []
-    for q in queries():
+    for search, page in searches:
         data = http.get_json(
-            "https://api.adzuna.com/v1/api/jobs/us/search/1",
+            f"https://api.adzuna.com/v1/api/jobs/us/search/{page}",
             params={
                 "app_id": app_id, "app_key": app_key,
-                "what": q, "where": where(),
-                "distance": 40, "results_per_page": 25,
+                **search, "where": where(),
+                "distance": 40, "results_per_page": ADZUNA_PER_PAGE,
                 "max_days_old": 30, "content-type": "application/json",
             }, timeout=TIMEOUT)
         if not isinstance(data, dict):
@@ -274,6 +288,74 @@ def adzuna(_cfg: dict | None = None) -> list[Job]:
                 # silence as good news.
                 partial=True,
             ))
+    return out
+
+
+# --------------------------------------------------------------------------
+# The Muse -- free, no key. The one board here that filters by level on its
+# own side, so its pages are not spent on senior roles the scorer would block.
+# Full bodies, so nothing waits on a second fetch.
+# --------------------------------------------------------------------------
+MUSE_PAGES = 10
+MUSE_LEVELS = ("Entry Level", "Mid Level")
+MUSE_CATEGORIES = ("Data and Analytics", "IT", "Business Operations",
+                   "Accounting", "Finance", "Compliance")
+MUSE_REMOTE = "Flexible / Remote"
+
+
+def themuse(_cfg: dict | None = None) -> list[Job]:
+    params = ([("level", v) for v in MUSE_LEVELS]
+              + [("category", v) for v in MUSE_CATEGORIES]
+              + [("location", v) for v in (where(), MUSE_REMOTE)])
+    out: list[Job] = []
+    for page in range(MUSE_PAGES):
+        data = http.get_json("https://www.themuse.com/api/public/jobs",
+                             params=params + [("page", page)], timeout=TIMEOUT)
+        if not isinstance(data, dict):
+            break
+        for j in data.get("results", []):
+            places = [p.get("name", "") for p in j.get("locations", [])]
+            out.append(Job(
+                title=j.get("name", ""),
+                company=(j.get("company") or {}).get("name", ""),
+                url=(j.get("refs") or {}).get("landing_page", ""),
+                source="themuse",
+                location="; ".join(places),
+                description=j.get("contents", ""),
+                posted_at=parse_date(j.get("publication_date")),
+                remote=MUSE_REMOTE in places,
+                external_id=str(j.get("id", "")),
+            ))
+        if page + 1 >= int(data.get("page_count") or 0):
+            break
+    return out
+
+
+# --------------------------------------------------------------------------
+# Jobicy -- free, no key. One call for the newest US remote postings.
+# --------------------------------------------------------------------------
+def jobicy(_cfg: dict | None = None) -> list[Job]:
+    data = http.get_json("https://jobicy.com/api/v2/remote-jobs",
+                         params={"count": 100, "geo": "usa"}, timeout=TIMEOUT)
+    if not isinstance(data, dict):
+        return []
+    out: list[Job] = []
+    for j in data.get("jobs", []):
+        yearly = str(j.get("salaryPeriod", "")).lower() in ("year", "yearly", "annual")
+        dollars = str(j.get("salaryCurrency", "")).upper() == "USD"
+        out.append(Job(
+            title=j.get("jobTitle", ""),
+            company=j.get("companyName", ""),
+            url=j.get("url", ""),
+            source="jobicy",
+            location=j.get("jobGeo", "") or "Remote",
+            description=j.get("jobDescription", ""),
+            posted_at=parse_date(j.get("pubDate")),
+            salary_min=_num(j.get("salaryMin")) if yearly and dollars else None,
+            salary_max=_num(j.get("salaryMax")) if yearly and dollars else None,
+            remote=True,
+            external_id=str(j.get("id", "")),
+        ))
     return out
 
 
@@ -451,6 +533,8 @@ HANDLERS = {
     "remotive": remotive,
     "himalayas": himalayas,
     "weworkremotely": weworkremotely,
+    "themuse": themuse,
+    "jobicy": jobicy,
     "adzuna": adzuna,
     "usajobs": usajobs,
     "hackernews": hackernews,

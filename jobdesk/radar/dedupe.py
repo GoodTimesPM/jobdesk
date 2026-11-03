@@ -32,6 +32,7 @@ SOURCE_PRIORITY = {
     "smartrecruiters": 1, "workable": 1, "recruitee": 1,
     "usajobs": 2, "adzuna": 3, "hiringcafe": 3,
     "remoteok": 4, "remotive": 4, "himalayas": 4, "weworkremotely": 4,
+    "themuse": 4, "jobicy": 4,
     "hackernews": 5,
 }
 
@@ -68,7 +69,7 @@ REPOST_MIN_AGENCY_SHARE = 0.25
 # The company's own ATS carries its own reqs, so a farm cannot form there.
 _OWN_BOARDS = frozenset(SOURCE_PRIORITY) - {
     "usajobs", "adzuna", "hiringcafe", "remoteok", "remotive",
-    "himalayas", "weworkremotely", "hackernews",
+    "himalayas", "weworkremotely", "hackernews", "themuse", "jobicy",
 }
 
 # Words that describe the arrangement, the commute or the paperwork rather
@@ -320,6 +321,8 @@ class SeenStore:
         if not rec:
             return                      # first sighting, nothing to contradict
         first = _parse(rec.get("first_seen"))
+        # Scoring runs before `record`, and reads how old the posting was then.
+        job.first_seen = first or job.first_seen
         if first and job.posted_at and job.posted_at > first:
             job.posted_at = first
 
@@ -331,7 +334,9 @@ class SeenStore:
 
         A req the radar has seen on 40+ separate runs spanning two months is
         almost always an evergreen pipeline-filler rather than a live opening
-        -- worth knowing before spending 20 minutes tailoring for it.
+        -- worth knowing before spending 20 minutes tailoring for it. A warning
+        and no points: time on our board says nothing about the fit, and the
+        15 it used to cost pushed long-running rows off the board.
         """
         rec = self._data.get(job.uid)
         if not rec:
@@ -344,10 +349,6 @@ class SeenStore:
             job.flags.append("ghost-suspect")
             job.reasons.append(
                 f"seen {rec['times_seen']}x over {span}d - likely evergreen")
-            if job.points:
-                job.points.append(["Evergreen", max(0, job.score - 15) - job.score,
-                                   [job.reasons[-1]]])
-            job.score = max(0, job.score - 15)
 
     def __len__(self) -> int:
         return len(self._data)
