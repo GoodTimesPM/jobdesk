@@ -124,22 +124,6 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     log(f"{len(new_jobs)} new posting(s) at or above score "
         f"{config.MIN_SCORE_TO_REPORT} (store holds {len(store)})")
 
-    # Today's good postings become tomorrow's watched companies. Runs after
-    # scoring because the score is the whole qualification, and off the full
-    # list rather than `new_jobs` -- a company is worth watching whether or
-    # not this particular req was seen yesterday. Wrapped because this is the
-    # one step whose failure should cost nothing: the digest is already
-    # decided by here, and a network fault while probing must not lose it.
-    if dry_run:
-        log("dry run - skipping employer discovery")
-    else:
-        try:
-            for row in learn.run(jobs):
-                log(f"learned employer: {row['name']} via {row['ats']} "
-                    f"(confirmed by \"{row['confirmed_by']}\")")
-        except Exception:
-            log("employer discovery failed\n" + traceback.format_exc())
-
     digest_path = config.DIGESTS / f"digest_{stamp}.md"
     digest_path.write_text(render.markdown(jobs, stats, new_jobs), encoding="utf-8")
     log(f"digest written to {digest_path.name}")
@@ -173,7 +157,7 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
         log(f"snapshot: {len(slim)} newly-seen posting(s) -> {snapshot.name}")
 
     if dry_run:
-        log("dry run - skipping Notion write and seen.json update")
+        log("dry run - skipping employer discovery, Notion write and seen.json update")
         if sys.stdout is not None:
             print(render.console(jobs, stats, new_jobs))
         return 0
@@ -183,6 +167,14 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     # `new_jobs` -- a posting found yesterday and not applied to yet is still a
     # candidate today, and this is the file that answers "what can I apply to".
     candidates.write(jobs, log=log, store=store)
+    plugins.deliver(jobs, stats, new_jobs, log=log)
+    store.save()
+    # Everything the run found is safe from here. The steps below only make
+    # later runs better, and they spend an unknown number of HTTP calls. On
+    # 2026-11-03 the task's time limit killed a run during discovery with 53 new
+    # postings in hand, and all 53 went with it.
+    log("results saved")
+
     # Rows this run did not see keep their snippet for up to a month unless
     # something rechecks them, and a closed ad never fills. See SWEEP_BUDGET.
     try:
@@ -191,8 +183,18 @@ def run(dry_run: bool = False, only: str | None = None) -> int:
     except Exception as exc:
         log(f"candidates: sweep failed, run continues ({exc})")
 
-    plugins.deliver(jobs, stats, new_jobs, log=log)
-    store.save()
+    # Today's good postings become tomorrow's watched companies. Runs after
+    # scoring because the score is the whole qualification, and off the full
+    # list rather than `new_jobs` -- a company is worth watching whether or
+    # not this particular req was seen yesterday. Wrapped because this is the
+    # one step whose failure should cost nothing.
+    try:
+        for row in learn.run(jobs):
+            log(f"learned employer: {row['name']} via {row['ats']} "
+                f"(confirmed by \"{row['confirmed_by']}\")")
+    except Exception:
+        log("employer discovery failed\n" + traceback.format_exc())
+
     log("done")
     return 0
 
