@@ -531,31 +531,84 @@ button.side-run .tab-label { flex: none; }
 :root[data-side="folded"] .runbadge { font-size: 0; width: 12px; height: 12px;
   padding: 0; margin: 0 auto; }
 
+/* The notification is a card that floats over the top of the page, tinted by
+   what it is saying: the accent for news, green for done, red for a problem. */
 .banner {
+  --tone: var(--accent);
+  position: fixed; z-index: 70; top: 14px; left: 50%;
+  transform: translateX(-50%); width: min(600px, calc(100vw - 32px));
   display: flex; align-items: center; gap: 12px;
-  padding: 9px 18px; background: var(--warn); color: #fff; font-size: 13px;
+  padding: 11px 10px 11px 12px; overflow: hidden;
+  border-radius: 16px; color: var(--ink); font-size: 13.5px; line-height: 1.45;
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--tone) 13%, transparent), transparent 55%),
+    color-mix(in srgb, var(--card) 90%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--line));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07),
+    0 2px 6px rgba(10, 15, 25, .08), 0 22px 50px -14px rgba(10, 15, 25, .38);
 }
 .banner[hidden] { display: none; }
-.banner.bad { background: var(--bad); }
+.banner.good { --tone: var(--good); }
+.banner.bad { --tone: var(--bad); }
+.banner-ic {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; font-weight: 700; font-size: 15px;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 16%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 28%, transparent);
+}
+.banner-ic::before { content: "i"; font-family: Georgia, serif; font-style: italic; }
+.banner.good .banner-ic::before { content: "\2713"; font-family: inherit; font-style: normal; }
+.banner.bad .banner-ic::before { content: "!"; font-family: inherit; font-style: normal; }
+/* The drain line: as wide as the card, shrinking to nothing as it times out. */
+.banner::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--tone); opacity: .7; transform-origin: left; transform: scaleX(0);
+}
+.banner.timed::after { animation: banner-drain var(--banner-t, 8s) linear forwards; }
+.banner.held::after { animation-play-state: paused; }
+@keyframes banner-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes banner-in { from { opacity: 0; transform: translate(-50%, -12px) scale(.97); } }
+  .banner:not([hidden]) { animation: banner-in .38s var(--ease); }
+}
+@media (max-width: 700px) {
+  .banner { top: calc(62px + env(safe-area-inset-top)); font-size: 13px; gap: 10px; }
+}
 /* The text takes the slack, so the dismiss X stays pinned to the right edge
    whether or not there is a button beside it. Giving the button the
    `margin-left: auto` instead moved the X inboard the moment one appeared. */
-#banner-text { flex: 1 1 auto; min-width: 0; }
+#banner-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 
-.banner-do {
-  flex: none; background: none; border: 1px solid currentColor;
-  border-radius: 5px; color: inherit; font: inherit; font-size: 12.5px;
-  padding: 3px 10px; cursor: pointer; opacity: .85;
+.banner .banner-do {
+  flex: none; border: 0; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  background: var(--tone); color: var(--card); font: inherit; font-size: 12.5px;
+  font-weight: 600; padding: 7px 13px;
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--tone) 70%, transparent);
+  transition: transform .15s var(--ease), filter .15s;
 }
-.banner-do:hover { opacity: 1; }
-.banner-do[hidden] { display: none; }
+.banner .banner-do:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.banner .banner-do[hidden] { display: none; }
 
-.banner-x {
-  flex: none; background: none; border: 0; color: inherit;
-  font-size: 26px; line-height: 1; padding: 0 2px; margin-left: 4px;
-  cursor: pointer; opacity: .75;
+.banner .banner-x {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; border: 0;
+  display: grid; place-items: center; background: none; color: var(--ink-faint);
+  font-size: 20px; line-height: 1; padding: 0; cursor: pointer;
 }
-.banner-x:hover, .banner-x:focus-visible { background: none; opacity: 1; }
+.banner .banner-x:hover, .banner .banner-x:focus-visible { background: var(--line-soft); color: var(--ink); }
+
+/* The tab that has the next step in it. */
+.beckon { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.beckon .ic { color: var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes beckon {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent);
+               background: color-mix(in srgb, var(--accent) 6%, transparent); }
+    50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent);
+          background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  }
+  .beckon { animation: beckon 1.5s ease-in-out infinite; }
+}
 
 .view { padding: 18px; max-width: 1500px; margin: 0 auto; }
 
@@ -1219,6 +1272,12 @@ option.dead     { color: var(--bad); }
 .runs .meta[data-state="running"] { color: var(--accent); }
 .runs .meta[data-state="failed"] { color: var(--bad); }
 .runs .meta[data-state="done"] { color: var(--good); }
+.runs .run-go { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.runs .run-go .go { flex: 1; color: var(--accent); font-weight: 600; }
+.runs .run-log { flex: none; font: inherit; font-size: 11.5px; padding: 2px 9px;
+  border-radius: 99px; border: 1px solid var(--line); background: none;
+  color: var(--ink-soft); cursor: pointer; }
+.runs .run-log:hover { color: var(--ink); border-color: var(--ink-faint); }
 
 .out {
   margin: 0; background: var(--card); border: 1px solid var(--line);

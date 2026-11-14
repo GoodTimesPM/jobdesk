@@ -95,13 +95,16 @@ const post = (path, body) => call(path, {
 const BANNER_SECONDS = 8;
 let bannerTimer = null;
 
+// `bad` is true for an error and "good" for a success; anything else is news.
 function banner(text, bad, sticky, action) {
   const box = $("#banner");
   clearTimeout(bannerTimer);
   bannerTimer = null;
   $("#banner-text").textContent = text || "";
   box.hidden = !text;
-  box.classList.toggle("bad", !!bad);
+  box.classList.toggle("bad", bad === true);
+  box.classList.toggle("good", bad === "good");
+  box.setAttribute("role", bad === true ? "alert" : "status");
 
   /* A rule with no way past it gets worked around outside the tool, where
      nothing is written down. So a block that a person can legitimately
@@ -113,12 +116,33 @@ function banner(text, bad, sticky, action) {
     act.textContent = action.label;
     act.onclick = action.run;
   }
-  if (text && !bad && !sticky) {
+  // The thin line along the foot drains while the message waits to go, and
+  // holds while the pointer is on it, so a long message is not pulled away
+  // mid-sentence.
+  box.classList.remove("timed", "held");
+  if (text && bad !== true && !sticky) {
+    void box.offsetWidth;            // restart the drain for a new message
+    box.style.setProperty("--banner-t", BANNER_SECONDS + "s");
+    box.classList.add("timed");
     bannerTimer = setTimeout(() => { box.hidden = true; }, BANNER_SECONDS * 1000);
   }
 }
 
 $("#banner-close").addEventListener("click", () => banner(""));
+$("#banner").addEventListener("mouseenter", () => {
+  if (!bannerTimer) return;
+  clearTimeout(bannerTimer);
+  bannerTimer = "held";
+  $("#banner").classList.add("held");
+});
+$("#banner").addEventListener("mouseleave", () => {
+  const box = $("#banner");
+  if (bannerTimer !== "held") return;
+  box.classList.remove("held", "timed");
+  void box.offsetWidth;
+  box.classList.add("timed");
+  bannerTimer = setTimeout(() => { box.hidden = true; }, BANNER_SECONDS * 1000);
+});
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
 
@@ -130,7 +154,24 @@ function when(iso) {
 
 /* ---------------------------------------------------------------- views */
 
+// A built packet is only half done until it is marked applied, so the Applied
+// tab pulses until it is opened.
+function beckon(view, on) {
+  $$(`[data-view="${view}"]`).forEach((t) => t.classList.toggle("beckon", on));
+}
+
+// The Applied tab with one application open and in view.
+async function openApplication(id) {
+  show("applied");
+  if (!id) return;
+  apps.open = id;
+  await loadApplications();
+  const row = $(`#app-rows tr.row[data-id="${CSS.escape(id)}"]`);
+  if (row) row.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
 function show(view) {
+  beckon(view, false);
   $$(".view").forEach((v) => { v.hidden = v.id !== "view-" + view; });
   document.documentElement.dataset.view = view;
   $$(".tab").forEach((t) => t.setAttribute("aria-current",
@@ -393,13 +434,23 @@ function drawRuns() {
   const box = $("#runs");
   box.textContent = "";
   runs.list.forEach((run) => {
+    // A packet that built has a row on the Applied tab, and that row is where
+    // the next step happens. Its output stays one button away.
+    const app = run.kind === "packet" && run.state === "done"
+      && run.result && run.result.ok && run.result.id;
     box.append(el("li", {
       "aria-current": String(run.id === runs.watching),
-      on: { click: () => watch(run.id) },
+      class: app ? "to-app" : "",
+      title: app ? "Open this application on the Applied tab" : "",
+      on: { click: () => (app ? openApplication(app) : watch(run.id)) },
     },
       el("span", { class: "label", text: run.label }),
       el("span", { class: "meta", text: `${run.state} · ${run.started.slice(11)}` +
-        (run.error ? ` · ${run.error}` : "") })));
+        (run.error ? ` · ${run.error}` : "") }),
+      app ? el("span", { class: "run-go" },
+        el("span", { class: "go", text: "Open in Applied \u2192" }),
+        el("button", { class: "run-log", type: "button", text: "Output",
+          on: { click: (e) => { e.stopPropagation(); watch(run.id); } } })) : ""));
     box.lastChild.querySelector(".meta").dataset.state = run.state;
     box.lastChild.dataset.id = run.id;
   });
@@ -490,8 +541,10 @@ function finishedRun(data) {
         },
       });
     } else if (result.ok) {
+      if (document.documentElement.dataset.view !== "applied") beckon("applied", true);
       banner(`Packet built. Open APPLY.md, work through it, then mark it `
-           + `applied on the Applied tab.`);
+           + `applied on the Applied tab.`, "good", false,
+             { label: "Open Applied", run: () => openApplication(result.id) });
     } else {
       banner((result.problems || ["the packet did not build"]).join(" "), true);
     }
