@@ -272,6 +272,38 @@ def test_letter() -> None:
     check("a tool on neither the resume nor the JD is rejected",
           len(problems) == 2, str(problems))
 
+    # The house style: what was done, how, and what it taught. A paragraph
+    # that spends itself on the alternative never reaches the letter.
+    from jobdesk import style
+    check("the example profile's letter and answers pass the house style",
+          not style.profile_problems(), str(style.profile_problems()))
+    for bad_line in ("I wrote the schema by hand rather than in a designer.",
+                     "It is not analyst work, but it is the same trait.",
+                     "The work was less about the visuals than about the data.",
+                     "I would rather say it plainly.",
+                     "I will name the thing a reader notices anyway: I have a gap.",
+                     "I reconciled 6 entities -- all of them -- each month.",
+                     "I reconciled 6 entities \u2014 all of them \u2014 each month.",
+                     "I learned what the data actually meant."):
+        check(f"style catches: {bad_line[:40]}", bool(style.problems(bad_line, "x")))
+    for good_line in ("I reconciled 6 entities each month and documented every control step.",
+                      "I learned more about payroll than any course taught me.",
+                      "The close went from 9 business days to 5."):
+        check(f"style passes: {good_line[:40]}", not style.problems(good_line, "x"),
+              str(style.problems(good_line, "x")))
+    styled = letter_mod.load_content()
+    styled["opening"] = [dict(o, id="open.contrast", families=["*"],
+                              template=o["template"] + " I did it by hand rather than with a script.")
+                         for o in styled["opening"][:1]]
+    contrast = letter_mod.build(company="Meadowlark Health", role="Staff Accountant",
+                                family="accounting", resume_text=RESUME, jd_text=JD,
+                                content=styled)
+    check("a paragraph that breaks the house style is dropped, with the reason",
+          any(pid == "open.contrast" and "alternative" in why
+              for pid, why in contrast.dropped), str(contrast.dropped))
+    check("and it is not in the letter",
+          "rather than" not in contrast.body)
+
     # A user-written note is exempt from the template check but still shipped.
     noted = letter_mod.build(company="Meadowlark Health", role="Staff Accountant",
                              family="accounting", resume_text=RESUME, jd_text=JD,
