@@ -15,7 +15,7 @@
 #      list.
 #
 # Rule 2 counts spelled-out numbers too, so avoid using "one", "two" and their
-# neighbours as pronouns or figures of speech. "rather than feeding one" was
+# neighbours as pronouns or figures of speech. "instead of feeding one" was
 # read as a claim about the number 1, and it silently cost every accounting
 # letter its opening paragraph until someone read the drop list.
 #
@@ -50,7 +50,7 @@ method_stoplist = ["Internal Controls", "Desk Procedures"]
 [[opening]]
 id = "open.accounting"
 families = ["accounting"]
-template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver, and my two years of experience have been full-cycle: general ledger, reconciliations, and owning a month-end close rather than feeding someone else's."""
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver, and my two years of experience have been full-cycle: general ledger, reconciliations, and owning the month-end close."""
 
 [[opening]]
 id = "open.billing"
@@ -60,7 +60,7 @@ template = """I am writing to apply for the {role} position at {company}. I am a
 [[opening]]
 id = "open.payroll"
 families = ["payroll"]
-template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver. Payroll and benefits administration have been part of my day-to-day rather than something I have only read about, and I know how unforgiving the calendar is."""
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver. Payroll and benefits administration have been part of my day-to-day work, and I know how unforgiving the payroll calendar is."""
 
 [[opening]]
 id = "open.audit"
@@ -70,7 +70,7 @@ template = """I am writing to apply for the {role} position at {company}. I am a
 [[opening]]
 id = "open.analysis"
 families = ["analysis", "operations"]
-template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver who works on both sides of the ledger and the reporting built on top of it, from journal entries through the budget variance package a manager actually reads."""
+template = """I am writing to apply for the {role} position at {company}. I am an accounting graduate based in Denver who works on both sides of the ledger and the reporting built on top of it, from journal entries through the budget variance package a manager reads."""
 
 # ---------------------------------------------------------------------------
 # EVIDENCE -- the middle of the letter. Each one is a specific thing that
@@ -92,7 +92,7 @@ template = """At Front Range Property Group I own the month-end close for 6 prop
 id = "ev.ap.frpg"
 employer = "frpg"
 families = ["billing", "operations"]
-template = """The payables side is roughly 400 vendor invoices a month in Bill.com, each matched against its purchase order and receiving record before it goes into the weekly check run. Anything without an approved purchase order is held rather than paid, which is the sort of rule that only works if someone applies it every week."""
+template = """The payables side is roughly 400 vendor invoices a month in Bill.com, each matched against its purchase order and receiving record before it goes into the weekly check run. Anything without an approved purchase order is held, and I apply that rule every week, because it only works when someone does."""
 
 [[evidence]]
 id = "ev.reporting"
@@ -104,13 +104,13 @@ template = """I also build the monthly budget-to-actual package for those 6 prop
 id = "ev.audit"
 employer = "frpg"
 families = ["audit", "accounting"]
-template = """I prepare the annual audit schedules and pull support for the external auditors. Their follow-up request list went from 31 items in 2024 to 12 in 2025, which came entirely from documenting the control steps behind each schedule instead of reassembling them from memory each spring."""
+template = """I prepare the annual audit schedules and pull support for the external auditors. Their follow-up request list went from 31 items in 2024 to 12 in 2025, which came from documenting the control steps behind each schedule as I built it. The audit taught me that support written down in advance cuts the follow-up."""
 
 [[evidence]]
 id = "ev.ap.meridian"
 employer = "meridian"
 families = ["billing", "accounting", "operations"]
-template = """Before this I was the AP clerk at Meridian Dental Partners, processing 250 to 300 invoices a month across 11 clinic locations and keeping each clinic's expenses coded to its own general ledger. I handled vendor inquiries for 180 suppliers directly, including pricing and short-ship disputes, rather than routing them up."""
+template = """Before this I was the AP clerk at Meridian Dental Partners, processing 250 to 300 invoices a month across 11 clinic locations and keeping each clinic's expenses coded to its own general ledger. I handled vendor inquiries for 180 suppliers directly, including pricing and short-ship disputes."""
 
 [[evidence]]
 id = "ev.payroll"
@@ -146,20 +146,20 @@ id = "bridge.experience.methods"
 families = ["*"]
 requires_tools = true
 requires_methods = true
-template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I closed 6 entities on my own this month, and most of that work was {methods}, done in {tools}."""
+template = """I have two years of experience, and some postings at this level ask for more. My scope is wider than the years suggest. I closed 6 entities on my own this month, and most of that work was {methods}, done in {tools}."""
 
 [[bridge]]
 id = "bridge.experience.tools"
 families = ["*"]
 requires_tools = true
 requires_methods = false
-template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I closed 6 entities on my own this month, and I have worked in {tools} rather than around them."""
+template = """I have two years of experience, and some postings at this level ask for more. My scope is wider than the years suggest. I closed 6 entities on my own this month, working hands-on in {tools}."""
 
 [[bridge]]
 id = "bridge.experience.plain"
 families = ["*"]
 requires_tools = false
-template = """I will name the thing a reader notices anyway: I have two years of experience, and some postings at this level ask for more. What I would point to instead is scope. I own a close for 6 entities rather than a single task within someone else's."""
+template = """I have two years of experience, and some postings at this level ask for more. My scope is wider than the years suggest. I own the close for 6 entities from start to finish."""
 
 # ---------------------------------------------------------------------------
 # CLOSE

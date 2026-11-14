@@ -38,7 +38,7 @@ answer = "I am based in Denver, Colorado and am not looking to relocate. I am fu
 id = "start-date"
 question = "When are you available to start?"
 aliases = ["available to start", "start date", "notice period", "availability"]
-answer = "Two weeks from an accepted offer. I would want to hand off an in-flight close cleanly rather than leave one half done."
+answer = "Two weeks from an accepted offer, so I can hand off an in-flight close cleanly."
 
 [[answer]]
 id = "salary"
@@ -78,7 +78,7 @@ note = "This one is deliberately generic and it reads that way. Add one real sen
 id = "why-role"
 question = "Why are you interested in this role?"
 aliases = ["why this role", "why this position", "interested in this position"]
-answer = "It is the work I already do, at a scale where I would learn something. I own a 6-entity close today, and I want the next role to add depth rather than repeat what I have."
+answer = "It is the work I already do, at a scale where I would learn something. I own a 6-entity close today, and I want the next role to add depth to that experience."
 
 [[answer]]
 id = "career-gap"
@@ -93,7 +93,7 @@ id = "difficult-problem"
 question = "Describe a difficult problem you solved."
 aliases = ["difficult problem", "challenging situation", "problem you solved",
            "tell us about a time"]
-answer = "During our NetSuite migration the opening balances for two entities would not tie, off by about $4,000 in aggregate. Rather than plug it, I traced it back through the QuickBooks history and found 140 transactions coded to the wrong entity over three years, most of them shared vendor invoices split by hand. I corrected them before cutover and added a coding rule so the split is no longer a judgment call. It took nine days I had not planned for, and the alternative was carrying a known error into a new system permanently."
+answer = "During our NetSuite migration the opening balances for two entities would not tie, off by about $4,000 in aggregate. I traced it back through the QuickBooks history and found 140 transactions coded to the wrong entity over three years, most of them shared vendor invoices split by hand. I corrected them before cutover and added a coding rule so the split is no longer a judgment call. It took nine days I had not planned for, and the new system opened with balances that tied. It taught me to fix the rule that caused an error along with the error itself."
 
 [[answer]]
 id = "strength"
@@ -127,24 +127,24 @@ id = "audit-experience"
 question = "Describe your experience supporting an audit."
 aliases = ["audit experience", "external auditors", "audit support", "pbc list",
            "internal controls"]
-answer = "I prepare the annual audit schedules and pull the support the external auditors request. Their follow-up list went from 31 items in 2024 to 12 in 2025, entirely because I started documenting the control steps behind each schedule as I built it instead of reconstructing them the following spring."
+answer = "I prepare the annual audit schedules and pull the support the external auditors request. Their follow-up list went from 31 items in 2024 to 12 in 2025, entirely because I started documenting the control steps behind each schedule as I built it."
 
 [[answer]]
 id = "high-volume"
 question = "How do you handle a high volume of transactions and competing deadlines?"
 aliases = ["high volume", "competing priorities", "manage deadlines", "fast-paced",
            "prioritize"]
-answer = "By working the exceptions first. On 400 invoices a month the routine ones move themselves once the three-way match is in place; what actually threatens the deadline is the 20 that do not match. I clear those early in the week so the check run is never the place a problem is discovered."
+answer = "By working the exceptions first. On 400 invoices a month the routine ones move themselves once the three-way match is in place; what threatens the deadline is the 20 that do not match. I clear those early in the week so the check run is never the place a problem is discovered."
 
 [[answer]]
 id = "accuracy"
 question = "How do you ensure accuracy in your work?"
 aliases = ["ensure accuracy", "attention to detail", "avoid errors", "quality control",
            "double check"]
-answer = "Controls rather than care. Care does not survive a bad week. Every reconciliation has a sign-off, invoices without an approved purchase order are held rather than paid, and the recurring reports come from a query rather than a copied range. Where I have found an error twice, I have changed the process rather than promised to look harder."
+answer = "Through controls. Every reconciliation has a sign-off, invoices without an approved purchase order are held, and the recurring reports come from a saved query. Where I have found an error twice, I have changed the process that let it through."
 
 [[answer]]
 id = "anything-else"
 question = "Is there anything else you would like us to know?"
 aliases = ["anything else", "additional information", "additional comments"]
-answer = "Two seasons as an IRS-certified VITA volunteer, roughly 60 returns a season, every one passing second-reviewer check. It is not on the resume as employment, but it is where I got comfortable explaining a number to someone who has to sign it."
+answer = "Two seasons as an IRS-certified VITA volunteer, roughly 60 returns a season, every one passing second-reviewer check. That volunteer work is where I got comfortable explaining a number to someone who has to sign it."

@@ -470,7 +470,7 @@ id = "meridian.vendor"
 parent = "meridian"
 priority = 8
 tags = ["vendor-management", "customer-service", "communication", "problem-solving"]
-text = "Handled vendor inquiries for 180 active suppliers, resolving pricing and short-ship disputes directly rather than routing them to the controller."
+text = "Handled vendor inquiries for 180 active suppliers, resolving pricing and short-ship disputes directly with each vendor."
 
 [[bullet]]
 id = "meridian.expense"
@@ -482,7 +482,7 @@ text = "Audited employee expense reports in Expensify against the reimbursement 
   [[bullet.variant]]
   id = "meridian.expense.service"
   tags = ["expense-reports", "customer-service", "communication"]
-  text = "Reviewed employee expense reports in Expensify and coached submitters on what documentation the policy required, rather than only rejecting."
+  text = "Reviewed employee expense reports in Expensify and coached submitters on what documentation the policy required."
 
 [[bullet]]
 id = "meridian.1099"
@@ -562,7 +562,7 @@ id = "proj-close.days"
 parent = "proj-close"
 priority = 8
 tags = ["month-end-close", "process-improvement", "documentation", "deadline-management"]
-text = "Rebuilt the close calendar around a dependency order rather than a task list, taking the close from 9 business days to 5 without adding staff."
+text = "Rebuilt the close calendar around the order in which tasks depend on each other, taking the close from 9 business days to 5 without adding staff."
 
 [[bullet]]
 id = "proj-close.checklist"
