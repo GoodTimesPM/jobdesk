@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from .. import style
 from . import config
 
 _SLOT = re.compile(r"\{(\w+)\}")
@@ -363,6 +364,12 @@ def _supported(paragraph: Paragraph, approved: set[str]) -> str:
     return ""
 
 
+def _styled(paragraph: Paragraph) -> str:
+    """"" if the paragraph follows the house style in style.py, else why not."""
+    found = style.problems(paragraph.text, paragraph.id)
+    return "; ".join(p.split(": ", 1)[1] for p in found)
+
+
 def build(*, company: str, role: str, family: str, resume_text: str,
           jd_text: str, note: str = "", content: dict | None = None,
           evidence_count: int = 2, approved_text: str = "") -> Letter:
@@ -418,7 +425,7 @@ def build(*, company: str, role: str, family: str, resume_text: str,
             paragraph = _render(entry, slots)
             paragraph.section = section
             seen.add(entry["id"])
-            reason = _supported(paragraph, approved)
+            reason = _supported(paragraph, approved) or _styled(paragraph)
             if reason:
                 dropped.append((entry["id"], reason))
                 return
@@ -479,6 +486,10 @@ def verify(letter: Letter, resume_text: str, jd_text: str,
         if unsupported:
             problems.append(f"{paragraph.id}: claims {', '.join(sorted(unsupported))}, "
                             f"which your confirmed content does not say")
+
+        # 5. style: what was done, how, and what it taught, with no detour
+        #    through what was not done. Your own note is your call.
+        problems += style.problems(paragraph.text, paragraph.id)
 
     # 3. tools
     for tool in letter.tools:
