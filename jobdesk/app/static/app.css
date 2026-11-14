@@ -505,8 +505,7 @@ button { font: inherit; }
   color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .tab .ct:empty { display: none; }
 
-.side-head { padding: 14px .75em 4px; font-size: .74em; font-weight: 600;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.side-head { padding: 14px .75em 4px; font-size: .82em; font-weight: 600; color: var(--ink-faint); }
 .side-views[hidden] { display: none; }
 #side-views { display: flex; flex-direction: column; gap: 2px; }
 .side-dot { flex: none; width: 7px; height: 7px; border-radius: 50%;
@@ -781,8 +780,7 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
   border-left: 2px solid var(--line); padding-left: 14px; color: var(--ink-soft);
   max-width: 92ch;
 }
-.jd h4 { margin: 14px 0 4px; font-size: 12.5px; letter-spacing: .4px;
-         text-transform: uppercase; color: var(--ink); }
+.jd h4 { margin: 14px 0 4px; font-size: 14px; color: var(--ink); }
 .jd h4:first-child { margin-top: 0; }
 .jd p { margin: 0 0 8px; }
 .jd ul { margin: 0 0 10px; padding-left: 20px; }
@@ -845,8 +843,7 @@ button.danger[data-armed] { background: var(--bad); color: #fff;
 .about-section[open] > summary::before { content: "\25BE"; }
 .about-section > summary h3 { margin: 0; }
 .about-section > .note { margin: 8px 0 4px; }
-.about-group { margin: 16px 0 4px; font-size: 13px; color: var(--ink-soft);
-               text-transform: uppercase; letter-spacing: .04em; }
+.about-group { margin: 16px 0 4px; font-size: 13px; font-weight: 600; color: var(--ink-soft); }
 .about-card { border: 1px solid var(--line-soft); border-radius: var(--radius);
               padding: 10px 12px; margin-top: 10px; }
 .about-head { display: flex; align-items: flex-start; gap: 10px; }
@@ -960,8 +957,7 @@ textarea { font: inherit; }
    (`--x-fixed`, then `--x-light` or `--x-dark`), never the page's resolved
    `--card` or `--accent`, which belong to whatever the page is wearing. The
    pressed border is the one place the page's own accent is right. */
-.swatch-head { margin: 16px 0 6px; font-size: 11.5px; font-weight: 600;
-               letter-spacing: .04em; text-transform: uppercase;
+.swatch-head { margin: 16px 0 6px; font-size: 13px; font-weight: 600;
                color: var(--ink-faint); }
 .swatch-row { display: grid; gap: 8px;
               grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); }
@@ -1465,8 +1461,7 @@ option.dead     { color: var(--bad); }
 /* The `##` sections, which are labels rather than titles: "Before you submit",
    "Files". Small and spaced, so they divide the file without competing with it. */
 .md h5, .md h6 {
-  margin: 16px 0 6px; color: var(--ink-faint); font-size: 11px; font-weight: 700;
-  letter-spacing: .05em; text-transform: uppercase;
+  margin: 16px 0 6px; color: var(--ink-faint); font-size: 13px; font-weight: 700;
 }
 .md strong { color: var(--ink); font-weight: 650; }
 .md code { background: var(--line-soft); border-radius: 3px; padding: 1px 4px;
@@ -1648,8 +1643,7 @@ button.style-btn[aria-pressed="true"] .ic { color: var(--accent); }
 
 :root[data-jobs="timeline"] #jobs-scroll .grid td.day {
   display: block; position: relative; border: 0;
-  padding: 14px 14px 4px 38px; font-size: .74em; font-weight: 600;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+  padding: 14px 14px 4px 38px; font-size: .86em; font-weight: 600; color: var(--ink-faint);
 }
 :root[data-jobs="timeline"] #jobs-scroll .grid td.item { position: relative; padding-left: 38px; }
 :root[data-jobs="timeline"] #jobs-scroll .grid :is(td.item, td.day)::before {
@@ -1695,8 +1689,7 @@ button.rd-close { font-size: 20px; line-height: 1; padding: 3px 10px; }
 .rd-title { font-size: 1.45em; line-height: 1.25; margin: 12px 0 3px; }
 .rd-sub { color: var(--ink-soft); }
 .rd-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
-.rd-section { margin: 18px 0 6px; font-size: .74em; font-weight: 600;
-  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); }
+.rd-section { margin: 18px 0 6px; font-size: .86em; font-weight: 600; color: var(--ink-faint); }
 .rd-body .jd { max-width: none; }
 .rd-keys { margin-top: 18px; padding-top: 10px; font-size: 12px;
            border-top: 1px solid var(--line-soft); color: var(--ink-faint); }
@@ -2394,4 +2387,16 @@ button.linkish:hover { text-decoration: underline; }
   .ev-item { grid-template-columns: auto 1fr; }
   .ev-kind { grid-column: 2; }
   .ev-actions button { flex: 1 1 auto; }
+}
+
+/* Numbers that line up in columns or change in place keep a fixed width. */
+.grid td, .tab .ct, .tierbar, .growth-stats { font-variant-numeric: tabular-nums; }
+
+/* Reduced motion: transitions and animations finish at once. Placed last so it
+   wins over every rule above that sets its own timing. */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
 }

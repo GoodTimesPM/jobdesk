@@ -13,13 +13,12 @@ about what it will accept:
   * a **tailnet** address (`100.64.0.0/10`, the CGNAT range Tailscale and
     friends hand out) is preferred, because that network is already private and
     the access token is a second lock rather than the only one;
-  * a **private LAN** address (RFC 1918) is the fallback, and it is a real
-    fallback rather than a consolation — a phone and a desktop on the same home
-    wifi is the ordinary case — but it is announced differently, because "your
-    home network" and "the coffee shop's network" are the same sentence to a
-    laptop;
-  * anything else, including a public address, is **never** chosen. If neither
-    of the two above exists, `auto()` raises. Guessing here would put the ledger
+  * a **private LAN** address (RFC 1918) is no longer chosen on its own. It
+    used to be the fallback, and at logon, before Tailscale came up, it won:
+    the token then crossed the home wifi unencrypted. Pass it with `--host`
+    if that is what you want;
+  * anything else, including a public address, is **never** chosen. If there is
+    no tailnet, `auto()` raises. Guessing here would put the ledger
     on whatever network happened to be attached.
 
 `0.0.0.0` remains available and remains spelled out in full. It is the one
@@ -161,27 +160,35 @@ def is_this_machine(host: str) -> bool:
     return host in local_addresses()
 
 
-def auto() -> tuple[str, str]:
-    """The address to bind and which kind it is: `("100.1.2.3", "tailnet")`.
+def auto(wait_s: float = 0.0) -> tuple[str, str]:
+    """The tailnet address to bind: `("100.1.2.3", "tailnet")`.
 
-    Raises `NoAddress` rather than returning a public address or a guess.
+    Tailnet only. A LAN address used to be the fallback, and at logon, when
+    Tailscale had not come up yet, that fallback won: the server sat on the
+    home wifi over plain HTTP with the token crossing it unencrypted. A LAN
+    bind now has to be asked for by address with `--host`.
+
+    `wait_s` polls for Tailscale that long before giving up, for the logon
+    task that starts before Tailscale does. Raises `NoAddress` after that.
     """
-    address = tailnet()
-    if address:
-        return address, "tailnet"
-    address = lan()
-    if address:
-        return address, "lan"
+    deadline = time.monotonic() + wait_s
+    while True:
+        address = tailnet()
+        if address:
+            return address, "tailnet"
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(2)
     raise NoAddress(
-        "no tailnet or private LAN address on this machine, so there is "
-        "nothing safe to bind.\n\n"
-        "Either connect to a network — Tailscale is the one worth having, "
-        "since it works off your home wifi too — or pass --host with the "
-        "address you mean."
+        "no tailnet address on this machine, so there is nothing safe to "
+        "bind for the phone.\n\n"
+        "Start Tailscale and run this again. To use the home wifi instead, "
+        "pass --host with this machine's LAN address; the token then crosses "
+        "the wifi unencrypted."
     )
 
 
-def resolve(host: str | None) -> tuple[str, str]:
+def resolve(host: str | None, wait_s: float = 0.0) -> tuple[str, str]:
     """Turn whatever `--host` said into an address and a label.
 
     Anything that is not the literal string `auto` is passed straight through;
@@ -191,7 +198,7 @@ def resolve(host: str | None) -> tuple[str, str]:
     if host is None:
         return "127.0.0.1", "loopback"
     if host.strip().lower() == "auto":
-        return auto()
+        return auto(wait_s)
     host = host.strip()
     if host in ("0.0.0.0", "::"):
         return host, "every interface"

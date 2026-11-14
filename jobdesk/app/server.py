@@ -381,7 +381,7 @@ def _free_port(start: int, address: str = HOST) -> int:
     raise SystemExit(f"no free port in {start}-{start + 19}")
 
 
-def _bind(host, port: int):
+def _bind(host, port: int, wait_s: float = 0.0):
     """Resolve the host, set the gate, bind, and hand back the local URL.
 
     One function because the three steps are one decision. `access.check`
@@ -394,7 +394,7 @@ def _bind(host, port: int):
     answers that one.
     """
     global REQUIRE_TOKEN
-    address, kind = net.resolve(host)
+    address, kind = net.resolve(host, wait_s)
     REQUIRE_TOKEN = access.check(address)
     port = _free_port(port, address)
     httpd = ThreadingHTTPServer((address, port), Handler)
@@ -438,7 +438,8 @@ def start_background(port: int = DEFAULT_PORT, host=None):
 
 
 def serve(port: int = DEFAULT_PORT, open_browser: bool = True, host=None) -> None:
-    httpd, url, kind = _bind(host, port)
+    # The logon task can start before Tailscale does; give it two minutes.
+    httpd, url, kind = _bind(host, port, wait_s=120)
     bound = httpd.server_address
     # Fold the snapshot history into peer-group aggregates while the browser
     # is still starting. Nothing waits on it; the table works without it.
