@@ -13,6 +13,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import style
 from . import config
 from .vocab import Vocabulary
 
@@ -220,6 +221,11 @@ def check(master: Master, vocab: Vocabulary) -> list[str]:
             if tag not in known_terms:
                 problems.append(f"{b.id}: unknown tag {tag!r} (not in vocabulary.toml)")
 
+        # A bullet says what was done, how, and what came of it. See style.py.
+        problems += style.problems(b.text, b.id)
+        for v in b.variants:
+            problems += style.problems(v.text, v.id)
+
         base_numbers = numbers_in(b.text)
         for v in b.variants:
             if v.id in seen_ids:
@@ -236,6 +242,12 @@ def check(master: Master, vocab: Vocabulary) -> list[str]:
                     f"the base bullet {b.id} -- a variant may reword a claim, never "
                     f"renumber it"
                 )
+
+    for part in master.openings + master.closings:
+        problems += style.problems(part.text, f"summary {part.id}")
+    for clause in master.middles:
+        problems += style.problems(f"{clause.template} {clause.fallback}",
+                                   f"summary {clause.id}")
 
     for c in master.coursework:
         for tag in c.tags:

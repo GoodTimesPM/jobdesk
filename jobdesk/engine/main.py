@@ -19,7 +19,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from .. import profile
+from .. import profile, style
 from . import ats, config, gap, jd as jd_mod, master as master_mod, tailor, verify
 from . import render_docx, render_pdf, render_txt
 from .vocab import load as load_vocab
@@ -45,7 +45,9 @@ def _load(strict: bool = True):
 
 def cmd_check(args: argparse.Namespace) -> int:
     vocab, master = _load(strict=False)
-    problems = master_mod.check(master, vocab)
+    # The letter and the screening answers follow the same house style as the
+    # bullets, so one check covers everything that goes to an employer.
+    problems = master_mod.check(master, vocab) + style.profile_problems()
     drafts = master_mod.drafts(master)
 
     live = [b for b in master.bullets if not b.draft]
